@@ -1,0 +1,244 @@
+<script type="text/javascript">
+  var gk_isXlsx = false;
+  var gk_xlsxFileLookup = {};
+  var gk_fileData = {};
+  function filledCell(cell) {
+    return cell !== "" && cell != null;
+  }
+  function loadFileData(filename) {
+    if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+      try {
+        var workbook = XLSX.read(gk_fileData[filename], { type: "base64" });
+        var firstSheetName = workbook.SheetNames[0];
+        var worksheet = workbook.Sheets[firstSheetName];
+
+        // Convert sheet to JSON to filter blank rows
+        var jsonData = XLSX.utils.sheet_to_json(worksheet, {
+          header: 1,
+          blankrows: false,
+          defval: "",
+        });
+        // Filter out blank rows (rows where all cells are empty, null, or undefined)
+        var filteredData = jsonData.filter((row) => row.some(filledCell));
+
+        // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+        var headerRowIndex = filteredData.findIndex(
+          (row, index) =>
+            row.filter(filledCell).length >=
+            filteredData[index + 1]?.filter(filledCell).length
+        );
+        // Fallback
+        if (headerRowIndex === -1 || headerRowIndex > 25) {
+          headerRowIndex = 0;
+        }
+
+        // Convert filtered JSON back to CSV
+        var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+        csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+        return csv;
+      } catch (e) {
+        console.error(e);
+        return "";
+      }
+    }
+    return gk_fileData[filename] || "";
+  }
+</script>
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BeTogether - Terms and Conditions</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        line-height: 1.6;
+        margin: 0;
+        padding: 0;
+        background-color: #f4f4f4;
+        color: #333;
+      }
+      .container {
+        max-width: 800px;
+        margin: 20px auto;
+        padding: 20px;
+        background: #fff;
+        border-radius: 8px;
+        box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+      }
+      h1,
+      h2 {
+        color: #2c3e50;
+      }
+      h1 {
+        text-align: center;
+        margin-bottom: 20px;
+      }
+      h2 {
+        margin-top: 20px;
+      }
+      p {
+        margin-bottom: 15px;
+      }
+      ul {
+        margin-bottom: 15px;
+        padding-left: 20px;
+      }
+      .index {
+        background: #e8ecef;
+        padding: 10px;
+        border-radius: 5px;
+        margin-bottom: 20px;
+      }
+      .index ul {
+        list-style: none;
+        padding: 0;
+      }
+      .index li {
+        margin-bottom: 10px;
+      }
+      .index a {
+        color: #3498db;
+        text-decoration: none;
+      }
+      .index a:hover {
+        text-decoration: underline;
+      }
+      footer {
+        text-align: center;
+        margin-top: 20px;
+        padding: 10px;
+        background: #2c3e50;
+        color: #fff;
+        border-radius: 0 0 8px 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>Terms and Conditions of Use – BeTogether</h1>
+
+      <div class="index">
+        <h2>Index</h2>
+        <ul>
+          <li><a href="#introduction">Introduction</a></li>
+          <li><a href="#definitions">Definitions</a></li>
+          <li><a href="#registration">Registration and Account</a></li>
+          <li><a href="#services">Offered and Requested Services</a></li>
+          <li><a href="#commissions">Commissions and Payments</a></li>
+          <li><a href="#funds">Funds Management and Withdrawals</a></li>
+          <li><a href="#cancellations">Cancellations and Refunds</a></li>
+          <li><a href="#reputation">Reputation, Reviews, and Reports</a></li>
+          <li><a href="#privacy">Privacy and Data Protection</a></li>
+          <li><a href="#liability">Limitation of Liability</a></li>
+          <li><a href="#changes">Changes to the Terms</a></li>
+          <li><a href="#governing">Governing Law and Jurisdiction</a></li>
+        </ul>
+      </div>
+
+      <h2 id="introduction">1. Introduction</h2>
+      <p>
+        Welcome to BeTogether, the platform that allows users to offer and
+        request services in a simple and secure way. By using the app, you agree
+        to these Terms and Conditions.
+      </p>
+
+      <h2 id="definitions">2. Definitions</h2>
+      <ul>
+        <li>
+          <strong>Service Provider:</strong> The user who publishes a service.
+        </li>
+        <li>
+          <strong>Service Seeker:</strong> The user who requests a service.
+        </li>
+        <li>
+          <strong>Service:</strong> Any activity, job, or task published on the
+          platform.
+        </li>
+        <li>
+          <strong>Commission:</strong> The percentage retained by BeTogether on
+          transactions.
+        </li>
+      </ul>
+
+      <h2 id="registration">3. Registration and Account</h2>
+      <p>
+        Users can browse the app without registration. To interact (book,
+        message, publish a service), registration is required. Upon
+        registration, users must provide accurate information. BeTogether may
+        suspend or cancel accounts in case of misconduct.
+      </p>
+
+      <h2 id="services">4. Offered and Requested Services</h2>
+      <p>
+        Each user can publish offered services or service requests. Descriptions
+        must be clear, honest, and not misleading. Illegal activities are
+        strictly prohibited.
+      </p>
+
+      <h2 id="commissions">5. Commissions and Payments</h2>
+      <p>BeTogether applies a commission fee on all transactions:</p>
+      <ul>
+        <li>8% charged to the service provider.</li>
+        <li>4% charged to the service seeker.</li>
+      </ul>
+      <p>Payments are processed through the secure in-app payment system.</p>
+
+      <h2 id="funds">6. Funds Management and Withdrawals</h2>
+      <p>
+        Payments received for services are shown in the account balance of the
+        provider. Funds are available for withdrawal 60 minutes after the
+        service has started. This ensures protection for both the service seeker
+        and the provider. In case of disputes, funds may be frozen until
+        resolved.
+      </p>
+
+      <h2 id="cancellations">7. Cancellations and Refunds</h2>
+      <p>
+        If the seeker cancels at least 24 hours before the agreed time, they are
+        entitled to a full refund. If cancellation occurs later or the seeker
+        does not show up, the provider still receives the payment. If the
+        service is not provided due to the provider’s fault, the seeker is
+        entitled to a full refund.
+      </p>
+
+      <h2 id="reputation">8. Reputation, Reviews, and Reports</h2>
+      <p>
+        After each service, both parties can leave a review. Users can report
+        misconduct. BeTogether may suspend users with repeated or severe
+        reports.
+      </p>
+
+      <h2 id="privacy">9. Privacy and Data Protection</h2>
+      <p>
+        Personal data is processed in compliance with the GDPR. Some data (name,
+        city, interests) will be publicly visible on the profile. Users can
+        request deletion of their data by contacting support.
+      </p>
+
+      <h2 id="liability">10. Limitation of Liability</h2>
+      <p>
+        BeTogether is not responsible for the quality of services provided by
+        users. The platform only guarantees technical infrastructure and payment
+        management. Users are solely responsible for their interactions.
+      </p>
+
+      <h2 id="changes">11. Changes to the Terms</h2>
+      <p>
+        BeTogether may modify these Terms to improve security or services. Any
+        changes will be communicated via app or email.
+      </p>
+
+      <h2 id="governing">12. Governing Law and Jurisdiction</h2>
+      <p>
+        These Terms are governed by Italian law. The Court of Milan shall have
+        jurisdiction over any disputes.
+      </p>
+
+      <footer>
+        <p>&copy; 2025 BeTogether. All rights reserved.</p>
+      </footer>
+    </div>
+  </body>
+</html>

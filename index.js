@@ -1,0 +1,46 @@
+const express = require("express");
+const path = require("path");
+const mongoose = require("mongoose");
+require("dotenv").config();
+
+const authRoutes = require("./routes/authRoutes");
+const profileRoutes = require("./routes/profileRoutes");
+const categoryRoutes = require("./routes/categoryRoutes");
+
+const app = express();
+
+// Middleware
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
+
+// Serve uploaded profile images
+app.use(
+  "/uploads/profile_images",
+  express.static(path.join(__dirname, "uploads/profile_images"))
+);
+
+// Serve static files from templates directory
+app.use(express.static(path.join(__dirname, "templates")));
+
+// Route to serve terms_and_conditions.html
+app.get("/terms", (req, res) => {
+  res.sendFile(path.join(__dirname, "templates", "terms_and_conditions.html"));
+});
+
+// API routes
+app.use("/api/auth", authRoutes);
+app.use("/api", profileRoutes);
+app.use("/api/admin/categories", categoryRoutes);
+
+// Connect to MongoDB (live Atlas)
+mongoose
+  .connect(process.env.MONGO_URI, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+  })
+  .then(() => console.log("✅ MongoDB Connected"))
+  .catch((err) => console.error("❌ MongoDB Connection Error:", err));
+
+// Start server
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));

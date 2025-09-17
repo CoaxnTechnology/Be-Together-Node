@@ -42,16 +42,28 @@ exports.addCategory = async (req, res) => {
 exports.getCategories = async (req, res) => {
   try {
     const categories = await Category.find();
+
+    if (!categories || categories.length === 0) {
+      return res.status(404).json({
+        isSuccess: false,
+        message: "Category not found",
+      });
+    }
+
     res.json({
       isSuccess: true,
       message: "Categories fetched successfully",
       data: categories,
     });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ isSuccess: false, message: "Server error" });
+    console.error("Error fetching categories:", err);
+    res.status(500).json({
+      isSuccess: false,
+      message: "Server error",
+    });
   }
 };
+
 //JjwzFZ07W2smzdEo
 //coaxntechnology_db_user
 

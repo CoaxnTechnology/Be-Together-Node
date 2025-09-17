@@ -1,30 +1,221 @@
 const mongoose = require("mongoose");
 const Category = require("./model/Category"); // 👈 aapka schema import karo
 
-const BASE_URL = "http://localhost:3000";
+const BASE_URL =
+  "mongodb+srv://coaxntechnology_db_user:JjwzFZ07W2smzdEo@bgtogether.xg507ee.mongodb.net/?retryWrites=true&w=majority&appName=BgTogether";
 
 const default_categories = [
-  { name: "Pet Care", image: `${BASE_URL}/uploads/icons/pet.png`, tags: ["dog sitter", "pet care", "dog walking", "pet sitting"] },
-  { name: "Childcare", image: `${BASE_URL}/uploads/icons/childcare.png`, tags: ["baby sitter", "childcare", "babysitting", "child supervision"] },
-  { name: "Household Maintenance", image: `${BASE_URL}/uploads/icons/house.png`, tags: ["house chores", "cleaning", "ironing", "household fixes", "home maintenance"] },
-  { name: "Academic Support", image: `${BASE_URL}/uploads/icons/academic.png`, tags: ["school tutoring", "academic support", "math tutoring", "English tutoring", "education"] },
-  { name: "Home Repairs and Assembly", image: `${BASE_URL}/uploads/icons/repairs.png`, tags: ["small jobs", "plumbing", "electrician", "furniture assembly", "home repairs"] },
-  { name: "Elderly Care", image: `${BASE_URL}/uploads/icons/elderly.png`, tags: ["elderly assistance", "senior care", "companionship", "errands", "medication help"] },
-  { name: "Moving Services", image: `${BASE_URL}/uploads/icons/moving.png`, tags: ["moving help", "furniture moving", "box moving", "relocation assistance"] },
-  { name: "Language Services", image: `${BASE_URL}/uploads/icons/language.png`, tags: ["translations", "document translation", "CV translation", "language services"] },
-  { name: "Garden and Plant Maintenance", image: `${BASE_URL}/uploads/icons/garden.png`, tags: ["garden care", "plant care", "watering plants", "green space maintenance", "gardening"] },
-  { name: "Translator", image: `${BASE_URL}/uploads/icons/translator.png`, tags: ["translation services", "language translation", "document translation", "interpreter", "multilingual"] },
-  { name: "Plumber", image: `${BASE_URL}/uploads/icons/plumber.png`, tags: ["plumbing", "pipe repair", "leak fixing", "drainage", "water heater repair"] },
-  { name: "Cooking", image: `${BASE_URL}/uploads/icons/cooking.png`, tags: ["cooking services", "meal preparation", "catering", "home chef", "culinary"] },
-  { name: "Join an Event", image: `${BASE_URL}/uploads/icons/event.png`, tags: ["event participation", "event registration", "community events", "social gatherings", "event planning"] },
-  { name: "Explore Area", image: `${BASE_URL}/uploads/icons/explore.png`, tags: ["local exploration", "sightseeing", "travel guide", "area tours", "local attractions"] },
-  { name: "Attend Show", image: `${BASE_URL}/uploads/icons/show.png`, tags: ["theater tickets", "live performances", "concerts", "show bookings", "entertainment"] },
-  { name: "Transport", image: `${BASE_URL}/uploads/icons/transport.png`, tags: ["transportation", "delivery services", "logistics", "shipping", "cargo"] },
-  { name: "Sports", image: `${BASE_URL}/uploads/icons/sports.png`, tags: ["sports activities", "fitness", "team sports", "sports events", "training"] },
-  { name: "Keep Company", image: `${BASE_URL}/uploads/icons/company.png`, tags: ["companionship", "social support", "elderly companionship", "friend services", "conversation"] },
-  { name: "Find a Ride", image: `${BASE_URL}/uploads/icons/ride.png`, tags: ["ride sharing", "carpool", "taxi services", "transportation booking", "travel assistance"] },
-  { name: "Fashion & Beauty", image: `${BASE_URL}/uploads/icons/fashion.png`, tags: ["makeup", "stylist", "salon", "skincare", "cosmetics"] },
-  { name: "Party", image: `${BASE_URL}/uploads/icons/party.png`, tags: ["DJ", "makeup artist", "musicians", "entertainers", "party planning"] }
+  {
+    name: "Pet Care",
+    image: `${BASE_URL}/uploads/icons/pet.png`,
+    tags: ["dog sitter", "pet care", "dog walking", "pet sitting"],
+  },
+  {
+    name: "Childcare",
+    image: `${BASE_URL}/uploads/icons/childcare.png`,
+    tags: ["baby sitter", "childcare", "babysitting", "child supervision"],
+  },
+  {
+    name: "Household Maintenance",
+    image: `${BASE_URL}/uploads/icons/house.png`,
+    tags: [
+      "house chores",
+      "cleaning",
+      "ironing",
+      "household fixes",
+      "home maintenance",
+    ],
+  },
+  {
+    name: "Academic Support",
+    image: `${BASE_URL}/uploads/icons/academic.png`,
+    tags: [
+      "school tutoring",
+      "academic support",
+      "math tutoring",
+      "English tutoring",
+      "education",
+    ],
+  },
+  {
+    name: "Home Repairs and Assembly",
+    image: `${BASE_URL}/uploads/icons/repairs.png`,
+    tags: [
+      "small jobs",
+      "plumbing",
+      "electrician",
+      "furniture assembly",
+      "home repairs",
+    ],
+  },
+  {
+    name: "Elderly Care",
+    image: `${BASE_URL}/uploads/icons/elderly.png`,
+    tags: [
+      "elderly assistance",
+      "senior care",
+      "companionship",
+      "errands",
+      "medication help",
+    ],
+  },
+  {
+    name: "Moving Services",
+    image: `${BASE_URL}/uploads/icons/moving.png`,
+    tags: [
+      "moving help",
+      "furniture moving",
+      "box moving",
+      "relocation assistance",
+    ],
+  },
+  {
+    name: "Language Services",
+    image: `${BASE_URL}/uploads/icons/language.png`,
+    tags: [
+      "translations",
+      "document translation",
+      "CV translation",
+      "language services",
+    ],
+  },
+  {
+    name: "Garden and Plant Maintenance",
+    image: `${BASE_URL}/uploads/icons/garden.png`,
+    tags: [
+      "garden care",
+      "plant care",
+      "watering plants",
+      "green space maintenance",
+      "gardening",
+    ],
+  },
+  {
+    name: "Translator",
+    image: `${BASE_URL}/uploads/icons/translator.png`,
+    tags: [
+      "translation services",
+      "language translation",
+      "document translation",
+      "interpreter",
+      "multilingual",
+    ],
+  },
+  {
+    name: "Plumber",
+    image: `${BASE_URL}/uploads/icons/plumber.png`,
+    tags: [
+      "plumbing",
+      "pipe repair",
+      "leak fixing",
+      "drainage",
+      "water heater repair",
+    ],
+  },
+  {
+    name: "Cooking",
+    image: `${BASE_URL}/uploads/icons/cooking.png`,
+    tags: [
+      "cooking services",
+      "meal preparation",
+      "catering",
+      "home chef",
+      "culinary",
+    ],
+  },
+  {
+    name: "Join an Event",
+    image: `${BASE_URL}/uploads/icons/event.png`,
+    tags: [
+      "event participation",
+      "event registration",
+      "community events",
+      "social gatherings",
+      "event planning",
+    ],
+  },
+  {
+    name: "Explore Area",
+    image: `${BASE_URL}/uploads/icons/explore.png`,
+    tags: [
+      "local exploration",
+      "sightseeing",
+      "travel guide",
+      "area tours",
+      "local attractions",
+    ],
+  },
+  {
+    name: "Attend Show",
+    image: `${BASE_URL}/uploads/icons/show.png`,
+    tags: [
+      "theater tickets",
+      "live performances",
+      "concerts",
+      "show bookings",
+      "entertainment",
+    ],
+  },
+  {
+    name: "Transport",
+    image: `${BASE_URL}/uploads/icons/transport.png`,
+    tags: [
+      "transportation",
+      "delivery services",
+      "logistics",
+      "shipping",
+      "cargo",
+    ],
+  },
+  {
+    name: "Sports",
+    image: `${BASE_URL}/uploads/icons/sports.png`,
+    tags: [
+      "sports activities",
+      "fitness",
+      "team sports",
+      "sports events",
+      "training",
+    ],
+  },
+  {
+    name: "Keep Company",
+    image: `${BASE_URL}/uploads/icons/company.png`,
+    tags: [
+      "companionship",
+      "social support",
+      "elderly companionship",
+      "friend services",
+      "conversation",
+    ],
+  },
+  {
+    name: "Find a Ride",
+    image: `${BASE_URL}/uploads/icons/ride.png`,
+    tags: [
+      "ride sharing",
+      "carpool",
+      "taxi services",
+      "transportation booking",
+      "travel assistance",
+    ],
+  },
+  {
+    name: "Fashion & Beauty",
+    image: `${BASE_URL}/uploads/icons/fashion.png`,
+    tags: ["makeup", "stylist", "salon", "skincare", "cosmetics"],
+  },
+  {
+    name: "Party",
+    image: `${BASE_URL}/uploads/icons/party.png`,
+    tags: [
+      "DJ",
+      "makeup artist",
+      "musicians",
+      "entertainers",
+      "party planning",
+    ],
+  },
 ];
 
 async function seedCategories() {
@@ -44,7 +235,7 @@ async function seedCategories() {
       const newCategory = new Category({
         name: cat.name,
         image: cat.image,
-        tags
+        tags,
       });
 
       await newCategory.save();
@@ -58,7 +249,10 @@ async function seedCategories() {
   }
 }
 
-mongoose.connect("mongodb://localhost:27017/BeTogether")
+mongoose
+  .connect(
+    "mongodb+srv://coaxntechnology_db_user:JjwzFZ07W2smzdEo@bgtogether.xg507ee.mongodb.net/?retryWrites=true&w=majority&appName=BgTogether"
+  )
   .then(() => {
     console.log("🚀 MongoDB connected");
     seedCategories();

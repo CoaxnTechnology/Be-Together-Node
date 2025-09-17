@@ -228,14 +228,11 @@ async function seedCategories() {
         continue;
       }
 
-      // Convert tags to {tagId, name} format
-      const tags = cat.tags.map((t, idx) => ({ tagId: idx + 1, name: t }));
-
-      // Create new category
+      // Create new category with tags as plain strings
       const newCategory = new Category({
         name: cat.name,
         image: cat.image,
-        tags,
+        tags: cat.tags, // 👈 directly use the array of strings
       });
 
       await newCategory.save();
@@ -248,6 +245,7 @@ async function seedCategories() {
     mongoose.disconnect();
   }
 }
+
 
 mongoose
   .connect(

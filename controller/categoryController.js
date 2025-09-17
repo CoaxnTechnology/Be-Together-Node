@@ -1,7 +1,7 @@
 // controllers/categoryController.js
 require("dotenv").config();
 const Category = require("../model/Category");
-const { getFullImageUrl } = require("../utils/getFullImageUrl"); // adjust path if necessary
+const { getFullImageUrl } = require("../utils/image"); // adjust path if necessary
 const cloudinary = require("cloudinary").v2;
 const streamifier = require("streamifier");
 const multer = require("multer");
@@ -14,21 +14,25 @@ cloudinary.config({
   secure: true,
 });
 
-
-
 // Export this middleware for routes: upload.single('image')
 
-
 // ---------- Helper: upload buffer to Cloudinary ----------
-function uploadToCloudinary(buffer, folder = "categories", publicId = undefined) {
+function uploadToCloudinary(
+  buffer,
+  folder = "categories",
+  publicId = undefined
+) {
   return new Promise((resolve, reject) => {
     const options = { folder, resource_type: "image" };
     if (publicId) options.public_id = String(publicId).replace(/\s+/g, "_");
 
-    const uploadStream = cloudinary.uploader.upload_stream(options, (err, result) => {
-      if (err) return reject(err);
-      resolve(result);
-    });
+    const uploadStream = cloudinary.uploader.upload_stream(
+      options,
+      (err, result) => {
+        if (err) return reject(err);
+        resolve(result);
+      }
+    );
 
     streamifier.createReadStream(buffer).pipe(uploadStream);
   });
@@ -44,7 +48,10 @@ function normalizeTagsInput(tags) {
   if (typeof tags === "string") {
     const s = tags.trim();
     // Try parse JSON-stringified arrays or objects
-    if ((s.startsWith("[") && s.endsWith("]")) || (s.startsWith("{") && s.endsWith("}"))) {
+    if (
+      (s.startsWith("[") && s.endsWith("]")) ||
+      (s.startsWith("{") && s.endsWith("}"))
+    ) {
       try {
         parsed = JSON.parse(s);
       } catch (e) {
@@ -97,7 +104,9 @@ exports.addCategory = async (req, res) => {
   try {
     const { name, tags } = req.body;
     if (!name || !String(name).trim()) {
-      return res.status(400).json({ isSuccess: false, message: "Name is required" });
+      return res
+        .status(400)
+        .json({ isSuccess: false, message: "Name is required" });
     }
 
     // Check duplicate by case-insensitive name
@@ -112,19 +121,33 @@ exports.addCategory = async (req, res) => {
     let imageUrl = null;
     if (req.file && req.file.buffer) {
       try {
-        const originalName = req.file.originalname ? req.file.originalname.replace(/\.[^/.]+$/, "") : undefined;
-        const uploadResult = await uploadToCloudinary(req.file.buffer, "categories", originalName);
+        const originalName = req.file.originalname
+          ? req.file.originalname.replace(/\.[^/.]+$/, "")
+          : undefined;
+        const uploadResult = await uploadToCloudinary(
+          req.file.buffer,
+          "categories",
+          originalName
+        );
         imageUrl = getFullImageUrl(uploadResult);
       } catch (uploadErr) {
         console.error("Cloudinary upload failed:", uploadErr);
-        return res.status(500).json({ isSuccess: false, message: "Image upload failed" });
+        return res
+          .status(500)
+          .json({ isSuccess: false, message: "Image upload failed" });
       }
     } else if (req.body.image) {
       // if client supplied image string or an object, use helper to normalize
       imageUrl = getFullImageUrl(req.body.image);
       // if imageUrl is still null, but the provided is a local path (like "/uploads/icons/x.png"), accept it:
-      if (!imageUrl && typeof req.body.image === "string" && req.body.image.trim()) {
-        imageUrl = req.body.image.trim().replace(/(\/uploads\/icons)+/g, "/uploads/icons");
+      if (
+        !imageUrl &&
+        typeof req.body.image === "string" &&
+        req.body.image.trim()
+      ) {
+        imageUrl = req.body.image
+          .trim()
+          .replace(/(\/uploads\/icons)+/g, "/uploads/icons");
       }
     }
 

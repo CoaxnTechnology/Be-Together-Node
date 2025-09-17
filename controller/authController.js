@@ -1,5 +1,6 @@
 const bcrypt = require("bcryptjs");
 const User = require("../model/User");
+const PendingUser = require("../model/PendingUser");
 const { createAccessToken } = require("../utils/jwt");
 const { generateOTP } = require("../utils/otp");
 const { sendOtpEmail } = require("../utils/email");
@@ -8,9 +9,6 @@ const path = require("path");
 const fs = require("fs");
 
 // ---------------- TEMP STORAGE FOR PENDING USERS ----------------
-const pendingUsers = {}; // { email: { userData, otp, expiry } }
-
-// ---------------- REGISTER ----------------
 exports.register = async (req, res) => {
   try {
     const { name, email, mobile, password, register_type, uid } = req.body;
@@ -20,11 +18,12 @@ exports.register = async (req, res) => {
     }
 
     const existing = await User.findOne({ email });
-    if (existing)
+    if (existing) {
       return res.json({
         IsSucces: false,
         message: "Email already registered.",
       });
+    }
 
     let hashedPassword = null;
     if (register_type === "manual" && password) {
@@ -46,23 +45,28 @@ exports.register = async (req, res) => {
     // OTP generate
     const { otp, expiry } = generateOTP();
 
-    // Store pending user in memory
-    pendingUsers[email] = {
-      userData: {
-        uid: uid ? parseInt(uid) : null,
-        name,
+    // Save to PendingUser collection
+    await PendingUser.findOneAndUpdate(
+      { email },
+      {
         email,
-        mobile,
-        hashed_password: hashedPassword,
-        register_type,
-        otp_verified: false,
-        profile_image: profileImageName,
+        otp,
+        expiry,
+        userData: {
+          uid: uid ? parseInt(uid) : null,
+          name,
+          email,
+          mobile,
+          hashed_password: hashedPassword,
+          register_type,
+          otp_verified: false,
+          profile_image: profileImageName,
+        },
       },
-      otp,
-      expiry,
-    };
+      { upsert: true, new: true }
+    );
 
-    // Send OTP
+    // Send OTP email
     await sendOtpEmail(email, otp);
 
     res.json({ IsSucces: true, message: "OTP sent. Please verify." });
@@ -75,27 +79,28 @@ exports.register = async (req, res) => {
 // ---------------- VERIFY OTP (REGISTER) ----------------
 exports.verifyOtpRegister = async (req, res) => {
   try {
-    const { v4: uuidv4 } = await import("uuid");
     const { email, otp } = req.body;
 
-    if (!pendingUsers[email])
+    const pendingUser = await PendingUser.findOne({ email });
+    if (!pendingUser) {
       return res.json({ IsSucces: false, message: "No pending registration" });
+    }
 
-    const tempUser = pendingUsers[email];
-
-    if (new Date() > tempUser.expiry)
+    if (new Date() > pendingUser.expiry) {
       return res.json({ IsSucces: false, message: "OTP expired" });
+    }
 
-    if (tempUser.otp !== otp)
+    if (pendingUser.otp !== otp) {
       return res.json({ IsSucces: false, message: "Invalid OTP" });
+    }
 
     // OTP correct → save user
-    const newUser = new User(tempUser.userData);
+    const newUser = new User(pendingUser.userData);
     newUser.otp_verified = true;
     await newUser.save();
 
-    // Cleanup
-    delete pendingUsers[email];
+    // Remove pending user after success
+    await PendingUser.deleteOne({ email });
 
     // Create session & token
     const session_id = uuidv4();

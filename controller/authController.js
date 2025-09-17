@@ -40,7 +40,7 @@ exports.register = async (req, res) => {
     if (req.file) {
      profileImageName = req.file.filename;
     }
-      
+      console.log(req.file)
 
     // Generate OTP
     const { otp, expiry } = generateOTP();

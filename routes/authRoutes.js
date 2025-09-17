@@ -1,5 +1,6 @@
 const express = require("express");
 const multer = require("multer");
+const path = require("path");
 const {
   register,
   verifyOtpRegister,
@@ -21,7 +22,6 @@ const storage = multer.diskStorage({
 });
 
 const upload = multer({ storage });
-
 router.post("/register", upload.single("profile_image"), register);
 router.post("/verify-otp-reg", verifyOtpRegister);
 router.post("/login", login);

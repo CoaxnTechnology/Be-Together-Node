@@ -1,15 +1,16 @@
+// controller/profileController.js
 const User = require("../model/User");
 const Category = require("../model/Category");
 const { getFullImageUrl } = require("../utils/image");
 const streamifier = require("streamifier");
 const cloudinary = require("cloudinary").v2;
 
-
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
+
 function uploadBufferToCloudinary(buffer, folder = "profile_images", publicId = null) {
   return new Promise((resolve, reject) => {
     const opts = {
@@ -29,16 +30,12 @@ function uploadBufferToCloudinary(buffer, folder = "profile_images", publicId = 
   });
 }
 
-// Extract Cloudinary public_id from a Cloudinary secure_url (best-effort).
 function extractPublicIdFromCloudinaryUrl(url) {
   if (!url || typeof url !== "string") return null;
   try {
-    // Try to match "/upload/.../v12345/<public_id>.<ext>"
+    // match "/upload/.../v12345/<public_id>.<ext>" or fallback "/upload/<public_id>.<ext>"
     let m = url.match(/\/upload\/(?:.*\/)?v\d+\/(.+)\.[^/.]+$/);
-    if (!m) {
-      // fallback: "/upload/<public_id>.<ext>"
-      m = url.match(/\/upload\/(.+)\.[^/.]+$/);
-    }
+    if (!m) m = url.match(/\/upload\/(.+)\.[^/.]+$/);
     if (!m) return null;
     return decodeURIComponent(m[1]);
   } catch (e) {
@@ -46,7 +43,6 @@ function extractPublicIdFromCloudinaryUrl(url) {
   }
 }
 
-// Delete Cloudinary image by public_id (non-fatal)
 async function deleteCloudinaryImage(publicId) {
   if (!publicId) return;
   try {
@@ -55,17 +51,20 @@ async function deleteCloudinaryImage(publicId) {
     console.error("deleteCloudinaryImage error (non-fatal):", err);
   }
 }
+
 // ---------------- GET Profile ----------------
 exports.getUserProfileByEmail = async (req, res) => {
   try {
     const { email } = req.body;
 
+    if (!email) {
+      return res.status(400).json({ isSuccess: false, message: "email is required" });
+    }
+
     const user = await User.findOne({ email }).populate("interests");
 
     if (!user) {
-      return res
-        .status(404)
-        .json({ isSuccess: false, message: "User not found" });
+      return res.status(404).json({ isSuccess: false, message: "User not found" });
     }
 
     res.json({
@@ -77,31 +76,37 @@ exports.getUserProfileByEmail = async (req, res) => {
         email: user.email,
         profile_image: getFullImageUrl(user.profile_image),
         bio: user.bio || "",
-        city: user.city,
-        languages: user.languages, // string array
-        interests: user.interests, // populated category objects
-        availability: user.availability || [], // added availability
+        city: user.city || "",
+        languages: user.languages || [],
+        interests: user.interests || [],
+        availability: user.availability || [],
       },
     });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ isSuccess: false, message: "Server error" });
+    console.error("getUserProfileByEmail error:", err);
+    res.status(500).json({ isSuccess: false, message: "Server error", error: err.message });
   }
 };
 
 // ---------------- UPDATE Profile ----------------
 exports.editProfile = async (req, res) => {
   try {
-    const {
-      email,
-      name,
-      bio,
-      city,
-      languages = [],
-      interests = [],
-      availability = [],
-      profile_image: clientImageUrl, // optional url from client (Flutter)
-    } = req.body;
+    // don't set defaults here; we need to detect if a field was provided
+    let { email, name, bio, city } = req.body;
+
+    // helper: try parse JSON string fields (common with multipart/form-data)
+    const tryParse = (val) => {
+      if (typeof val !== "string") return val;
+      const t = val.trim();
+      if ((t.startsWith("{") && t.endsWith("}")) || (t.startsWith("[") && t.endsWith("]"))) {
+        try { return JSON.parse(t); } catch (e) { return val; }
+      }
+      return val;
+    };
+
+    const rawLanguages = tryParse(req.body.languages);
+    const rawInterests = tryParse(req.body.interests);
+    const rawAvailability = tryParse(req.body.availability);
 
     // Identify user
     let user = null;
@@ -112,34 +117,19 @@ exports.editProfile = async (req, res) => {
     }
 
     if (!user) {
-      return res.status(404).json({
-        isSuccess: false,
-        message: "User not found",
-        data: null,
-      });
+      return res.status(404).json({ isSuccess: false, message: "User not found", data: null });
     }
 
-    // --- Update basic fields ---
+    // Basic fields
     if (typeof name === "string" && name.trim() === "") {
-      return res.json({
-        isSuccess: false,
-        message: "Name cannot be empty",
-        data: null,
-      });
+      return res.status(400).json({ isSuccess: false, message: "Name cannot be empty", data: null });
     }
     if (typeof name === "string" && name.trim() !== "") user.name = name.trim();
     if (typeof bio === "string") user.bio = bio.trim();
     if (typeof city === "string") user.city = city.trim();
 
-    // Profile image handling (priority):
-    // 1) if req.file present -> upload to Cloudinary (server-side)
-    // 2) else if client provided profile_image URL in body -> use that
-    // 3) else leave existing unchanged
-    let newImageObjOrUrl = null;
-    let newPublicId = null;
+    // keep track of old Cloudinary public_id (if any) to delete later
     let oldPublicId = null;
-
-    // capture old public id if present (for deletion later)
     if (user.profile_image) {
       if (typeof user.profile_image === "string") {
         oldPublicId = extractPublicIdFromCloudinaryUrl(user.profile_image);
@@ -148,78 +138,84 @@ exports.editProfile = async (req, res) => {
       }
     }
 
+    // ---------- Image upload handling ----------
     if (req.file && req.file.buffer) {
-      // Upload new image to Cloudinary
       try {
+        if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
+          throw new Error("Cloudinary not configured (missing env vars).");
+        }
+
         const publicId = `user_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
         const result = await uploadBufferToCloudinary(req.file.buffer, "profile_images", publicId);
-        newImageObjOrUrl = {
-          public_id: result.public_id,
-          secure_url: result.secure_url,
-        };
-        newPublicId = result.public_id;
+
+        if (!result || !result.secure_url) {
+          throw new Error("Invalid upload response from Cloudinary");
+        }
+
+        // Save the URL string in DB (as requested)
+        user.profile_image = result.secure_url;
+
+        // Save public_id too for later deletion (optional field on User schema)
+        user.profile_image_public_id = result.public_id || publicId;
+
+        // Delete old Cloudinary image when replaced
+        if (oldPublicId && result.public_id && oldPublicId !== result.public_id) {
+          try { await deleteCloudinaryImage(oldPublicId); } catch (e) { console.error(e); }
+        }
       } catch (uploadErr) {
         console.error("Cloudinary upload failed in editProfile:", uploadErr);
-        return res.status(500).json({ isSuccess: false, message: "Image upload failed" });
+        return res.status(500).json({ isSuccess: false, message: "Image upload failed", error: uploadErr.message });
       }
-    } else if (clientImageUrl && typeof clientImageUrl === "string" && clientImageUrl.trim() !== "") {
-      const url = clientImageUrl.trim();
+    }
+
+    // If client passed a profile_image URL (rare case), accept it (but we prefer file uploads)
+    if (!req.file && req.body.profile_image && typeof req.body.profile_image === "string" && req.body.profile_image.trim() !== "") {
+      const url = req.body.profile_image.trim();
+      user.profile_image = url;
       const extracted = extractPublicIdFromCloudinaryUrl(url);
-      if (extracted) {
-        newImageObjOrUrl = { public_id: extracted, secure_url: url };
-        newPublicId = extracted;
+      if (extracted) user.profile_image_public_id = extracted;
+    }
+
+    // ---------- Other fields ----------
+    // Languages
+    if (rawLanguages !== undefined) {
+      if (!Array.isArray(rawLanguages)) {
+        return res.status(400).json({ isSuccess: false, message: "languages must be an array" });
+      }
+      user.languages = rawLanguages;
+    }
+
+    // Interests -> match Category.tags
+    if (rawInterests !== undefined) {
+      if (!Array.isArray(rawInterests)) {
+        return res.status(400).json({ isSuccess: false, message: "interests must be an array" });
+      }
+      if (rawInterests.length === 0) {
+        user.interests = [];
       } else {
-        newImageObjOrUrl = url; // store raw URL if not Cloudinary or can't extract
+        // ensure tags are strings — consider normalizing case if needed
+        const foundCategories = await Category.find({ tags: { $in: rawInterests } });
+        if (!foundCategories.length) {
+          return res.status(400).json({ isSuccess: false, message: "No matching interests found", data: null });
+        }
+        user.interests = foundCategories.map((c) => c._id);
       }
     }
 
-    // Assign new image if present
-    if (newImageObjOrUrl) {
-      user.profile_image = newImageObjOrUrl;
-    }
-
-    // Languages - store directly from frontend strings (replace only if non-empty array provided)
-    if (Array.isArray(languages) && languages.length > 0) {
-      user.languages = languages;
-    }
-
-    // Interests - match with Category.tags
-    if (Array.isArray(interests) && interests.length > 0) {
-      const foundCategories = await Category.find({ tags: { $in: interests } });
-      if (!foundCategories.length) {
-        return res.json({
-          isSuccess: false,
-          message: "No matching interests found",
-          data: null,
-        });
+    // Availability
+    if (rawAvailability !== undefined) {
+      if (!Array.isArray(rawAvailability)) {
+        return res.status(400).json({ isSuccess: false, message: "availability must be an array" });
       }
-      user.interests = foundCategories.map((c) => c._id);
-    }
-
-    // Availability - multiple days and multiple time ranges
-    if (Array.isArray(availability) && availability.length > 0) {
-      user.availability = availability;
+      user.availability = rawAvailability;
     }
 
     await user.save();
 
-    // After successfully saving the new image, delete the old Cloudinary image if it exists and is different
-    try {
-      if (oldPublicId && newPublicId && oldPublicId !== newPublicId) {
-        await deleteCloudinaryImage(oldPublicId);
-      } else if (oldPublicId && typeof newImageObjOrUrl === "string") {
-        // New image provided by client but we couldn't extract its public id; still delete old if it was Cloudinary
-        await deleteCloudinaryImage(oldPublicId);
-      }
-      // else: no deletion needed
-    } catch (delErr) {
-      console.error("Failed to delete previous Cloudinary image (non-fatal):", delErr);
-    }
-
-    // populate interests only for response
+    // populate interests for response
     user = await user.populate("interests");
 
-    res.json({
+    return res.json({
       isSuccess: true,
       message: "Profile updated successfully",
       data: {
@@ -227,16 +223,16 @@ exports.editProfile = async (req, res) => {
         uid: user.uid,
         name: user.name,
         email: user.email,
-        profile_image: getFullImageUrl(user.profile_image),
+        profile_image: getFullImageUrl(user.profile_image), // should return secure_url string
         bio: user.bio,
         city: user.city,
-        languages: user.languages,
-        interests: user.interests,
-        availability: user.availability,
+        languages: user.languages || [],
+        interests: user.interests || [],
+        availability: user.availability || [],
       },
     });
   } catch (err) {
     console.error("editProfile error:", err);
-    return res.status(500).json({ isSuccess: false, message: "Server error" });
+    return res.status(500).json({ isSuccess: false, message: "Server error", error: err.message });
   }
 };

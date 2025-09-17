@@ -11,7 +11,9 @@ const fs = require("fs");
 // ---------------- TEMP STORAGE FOR PENDING USERS ----------------
 exports.register = async (req, res) => {
   try {
-    const { name, email, mobile, password, register_type, uid } = req.body;
+    let { name, email, mobile, password, register_type, uid } = req.body;
+
+    email = email.toLowerCase(); // normalize email
 
     if (!["manual", "google_auth"].includes(register_type)) {
       return res.json({ IsSucces: false, message: "Invalid register_type." });
@@ -46,7 +48,7 @@ exports.register = async (req, res) => {
     const { otp, expiry } = generateOTP();
 
     // Save to PendingUser collection
-    await PendingUser.findOneAndUpdate(
+    const saved = await PendingUser.findOneAndUpdate(
       { email },
       {
         email,
@@ -66,12 +68,14 @@ exports.register = async (req, res) => {
       { upsert: true, new: true }
     );
 
+    console.log("✅ PendingUser saved:", saved);
+
     // Send OTP email
     await sendOtpEmail(email, otp);
 
     res.json({ IsSucces: true, message: "OTP sent. Please verify." });
   } catch (err) {
-    console.error(err);
+    console.error("❌ Register Error:", err);
     res.status(500).json({ IsSucces: false, message: "Server error" });
   }
 };
@@ -79,9 +83,12 @@ exports.register = async (req, res) => {
 // ---------------- VERIFY OTP (REGISTER) ----------------
 exports.verifyOtpRegister = async (req, res) => {
   try {
-    const { email, otp } = req.body;
+    let { email, otp } = req.body;
+    email = email.toLowerCase(); // normalize email
 
     const pendingUser = await PendingUser.findOne({ email });
+    console.log("🔎 PendingUser found:", pendingUser);
+
     if (!pendingUser) {
       return res.json({ IsSucces: false, message: "No pending registration" });
     }
@@ -90,7 +97,7 @@ exports.verifyOtpRegister = async (req, res) => {
       return res.json({ IsSucces: false, message: "OTP expired" });
     }
 
-    if (pendingUser.otp !== otp) {
+    if (pendingUser.otp !== Number(otp)) {
       return res.json({ IsSucces: false, message: "Invalid OTP" });
     }
 
@@ -128,7 +135,7 @@ exports.verifyOtpRegister = async (req, res) => {
       },
     });
   } catch (err) {
-    console.error(err);
+    console.error("❌ Verify OTP Error:", err);
     res.status(500).json({ IsSucces: false, message: "Server error" });
   }
 };

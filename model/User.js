@@ -36,21 +36,19 @@ const userSchema = new mongoose.Schema({
   access_token: { type: String, default: null },
   session_id: { type: String, default: null },
   availability: [
-  {
-    day: { type: String, required: true }, // e.g. "Monday"
-    times: [
-      {
-        start_time: { type: String, required: true },
-        end_time: { type: String, required: true },
-      }
-    ]
-  }
-],
-
-  
+    {
+      day: { type: String, required: true }, // e.g. "Monday"
+      times: [
+        {
+          start_time: { type: String, required: true },
+          end_time: { type: String, required: true },
+        },
+      ],
+    },
+  ],
 
   // Relationships
-  languages: [{ type: mongoose.Schema.Types.ObjectId, ref: "Language" }],
+  languages: { type: [String], default: [] },
   interests: [{ type: mongoose.Schema.Types.ObjectId, ref: "Category" }],
   services: [{ type: mongoose.Schema.Types.ObjectId, ref: "Service" }],
 

@@ -10,7 +10,7 @@ const categorySchema = new mongoose.Schema({
   categoryId: { type: Number, unique: true }, // numeric category id
   name: { type: String, required: true },
   image: { type: String, default: null },
-  tags: [tagSchema], // object array with only name
+  tags: [{ type: String }], // object array with only name
 
   provider_share: { type: Number, default: 80.0 },
   seeker_share: { type: Number, default: 20.0 },
@@ -20,7 +20,7 @@ const categorySchema = new mongoose.Schema({
   services: [{ type: mongoose.Schema.Types.ObjectId, ref: "Service" }],
 
   created_at: { type: Date, default: Date.now },
-  updated_at: { type: Date, default: Date.now }
+  updated_at: { type: Date, default: Date.now },
 });
 
 // Auto increment categoryId

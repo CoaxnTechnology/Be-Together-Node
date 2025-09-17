@@ -1,12 +1,16 @@
 const bcrypt = require("bcryptjs");
 const User = require("../model/User");
-const PendingUser = require("../model/PendingUser");
+//const PendingUser = require("../model/PendingUser");
 const { createAccessToken } = require("../utils/jwt");
+
+
 const { generateOTP } = require("../utils/otp");
 const { sendOtpEmail } = require("../utils/email");
 const { getFullImageUrl } = require("../utils/image");
 const path = require("path");
 const fs = require("fs");
+
+
 
 // ---------------- TEMP STORAGE FOR PENDING USERS ----------------
 exports.register = async (req, res) => {
@@ -75,33 +79,38 @@ exports.register = async (req, res) => {
 
 // ---------------- VERIFY OTP (REGISTER) ----------------
 exports.verifyOtpRegister = async (req, res) => {
+  const { v4: uuidv4 } = await import('uuid');
+
   try {
     let { email, otp } = req.body;
     email = email.toLowerCase();
 
+    console.log("📩 Verify OTP Request:", { email, otp });
+
     const user = await User.findOne({ email });
+    console.log("🔎 User found:", user);
+
     if (!user) {
       return res.json({ IsSucces: false, message: "User not found" });
     }
 
-    if (user.otp_verified) {
-      return res.json({ IsSucces: false, message: "OTP already verified" });
+    if (!user.otp_code || !user.otp_expiry) {
+      return res.json({ IsSucces: false, message: "No OTP generated" });
     }
 
     if (new Date() > user.otp_expiry) {
       return res.json({ IsSucces: false, message: "OTP expired" });
     }
 
-    if (user.otp_code !== String(otp)) {
+    if (String(user.otp_code) !== String(otp)) {
       return res.json({ IsSucces: false, message: "Invalid OTP" });
     }
 
-    // Mark user verified
+    // OTP correct → update user
     user.otp_verified = true;
     user.otp_code = null;
     user.otp_expiry = null;
 
-    // Create session & token
     const session_id = uuidv4();
     const access_token = createAccessToken({ id: user._id, session_id });
 
@@ -110,7 +119,7 @@ exports.verifyOtpRegister = async (req, res) => {
 
     await user.save();
 
-    return res.json({
+    res.json({
       IsSucces: true,
       message: "Registered successfully",
       access_token,
@@ -129,9 +138,10 @@ exports.verifyOtpRegister = async (req, res) => {
     });
   } catch (err) {
     console.error("❌ Verify OTP Error:", err);
-    return res.status(500).json({ IsSucces: false, message: "Server error" });
+    res.status(500).json({ IsSucces: false, message: "Server error" });
   }
 };
+
 
 // ---------------- LOGIN ----------------
 exports.login = async (req, res) => {

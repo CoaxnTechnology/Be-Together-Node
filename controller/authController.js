@@ -38,15 +38,9 @@ exports.register = async (req, res) => {
     // Profile image save
     let profileImageName = null;
     if (req.file) {
-      profileImageName = `${Date.now()}-${req.file.originalname}`;
-      const uploadPath = path.join(
-        __dirname,
-        "../uploads/profile_images",
-        profileImageName
-      );
-      fs.mkdirSync(path.dirname(uploadPath), { recursive: true });
-      fs.writeFileSync(uploadPath, req.file.buffer);
+     profileImageName = req.file.filename;
     }
+      
 
     // Generate OTP
     const { otp, expiry } = generateOTP();

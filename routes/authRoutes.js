@@ -8,7 +8,19 @@ const {
 } = require("../controller/authController");
 
 const router = express.Router();
-const upload = multer(); // memory storage
+//const upload = multer(); // memory storage
+
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, path.join(__dirname, "../uploads/profile_images"));
+  },
+  filename: function (req, file, cb) {
+    const uniqueName = Date.now() + "-" + file.originalname;
+    cb(null, uniqueName);
+  },
+});
+
+const upload = multer({ storage });
 
 router.post("/register", upload.single("profile_image"), register);
 router.post("/verify-otp-reg", verifyOtpRegister);

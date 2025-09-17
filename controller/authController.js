@@ -1,51 +1,74 @@
+// controller/authController.js
 const bcrypt = require("bcryptjs");
 const User = require("../model/User");
-//const PendingUser = require("../model/PendingUser");
 const { createAccessToken } = require("../utils/jwt");
-
-
 const { generateOTP } = require("../utils/otp");
 const { sendOtpEmail } = require("../utils/email");
 const { getFullImageUrl } = require("../utils/image");
 const path = require("path");
 const fs = require("fs");
+const multer = require("multer");
+ // use require for consistency
 
+// helper: remove uploaded file from disk (silent on error)
+function removeUploadedFile(filename) {
+  if (!filename) return;
+  const filePath = path.join(__dirname, "../uploads/profile_images", filename);
+  fs.unlink(filePath, (err) => {
+    if (err && err.code !== "ENOENT") {
+      console.error("Failed to remove file:", filePath, err);
+    }
+  });
+}
 
-
-// ---------------- TEMP STORAGE FOR PENDING USERS ----------------
+// ---------------- REGISTER ----------------
 exports.register = async (req, res) => {
   try {
     let { name, email, mobile, password, register_type, uid } = req.body;
-    email = email.toLowerCase();
 
+    if (email) email = String(email).toLowerCase();
+
+    // validate register_type
     if (!["manual", "google_auth"].includes(register_type)) {
-      return res.json({ IsSucces: false, message: "Invalid register_type." });
+      // if user uploaded a file, remove it since registration won't continue
+      if (req.file) removeUploadedFile(req.file.filename);
+      return res.status(400).json({ IsSucces: false, message: "Invalid register_type." });
     }
 
+    // basic required fields
+    if (!email) {
+      if (req.file) removeUploadedFile(req.file.filename);
+      return res.status(400).json({ IsSucces: false, message: "Email required." });
+    }
+
+    // check existing user BEFORE heavy work
     const existing = await User.findOne({ email });
     if (existing) {
-      return res.json({
-        IsSucces: false,
-        message: "Email already registered.",
-      });
+      if (req.file) removeUploadedFile(req.file.filename);
+      return res.status(409).json({ IsSucces: false, message: "Email already registered." });
     }
 
+    // hash password when manual registration
     let hashedPassword = null;
-    if (register_type === "manual" && password) {
+    if (register_type === "manual") {
+      if (!password) {
+        if (req.file) removeUploadedFile(req.file.filename);
+        return res.status(400).json({ IsSucces: false, message: "Password required for manual registration." });
+      }
       hashedPassword = await bcrypt.hash(password, 10);
     }
 
-    // Profile image save
+    // Profile image: optional
     let profileImageName = null;
     if (req.file) {
-     profileImageName = req.file.filename;
+      // multer uploaded file: req.file.filename is safe to store
+      profileImageName = req.file.filename;
     }
-      console.log(req.file)
 
     // Generate OTP
     const { otp, expiry } = generateOTP();
 
-    // Save user
+    // Create user document
     const newUser = new User({
       uid: uid ? String(uid) : null,
       name,
@@ -61,43 +84,58 @@ exports.register = async (req, res) => {
 
     await newUser.save();
 
-    // Send OTP email
-    await sendOtpEmail(email, otp);
+    // Fire OTP email (don't await fatal on send failure if you want resiliency)
+    try {
+      await sendOtpEmail(email, otp);
+    } catch (emailErr) {
+      console.error("Failed to send OTP email:", emailErr);
+      // optionally inform client but keep registration; up to you
+    }
 
-    return res.json({ IsSucces: true, message: "OTP sent. Please verify." });
+    return res.status(201).json({ IsSucces: true, message: "OTP sent. Please verify." });
   } catch (err) {
     console.error("❌ Register Error:", err);
+
+    // If multer threw, it will be a MulterError
+    if (err instanceof multer.MulterError) {
+      // remove uploaded file if present
+      if (req.file) removeUploadedFile(req.file.filename);
+      return res.status(400).json({ IsSucces: false, message: err.message });
+    }
+
+    // generic fallback
+    if (req.file) removeUploadedFile(req.file.filename);
     return res.status(500).json({ IsSucces: false, message: "Server error" });
   }
 };
 
 // ---------------- VERIFY OTP (REGISTER) ----------------
 exports.verifyOtpRegister = async (req, res) => {
-  const { v4: uuidv4 } = await import('uuid');
-
+  const { v4: uuidv4 } = require("uuid");
   try {
     let { email, otp } = req.body;
-    email = email.toLowerCase();
+    if (!email) return res.status(400).json({ IsSucces: false, message: "Email required" });
+    if (!otp) return res.status(400).json({ IsSucces: false, message: "OTP required" });
+
+    email = String(email).toLowerCase();
+    otp = String(otp);
 
     console.log("📩 Verify OTP Request:", { email, otp });
 
     const user = await User.findOne({ email });
-    console.log("🔎 User found:", user);
-
-    if (!user) {
-      return res.json({ IsSucces: false, message: "User not found" });
-    }
+    if (!user) return res.status(404).json({ IsSucces: false, message: "User not found" });
 
     if (!user.otp_code || !user.otp_expiry) {
-      return res.json({ IsSucces: false, message: "No OTP generated" });
+      return res.status(400).json({ IsSucces: false, message: "No OTP generated" });
     }
 
-    if (new Date() > user.otp_expiry) {
-      return res.json({ IsSucces: false, message: "OTP expired" });
+    // secure expiry check
+    if (Date.now() > new Date(user.otp_expiry).getTime()) {
+      return res.status(400).json({ IsSucces: false, message: "OTP expired" });
     }
 
-    if (String(user.otp_code) !== String(otp)) {
-      return res.json({ IsSucces: false, message: "Invalid OTP" });
+    if (String(user.otp_code) !== otp) {
+      return res.status(400).json({ IsSucces: false, message: "Invalid OTP" });
     }
 
     // OTP correct → update user
@@ -132,26 +170,25 @@ exports.verifyOtpRegister = async (req, res) => {
     });
   } catch (err) {
     console.error("❌ Verify OTP Error:", err);
-    res.status(500).json({ IsSucces: false, message: "Server error" });
+    return res.status(500).json({ IsSucces: false, message: "Server error" });
   }
 };
-
 
 // ---------------- LOGIN ----------------
 exports.login = async (req, res) => {
   try {
-    const { v4: uuidv4 } = await import("uuid");
     const { email, password, login_type, uid } = req.body;
-    const user = await User.findOne({ email });
-    if (!user) return res.json({ IsSucces: false, message: "User not found" });
+    if (!email) return res.status(400).json({ IsSucces: false, message: "Email required" });
+
+    const user = await User.findOne({ email: String(email).toLowerCase() });
+    if (!user) return res.status(404).json({ IsSucces: false, message: "User not found" });
 
     if (login_type === "manual") {
       if (!user.hashed_password || !password)
-        return res.json({ IsSucces: false, message: "Password required" });
+        return res.status(400).json({ IsSucces: false, message: "Password required" });
 
-      const valid = await bcrypt.compare(password, user.hashed_password);
-      if (!valid)
-        return res.json({ IsSucces: false, message: "Invalid password" });
+      const valid = await bcrypt.compare(String(password), user.hashed_password);
+      if (!valid) return res.status(401).json({ IsSucces: false, message: "Invalid password" });
 
       const { otp, expiry } = generateOTP();
       user.otp_code = otp;
@@ -159,7 +196,12 @@ exports.login = async (req, res) => {
       user.otp_verified = false;
       await user.save();
 
-      await sendOtpEmail(user.email, otp);
+      try {
+        await sendOtpEmail(user.email, otp);
+      } catch (emailErr) {
+        console.error("Failed to send login OTP email:", emailErr);
+      }
+
       return res.json({
         IsSucces: true,
         message: "OTP sent for login. Please verify.",
@@ -168,7 +210,7 @@ exports.login = async (req, res) => {
     }
 
     if (login_type === "google_auth") {
-      if (uid) user.uid = parseInt(uid);
+      if (uid) user.uid = String(uid);
 
       const session_id = uuidv4();
       const access_token = createAccessToken({ id: user._id, session_id });
@@ -197,27 +239,31 @@ exports.login = async (req, res) => {
       });
     }
 
-    res.json({ IsSucces: false, message: "Invalid login_type" });
+    return res.status(400).json({ IsSucces: false, message: "Invalid login_type" });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ IsSucces: false, message: "Server error" });
+    console.error("❌ Login Error:", err);
+    return res.status(500).json({ IsSucces: false, message: "Server error" });
   }
 };
 
 // ---------------- VERIFY OTP (LOGIN) ----------------
 exports.verifyOtpLogin = async (req, res) => {
   try {
-    const { v4: uuidv4 } = await import("uuid");
     const { email, otp } = req.body;
-    const user = await User.findOne({ email });
-    if (!user) return res.json({ IsSucces: false, message: "User not found" });
+    if (!email) return res.status(400).json({ IsSucces: false, message: "Email required" });
+    if (!otp) return res.status(400).json({ IsSucces: false, message: "OTP required" });
+
+    const user = await User.findOne({ email: String(email).toLowerCase() });
+    if (!user) return res.status(404).json({ IsSucces: false, message: "User not found" });
 
     if (!user.otp_code || !user.otp_expiry)
-      return res.json({ IsSucces: false, message: "No OTP generated" });
-    if (new Date() > user.otp_expiry)
-      return res.json({ IsSucces: false, message: "OTP expired" });
-    if (user.otp_code !== otp)
-      return res.json({ IsSucces: false, message: "Invalid OTP" });
+      return res.status(400).json({ IsSucces: false, message: "No OTP generated" });
+
+    if (Date.now() > new Date(user.otp_expiry).getTime())
+      return res.status(400).json({ IsSucces: false, message: "OTP expired" });
+
+    if (String(user.otp_code) !== String(otp))
+      return res.status(400).json({ IsSucces: false, message: "Invalid OTP" });
 
     user.otp_verified = true;
     user.otp_code = null;
@@ -247,7 +293,7 @@ exports.verifyOtpLogin = async (req, res) => {
       },
     });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ IsSucces: false, message: "Server error" });
+    console.error("❌ Verify OTP (login) Error:", err);
+    return res.status(500).json({ IsSucces: false, message: "Server error" });
   }
 };

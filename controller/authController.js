@@ -12,8 +12,7 @@ const fs = require("fs");
 exports.register = async (req, res) => {
   try {
     let { name, email, mobile, password, register_type, uid } = req.body;
-
-    email = email.toLowerCase(); // normalize email
+    email = email.toLowerCase();
 
     if (!["manual", "google_auth"].includes(register_type)) {
       return res.json({ IsSucces: false, message: "Invalid register_type." });
@@ -41,42 +40,36 @@ exports.register = async (req, res) => {
         "../uploads/profile_images",
         profileImageName
       );
+      fs.mkdirSync(path.dirname(uploadPath), { recursive: true });
       fs.writeFileSync(uploadPath, req.file.buffer);
     }
 
-    // OTP generate
+    // Generate OTP
     const { otp, expiry } = generateOTP();
 
-    // Save to PendingUser collection
-    const saved = await PendingUser.findOneAndUpdate(
-      { email },
-      {
-        email,
-        otp,
-        expiry,
-        userData: {
-          uid: uid ? parseInt(uid) : null,
-          name,
-          email,
-          mobile,
-          hashed_password: hashedPassword,
-          register_type,
-          otp_verified: false,
-          profile_image: profileImageName,
-        },
-      },
-      { upsert: true, new: true }
-    );
+    // Save user
+    const newUser = new User({
+      uid: uid ? String(uid) : null,
+      name,
+      email,
+      mobile,
+      hashed_password: hashedPassword,
+      register_type,
+      otp_verified: false,
+      otp_code: otp,
+      otp_expiry: expiry,
+      profile_image: profileImageName,
+    });
 
-    console.log("✅ PendingUser saved:", saved);
+    await newUser.save();
 
     // Send OTP email
     await sendOtpEmail(email, otp);
 
-    res.json({ IsSucces: true, message: "OTP sent. Please verify." });
+    return res.json({ IsSucces: true, message: "OTP sent. Please verify." });
   } catch (err) {
     console.error("❌ Register Error:", err);
-    res.status(500).json({ IsSucces: false, message: "Server error" });
+    return res.status(500).json({ IsSucces: false, message: "Server error" });
   }
 };
 
@@ -84,59 +77,59 @@ exports.register = async (req, res) => {
 exports.verifyOtpRegister = async (req, res) => {
   try {
     let { email, otp } = req.body;
-    email = email.toLowerCase(); // normalize email
+    email = email.toLowerCase();
 
-    const pendingUser = await PendingUser.findOne({ email });
-    console.log("🔎 PendingUser found:", pendingUser);
-
-    if (!pendingUser) {
-      return res.json({ IsSucces: false, message: "No pending registration" });
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.json({ IsSucces: false, message: "User not found" });
     }
 
-    if (new Date() > pendingUser.expiry) {
+    if (user.otp_verified) {
+      return res.json({ IsSucces: false, message: "OTP already verified" });
+    }
+
+    if (new Date() > user.otp_expiry) {
       return res.json({ IsSucces: false, message: "OTP expired" });
     }
 
-    if (pendingUser.otp !== Number(otp)) {
+    if (user.otp_code !== String(otp)) {
       return res.json({ IsSucces: false, message: "Invalid OTP" });
     }
 
-    // OTP correct → save user
-    const newUser = new User(pendingUser.userData);
-    newUser.otp_verified = true;
-    await newUser.save();
-
-    // Remove pending user after success
-    await PendingUser.deleteOne({ email });
+    // Mark user verified
+    user.otp_verified = true;
+    user.otp_code = null;
+    user.otp_expiry = null;
 
     // Create session & token
     const session_id = uuidv4();
-    const access_token = createAccessToken({ id: newUser._id, session_id });
+    const access_token = createAccessToken({ id: user._id, session_id });
 
-    newUser.session_id = session_id;
-    newUser.access_token = access_token;
-    await newUser.save();
+    user.session_id = session_id;
+    user.access_token = access_token;
 
-    res.json({
+    await user.save();
+
+    return res.json({
       IsSucces: true,
       message: "Registered successfully",
       access_token,
       session_id,
       token_type: "bearer",
       user: {
-        id: newUser._id,
-        uid: newUser.uid,
-        name: newUser.name,
-        email: newUser.email,
-        mobile: newUser.mobile,
-        profile_image: getFullImageUrl(newUser.profile_image),
-        register_type: newUser.register_type,
-        otp_verified: newUser.otp_verified,
+        id: user._id,
+        uid: user.uid,
+        name: user.name,
+        email: user.email,
+        mobile: user.mobile,
+        profile_image: getFullImageUrl(user.profile_image),
+        register_type: user.register_type,
+        otp_verified: user.otp_verified,
       },
     });
   } catch (err) {
     console.error("❌ Verify OTP Error:", err);
-    res.status(500).json({ IsSucces: false, message: "Server error" });
+    return res.status(500).json({ IsSucces: false, message: "Server error" });
   }
 };
 

@@ -3,39 +3,8 @@ const Category = require("../model/Category");
 const { getFullImageUrl } = require("../utils/image");
 const streamifier = require("streamifier");
 const cloudinary = require("cloudinary").v2;
-// ---------------- GET Profile ----------------
-exports.getUserProfileByEmail = async (req, res) => {
-  try {
-    const { email } = req.body;
 
-    const user = await User.findOne({ email }).populate("interests");
 
-    if (!user) {
-      return res
-        .status(404)
-        .json({ isSuccess: false, message: "User not found" });
-    }
-
-    res.json({
-      isSuccess: true,
-      message: "Profile fetched successfully",
-      data: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        profile_image: getFullImageUrl(user.profile_image),
-        bio: user.bio || "",
-        city: user.city,
-        languages: user.languages, // string array
-        interests: user.interests, // populated category objects
-        availability: user.availability || [], // added availability
-      },
-    });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ isSuccess: false, message: "Server error" });
-  }
-};
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
@@ -86,6 +55,40 @@ async function deleteCloudinaryImage(publicId) {
     console.error("deleteCloudinaryImage error (non-fatal):", err);
   }
 }
+// ---------------- GET Profile ----------------
+exports.getUserProfileByEmail = async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    const user = await User.findOne({ email }).populate("interests");
+
+    if (!user) {
+      return res
+        .status(404)
+        .json({ isSuccess: false, message: "User not found" });
+    }
+
+    res.json({
+      isSuccess: true,
+      message: "Profile fetched successfully",
+      data: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        profile_image: getFullImageUrl(user.profile_image),
+        bio: user.bio || "",
+        city: user.city,
+        languages: user.languages, // string array
+        interests: user.interests, // populated category objects
+        availability: user.availability || [], // added availability
+      },
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ isSuccess: false, message: "Server error" });
+  }
+};
+
 // ---------------- UPDATE Profile ----------------
 exports.editProfile = async (req, res) => {
   try {

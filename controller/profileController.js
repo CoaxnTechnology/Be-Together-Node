@@ -1,7 +1,7 @@
 // controllers/userController.js
 const mongoose = require("mongoose");
-const User = require("../models/User"); // adjust path as needed
-const Category = require("../models/Category"); // adjust path as needed
+const User = require("../model/User"); // adjust path as needed
+const Category = require("../model/Category"); // adjust path as needed
 
 // Cloudinary helper functions - implement these in your utils or service files
 // Example signatures are provided; replace with your actual implementations.
@@ -81,8 +81,14 @@ exports.editProfile = async (req, res) => {
     if (req.file && req.file.buffer) {
       // Upload new image to Cloudinary
       try {
-        const publicId = `user_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-        const result = await uploadBufferToCloudinary(req.file.buffer, "profile_images", publicId);
+        const publicId = `user_${Date.now()}_${Math.random()
+          .toString(36)
+          .slice(2, 8)}`;
+        const result = await uploadBufferToCloudinary(
+          req.file.buffer,
+          "profile_images",
+          publicId
+        );
         newImageObjOrUrl = {
           public_id: result.public_id,
           secure_url: result.secure_url,
@@ -90,9 +96,15 @@ exports.editProfile = async (req, res) => {
         newPublicId = result.public_id;
       } catch (uploadErr) {
         console.error("Cloudinary upload failed in editProfile:", uploadErr);
-        return res.status(500).json({ isSuccess: false, message: "Image upload failed" });
+        return res
+          .status(500)
+          .json({ isSuccess: false, message: "Image upload failed" });
       }
-    } else if (clientImageUrl && typeof clientImageUrl === "string" && clientImageUrl.trim() !== "") {
+    } else if (
+      clientImageUrl &&
+      typeof clientImageUrl === "string" &&
+      clientImageUrl.trim() !== ""
+    ) {
       const url = clientImageUrl.trim();
       const extracted = extractPublicIdFromCloudinaryUrl(url);
       if (extracted) {
@@ -173,7 +185,10 @@ exports.editProfile = async (req, res) => {
       }
       // else: no deletion needed
     } catch (delErr) {
-      console.error("Failed to delete previous Cloudinary image (non-fatal):", delErr);
+      console.error(
+        "Failed to delete previous Cloudinary image (non-fatal):",
+        delErr
+      );
     }
 
     // Prepare response interests:

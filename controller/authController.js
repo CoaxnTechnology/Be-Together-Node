@@ -1,5 +1,6 @@
 // controller/authController.js
 const bcrypt = require("bcryptjs");
+const mongoose = require("mongoose");
 const User = require("../model/User");
 const { createAccessToken } = require("../utils/jwt");
 const { generateOTP } = require("../utils/otp");
@@ -8,7 +9,7 @@ const { getFullImageUrl } = require("../utils/image");
 const { randomUUID } = require("crypto");
 const cloudinary = require("cloudinary").v2;
 const streamifier = require("streamifier");
-const multer = require("multer"); // kept for MulterError checks
+const multer = require("multer"); // for MulterError checks
 
 // configure cloudinary (env vars must be set)
 cloudinary.config({
@@ -18,11 +19,7 @@ cloudinary.config({
 });
 
 // helper: upload buffer to Cloudinary
-function uploadBufferToCloudinary(
-  buffer,
-  folder = "profile_images",
-  publicId = null
-) {
+function uploadBufferToCloudinary(buffer, folder = "profile_images", publicId = null) {
   return new Promise((resolve, reject) => {
     const opts = {
       folder,
@@ -32,47 +29,36 @@ function uploadBufferToCloudinary(
     };
     if (publicId) opts.public_id = publicId;
 
-    const uploadStream = cloudinary.uploader.upload_stream(
-      opts,
-      (error, result) => {
-        if (error) return reject(error);
-        resolve(result);
-      }
-    );
+    const uploadStream = cloudinary.uploader.upload_stream(opts, (error, result) => {
+      if (error) return reject(error);
+      resolve(result);
+    });
 
     streamifier.createReadStream(buffer).pipe(uploadStream);
   });
 }
 
 // ---------------- REGISTER ----------------
-// ---------------- REGISTER ----------------
 exports.register = async (req, res) => {
   let uploadedPublicId = null; // for cleanup if needed
   try {
-    let { name, email, mobile, password, register_type, uid } = req.body;
+    let { name, email, mobile, password, register_type } = req.body;
     if (email) email = String(email).toLowerCase();
 
     // validate register_type
     if (!["manual", "google_auth"].includes(register_type)) {
-      return res
-        .status(400)
-        .json({ IsSucces: false, message: "Invalid register_type." });
+      return res.status(400).json({ IsSucces: false, message: "Invalid register_type." });
     }
 
     // basic required fields
     if (!email) {
-      return res
-        .status(400)
-        .json({ IsSucces: false, message: "Email required." });
+      return res.status(400).json({ IsSucces: false, message: "Email required." });
     }
 
     // check existing user BEFORE heavy work
     const existing = await User.findOne({ email });
     if (existing) {
-      // If user exists and is google_auth, consider returning success (or require login)
-      return res
-        .status(409)
-        .json({ IsSucces: false, message: "Email already registered." });
+      return res.status(409).json({ IsSucces: false, message: "Email already registered." });
     }
 
     // Prepare fields that differ by registration type
@@ -84,10 +70,7 @@ exports.register = async (req, res) => {
     if (register_type === "manual") {
       // manual registration: require password, hash it, and generate OTP
       if (!password) {
-        return res.status(400).json({
-          IsSucces: false,
-          message: "Password required for manual registration.",
-        });
+        return res.status(400).json({ IsSucces: false, message: "Password required for manual registration." });
       }
       hashedPassword = await bcrypt.hash(String(password), 10);
 
@@ -103,9 +86,7 @@ exports.register = async (req, res) => {
       expiry = null;
       otp_verified = true; // mark verified immediately
 
-      // OPTIONAL / RECOMMENDED: verify incoming Google id token here
-      // e.g. const idToken = req.body.id_token; verify with Google APIs
-      // If verification fails, return 401. (Not implemented here.)
+      // OPTIONAL: verify incoming Google id token here (not implemented)
     }
 
     // Determine profile image URL:
@@ -114,32 +95,25 @@ exports.register = async (req, res) => {
     // 2) Else if req.file with buffer exists (server upload flow), upload to Cloudinary and use returned secure_url.
     let profileImageUrl = null;
 
-    // 1) check client-provided URL (this is how google profile image should be passed)
+    // 1) check client-provided URL
     if (req.body && req.body.profile_image) {
-      // Basic validation: must be a non-empty string. (You may add stronger validation if needed.)
       profileImageUrl = String(req.body.profile_image).trim() || null;
     } else if (req.file && req.file.buffer) {
       // 2) server-side upload to Cloudinary
       try {
-        const publicId = `user_${Date.now()}_${Math.random()
-          .toString(36)
-          .slice(2, 8)}`;
-        const result = await uploadBufferToCloudinary(
-          req.file.buffer,
-          "profile_images",
-          publicId
-        );
+        const publicId = `user_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        const result = await uploadBufferToCloudinary(req.file.buffer, "profile_images", publicId);
         uploadedPublicId = result.public_id;
         profileImageUrl = result.secure_url || null;
       } catch (uploadErr) {
         console.error("Cloudinary upload failed (non-fatal):", uploadErr);
-        // Do not block registration; leave profileImageUrl as null and proceed
+        // Do not block registration; proceed without profile image
       }
     }
 
     // Create user document (store profile image URL as a string)
     const newUser = new User({
-      uid: uid ? String(uid) : null,
+      _id: new mongoose.Types.ObjectId(),
       name: name ? String(name) : null,
       email,
       mobile: mobile ? String(mobile) : null,
@@ -161,12 +135,10 @@ exports.register = async (req, res) => {
         console.error("Failed to send OTP email (non-fatal):", emailErr);
       }
 
-      return res
-        .status(201)
-        .json({ IsSucces: true, message: "OTP sent. Please verify." });
+      return res.status(201).json({ IsSucces: true, message: "OTP sent. Please verify." });
     }
 
-    // If google_auth: immediately create session, token and return user details
+    // If google_auth: immediately create session, token and return user details (no uid)
     if (register_type === "google_auth") {
       const session_id = randomUUID();
       const access_token = createAccessToken({ id: newUser._id, session_id });
@@ -183,7 +155,6 @@ exports.register = async (req, res) => {
         token_type: "bearer",
         user: {
           id: newUser._id,
-          uid: newUser.uid,
           name: newUser.name,
           email: newUser.email,
           mobile: newUser.mobile,
@@ -204,9 +175,7 @@ exports.register = async (req, res) => {
       // if we uploaded to Cloudinary but DB save failed, attempt cleanup
       if (uploadedPublicId) {
         try {
-          await cloudinary.uploader.destroy(uploadedPublicId, {
-            resource_type: "image",
-          });
+          await cloudinary.uploader.destroy(uploadedPublicId, { resource_type: "image" });
         } catch (e) {
           console.error("cleanup failed", e);
         }
@@ -217,9 +186,7 @@ exports.register = async (req, res) => {
     // if cloudinary uploaded but DB save failed, attempt to delete the uploaded image
     if (uploadedPublicId) {
       try {
-        await cloudinary.uploader.destroy(uploadedPublicId, {
-          resource_type: "image",
-        });
+        await cloudinary.uploader.destroy(uploadedPublicId, { resource_type: "image" });
       } catch (e) {
         console.error("cleanup failed", e);
       }
@@ -233,26 +200,17 @@ exports.register = async (req, res) => {
 exports.verifyOtpRegister = async (req, res) => {
   try {
     let { email, otp } = req.body;
-    if (!email)
-      return res
-        .status(400)
-        .json({ IsSucces: false, message: "Email required" });
-    if (!otp)
-      return res.status(400).json({ IsSucces: false, message: "OTP required" });
+    if (!email) return res.status(400).json({ IsSucces: false, message: "Email required" });
+    if (!otp) return res.status(400).json({ IsSucces: false, message: "OTP required" });
 
     email = String(email).toLowerCase();
     otp = String(otp);
 
     const user = await User.findOne({ email });
-    if (!user)
-      return res
-        .status(404)
-        .json({ IsSucces: false, message: "User not found" });
+    if (!user) return res.status(404).json({ IsSucces: false, message: "User not found" });
 
     if (!user.otp_code || !user.otp_expiry) {
-      return res
-        .status(400)
-        .json({ IsSucces: false, message: "No OTP generated" });
+      return res.status(400).json({ IsSucces: false, message: "No OTP generated" });
     }
 
     if (Date.now() > new Date(user.otp_expiry).getTime()) {
@@ -284,7 +242,6 @@ exports.verifyOtpRegister = async (req, res) => {
       token_type: "bearer",
       user: {
         id: user._id,
-        uid: user.uid,
         name: user.name,
         email: user.email,
         mobile: user.mobile,
@@ -302,32 +259,17 @@ exports.verifyOtpRegister = async (req, res) => {
 // ---------------- LOGIN ----------------
 exports.login = async (req, res) => {
   try {
-    const { email, password, login_type, uid } = req.body;
-    if (!email)
-      return res
-        .status(400)
-        .json({ IsSucces: false, message: "Email required" });
+    const { email, password, login_type } = req.body;
+    if (!email) return res.status(400).json({ IsSucces: false, message: "Email required" });
 
     const user = await User.findOne({ email: String(email).toLowerCase() });
-    if (!user)
-      return res
-        .status(404)
-        .json({ IsSucces: false, message: "User not found" });
+    if (!user) return res.status(404).json({ IsSucces: false, message: "User not found" });
 
     if (login_type === "manual") {
-      if (!user.hashed_password || !password)
-        return res
-          .status(400)
-          .json({ IsSucces: false, message: "Password required" });
+      if (!user.hashed_password || !password) return res.status(400).json({ IsSucces: false, message: "Password required" });
 
-      const valid = await bcrypt.compare(
-        String(password),
-        user.hashed_password
-      );
-      if (!valid)
-        return res
-          .status(401)
-          .json({ IsSucces: false, message: "Invalid password" });
+      const valid = await bcrypt.compare(String(password), user.hashed_password);
+      if (!valid) return res.status(401).json({ IsSucces: false, message: "Invalid password" });
 
       const { otp, expiry } = generateOTP();
       user.otp_code = otp;
@@ -349,8 +291,7 @@ exports.login = async (req, res) => {
     }
 
     if (login_type === "google_auth") {
-      if (uid) user.uid = String(uid);
-
+      // Do NOT accept/store external uid anymore.
       const session_id = randomUUID();
       const access_token = createAccessToken({ id: user._id, session_id });
 
@@ -367,7 +308,6 @@ exports.login = async (req, res) => {
         token_type: "bearer",
         user: {
           id: user._id,
-          uid: user.uid,
           name: user.name,
           email: user.email,
           mobile: user.mobile,
@@ -378,9 +318,7 @@ exports.login = async (req, res) => {
       });
     }
 
-    return res
-      .status(400)
-      .json({ IsSucces: false, message: "Invalid login_type" });
+    return res.status(400).json({ IsSucces: false, message: "Invalid login_type" });
   } catch (err) {
     console.error("❌ Login Error:", err);
     return res.status(500).json({ IsSucces: false, message: "Server error" });
@@ -391,29 +329,17 @@ exports.login = async (req, res) => {
 exports.verifyOtpLogin = async (req, res) => {
   try {
     const { email, otp } = req.body;
-    if (!email)
-      return res
-        .status(400)
-        .json({ IsSucces: false, message: "Email required" });
-    if (!otp)
-      return res.status(400).json({ IsSucces: false, message: "OTP required" });
+    if (!email) return res.status(400).json({ IsSucces: false, message: "Email required" });
+    if (!otp) return res.status(400).json({ IsSucces: false, message: "OTP required" });
 
     const user = await User.findOne({ email: String(email).toLowerCase() });
-    if (!user)
-      return res
-        .status(404)
-        .json({ IsSucces: false, message: "User not found" });
+    if (!user) return res.status(404).json({ IsSucces: false, message: "User not found" });
 
-    if (!user.otp_code || !user.otp_expiry)
-      return res
-        .status(400)
-        .json({ IsSucces: false, message: "No OTP generated" });
+    if (!user.otp_code || !user.otp_expiry) return res.status(400).json({ IsSucces: false, message: "No OTP generated" });
 
-    if (Date.now() > new Date(user.otp_expiry).getTime())
-      return res.status(400).json({ IsSucces: false, message: "OTP expired" });
+    if (Date.now() > new Date(user.otp_expiry).getTime()) return res.status(400).json({ IsSucces: false, message: "OTP expired" });
 
-    if (String(user.otp_code) !== String(otp))
-      return res.status(400).json({ IsSucces: false, message: "Invalid OTP" });
+    if (String(user.otp_code) !== String(otp)) return res.status(400).json({ IsSucces: false, message: "Invalid OTP" });
 
     user.otp_verified = true;
     user.otp_code = null;
@@ -434,7 +360,6 @@ exports.verifyOtpLogin = async (req, res) => {
       token_type: "bearer",
       user: {
         id: user._id,
-        uid: user.uid,
         name: user.name,
         email: user.email,
         mobile: user.mobile,

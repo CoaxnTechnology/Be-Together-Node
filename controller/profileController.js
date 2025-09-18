@@ -89,6 +89,7 @@ exports.getUserProfileByEmail = async (req, res) => {
 };
 
 // ---------------- UPDATE Profile ----------------
+// ---------------- UPDATE Profile ----------------
 exports.editProfile = async (req, res) => {
   try {
     // don't set defaults here; we need to detect if a field was provided
@@ -185,20 +186,64 @@ exports.editProfile = async (req, res) => {
       user.languages = rawLanguages;
     }
 
-    // Interests -> match Category.tags
+    // ---------- Interests -> store ONLY canonical tags from matched Categories ----------
+    // This will collect exact tag strings from Category.tags for matched categories (case-insensitive),
+    // flatten them, dedupe and store array of strings on user.interests.
     if (rawInterests !== undefined) {
       if (!Array.isArray(rawInterests)) {
         return res.status(400).json({ isSuccess: false, message: "interests must be an array" });
       }
+
       if (rawInterests.length === 0) {
         user.interests = [];
       } else {
-        // ensure tags are strings — consider normalizing case if needed
-        const foundCategories = await Category.find({ tags: { $in: rawInterests } });
-        if (!foundCategories.length) {
-          return res.status(400).json({ isSuccess: false, message: "No matching interests found", data: null });
+        // sanitize input tags, remove empty
+        const inputClean = rawInterests
+          .map(t => (typeof t === "string" ? t.trim() : ""))
+          .filter(Boolean);
+
+        if (!inputClean.length) {
+          user.interests = [];
+        } else {
+          // build case-insensitive regexes to match Category.tags entries
+          const tagRegexes = inputClean.map(t => new RegExp(`^${escapeRegExp(t)}$`, "i"));
+
+          // find categories that have any of those tags
+          const foundCategories = await Category.find({ tags: { $in: tagRegexes } });
+
+          if (!foundCategories.length) {
+            return res.status(400).json({ isSuccess: false, message: "No matching interests found", data: null });
+          }
+
+          // collect tags from matched categories (use canonical strings from DB)
+          const collected = [];
+          for (const c of foundCategories) {
+            if (Array.isArray(c.tags)) {
+              for (const tg of c.tags) {
+                if (typeof tg === "string") collected.push(tg.trim());
+              }
+            }
+          }
+
+          // dedupe preserving first occurrence order (case-insensitive dedupe)
+          const seen = new Set();
+          const deduped = [];
+          for (const t of collected) {
+            const key = t.toLowerCase();
+            if (!seen.has(key)) {
+              seen.add(key);
+              deduped.push(t);
+            }
+          }
+
+          // Optionally: if you want to store only tags that the user explicitly selected
+          // (i.e., filter deduped by inputClean), uncomment next two lines:
+          // const inputSet = new Set(inputClean.map(x => x.toLowerCase()));
+          // user.interests = deduped.filter(t => inputSet.has(t.toLowerCase()));
+
+          // By default we store all canonical tags from matched categories
+          user.interests = deduped;
         }
-        user.interests = foundCategories.map((c) => c._id);
       }
     }
 
@@ -212,8 +257,8 @@ exports.editProfile = async (req, res) => {
 
     await user.save();
 
-    // populate interests for response
-    user = await user.populate("interests");
+    // NOTE: do NOT populate interests because now it's an array of strings
+    // user = await user.populate("interests");
 
     return res.json({
       isSuccess: true,
@@ -223,7 +268,7 @@ exports.editProfile = async (req, res) => {
         uid: user.uid,
         name: user.name,
         email: user.email,
-        profile_image: getFullImageUrl(user.profile_image), // should return secure_url string
+        profile_image: getFullImageUrl(user.profile_image),
         bio: user.bio,
         city: user.city,
         languages: user.languages || [],
@@ -234,5 +279,10 @@ exports.editProfile = async (req, res) => {
   } catch (err) {
     console.error("editProfile error:", err);
     return res.status(500).json({ isSuccess: false, message: "Server error", error: err.message });
+  }
+
+  // helper inside function scope
+  function escapeRegExp(str) {
+    return String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
 };

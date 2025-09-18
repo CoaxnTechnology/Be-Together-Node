@@ -1,61 +1,79 @@
 // models/User.js
 const mongoose = require("mongoose");
 
-const userSchema = new mongoose.Schema({
-  uid: { type: String, default: null }, // Google UID
-  name: { type: String, required: true },
-  email: { type: String, unique: true, required: true, index: true },
-  mobile: { type: String, required: true },
-  hashed_password: { type: String, default: null },
-  profile_image: { type: String, default: null },
-  bio: { type: String, default: null },
-  city: { type: String, default: null, index: true },
+const userSchema = new mongoose.Schema(
+  {
+    uid: { type: String, default: null }, // Google UID
+    name: { type: String, required: true },
+    email: { type: String, unique: true, required: true, index: true },
+    mobile: { type: String, required: true },
+    hashed_password: { type: String, default: null },
+    profile_image: { type: String, default: null },
+    bio: { type: String, default: null },
+    city: { type: String, default: null, index: true },
 
-  register_type: {
-    type: String,
-    enum: ["manual", "google_auth"],
-    default: "manual",
-  },
-  login_type: {
-    type: String,
-    enum: ["manual", "google_auth"],
-    default: "manual",
-  },
-  status: {
-    type: String,
-    enum: ["active", "inactive", "banned"],
-    default: "active",
-  },
-  is_active: { type: Boolean, default: true },
+    register_type: {
+      type: String,
+      enum: ["manual", "google_auth"],
+      default: "manual",
+    },
+    login_type: {
+      type: String,
+      enum: ["manual", "google_auth"],
+      default: "manual",
+    },
+    status: {
+      type: String,
+      enum: ["active", "inactive", "banned"],
+      default: "active",
+    },
+    is_active: { type: Boolean, default: true },
 
-  otp_code: { type: String, default: null },
-  otp_expiry: { type: Date, default: null },
-  otp_verified: { type: Boolean, default: false },
-  is_google_auth: { type: Boolean, default: false },
+    otp_code: { type: String, default: null },
+    otp_expiry: { type: Date, default: null },
+    otp_verified: { type: Boolean, default: false },
+    is_google_auth: { type: Boolean, default: false },
 
-  access_token: { type: String, default: null },
-  session_id: { type: String, default: null },
-  availability: [
-    {
-      day: { type: String, required: true }, // e.g. "Monday"
-      times: [
+    access_token: { type: String, default: null },
+    session_id: { type: String, default: null },
+
+    // Inline availability definition — no separate schemas
+    availability: {
+      type: [
         {
-          start_time: { type: String, required: true },
-          end_time: { type: String, required: true },
+          day: { type: String, required: true }, // e.g. "Monday"
+          times: [
+            {
+              start_time: { type: String, required: true }, // "09:00"
+              end_time: { type: String, required: true },   // "12:00"
+            },
+          ],
         },
       ],
+      default: [],
     },
-  ],
 
-  // Relationships
-  languages: { type: [String], default: [] },
-  interests: [{ type: mongoose.Schema.Types.ObjectId, ref: "Category" }],
-  services: [{ type: mongoose.Schema.Types.ObjectId, ref: "Service" }],
+    // Relationships / simple arrays
+    languages: { type: [String], default: [] },
 
-  created_at: { type: Date, default: Date.now },
-  updated_at: { type: Date, default: Date.now },
-  last_login: { type: Date, default: null },
-});
+    // INTERESTS: store canonical category tags (strings)
+    interests: { type: [String], default: [] },
+
+    services: [{ type: mongoose.Schema.Types.ObjectId, ref: "Service" }],
+
+    created_at: { type: Date, default: Date.now },
+    updated_at: { type: Date, default: Date.now },
+    last_login: { type: Date, default: null },
+  },
+  {
+    toJSON: {
+      transform(doc, ret) {
+        delete ret.__v;
+        return ret;
+      },
+    },
+  }
+);
 
 // Update updated_at automatically
 userSchema.pre("save", function (next) {

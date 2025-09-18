@@ -73,24 +73,7 @@ exports.getUserProfileByEmail = async (req, res) => {
       path: "services",
       model: "Service",
       // select fields you want to return; remove select to return all
-      select: [
-        "_id",
-        "title",
-        "description",
-        "location",
-        "category",
-        "tags",
-        "service_type",
-        "date",
-        "start_time",
-        "end_time",
-        "recurring_days",
-        "max_participants",
-        "isFree",
-        "price",
-        "created_by",
-        "created_at",
-      ].join(" "),
+      
     });
 
     if (!user) {

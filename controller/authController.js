@@ -84,12 +84,10 @@ exports.register = async (req, res) => {
     if (register_type === "manual") {
       // manual registration: require password, hash it, and generate OTP
       if (!password) {
-        return res
-          .status(400)
-          .json({
-            IsSucces: false,
-            message: "Password required for manual registration.",
-          });
+        return res.status(400).json({
+          IsSucces: false,
+          message: "Password required for manual registration.",
+        });
       }
       hashedPassword = await bcrypt.hash(String(password), 10);
 
@@ -145,7 +143,7 @@ exports.register = async (req, res) => {
       name: name ? String(name) : null,
       email,
       mobile: mobile ? String(mobile) : null,
-      hashed_password: hashedPassword,
+      hashed_password: hashedPassword ? String(hashedPassword) : null,
       register_type,
       otp_verified,
       otp_code: otp,
@@ -230,7 +228,6 @@ exports.register = async (req, res) => {
     return res.status(500).json({ IsSucces: false, message: "Server error" });
   }
 };
-
 
 // ---------------- VERIFY OTP (REGISTER) ----------------
 exports.verifyOtpRegister = async (req, res) => {

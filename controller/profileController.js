@@ -11,7 +11,11 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-function uploadBufferToCloudinary(buffer, folder = "profile_images", publicId = null) {
+function uploadBufferToCloudinary(
+  buffer,
+  folder = "profile_images",
+  publicId = null
+) {
   return new Promise((resolve, reject) => {
     const opts = {
       folder,
@@ -21,10 +25,13 @@ function uploadBufferToCloudinary(buffer, folder = "profile_images", publicId = 
     };
     if (publicId) opts.public_id = publicId;
 
-    const uploadStream = cloudinary.uploader.upload_stream(opts, (error, result) => {
-      if (error) return reject(error);
-      resolve(result);
-    });
+    const uploadStream = cloudinary.uploader.upload_stream(
+      opts,
+      (error, result) => {
+        if (error) return reject(error);
+        resolve(result);
+      }
+    );
 
     streamifier.createReadStream(buffer).pipe(uploadStream);
   });
@@ -58,13 +65,17 @@ exports.getUserProfileByEmail = async (req, res) => {
     const { email } = req.body;
 
     if (!email) {
-      return res.status(400).json({ isSuccess: false, message: "email is required" });
+      return res
+        .status(400)
+        .json({ isSuccess: false, message: "email is required" });
     }
 
     const user = await User.findOne({ email }).populate("interests");
 
     if (!user) {
-      return res.status(404).json({ isSuccess: false, message: "User not found" });
+      return res
+        .status(404)
+        .json({ isSuccess: false, message: "User not found" });
     }
 
     res.json({
@@ -84,7 +95,9 @@ exports.getUserProfileByEmail = async (req, res) => {
     });
   } catch (err) {
     console.error("getUserProfileByEmail error:", err);
-    res.status(500).json({ isSuccess: false, message: "Server error", error: err.message });
+    res
+      .status(500)
+      .json({ isSuccess: false, message: "Server error", error: err.message });
   }
 };
 
@@ -99,8 +112,15 @@ exports.editProfile = async (req, res) => {
     const tryParse = (val) => {
       if (typeof val !== "string") return val;
       const t = val.trim();
-      if ((t.startsWith("{") && t.endsWith("}")) || (t.startsWith("[") && t.endsWith("]"))) {
-        try { return JSON.parse(t); } catch (e) { return val; }
+      if (
+        (t.startsWith("{") && t.endsWith("}")) ||
+        (t.startsWith("[") && t.endsWith("]"))
+      ) {
+        try {
+          return JSON.parse(t);
+        } catch (e) {
+          return val;
+        }
       }
       return val;
     };
@@ -118,12 +138,20 @@ exports.editProfile = async (req, res) => {
     }
 
     if (!user) {
-      return res.status(404).json({ isSuccess: false, message: "User not found", data: null });
+      return res
+        .status(404)
+        .json({ isSuccess: false, message: "User not found", data: null });
     }
 
     // Basic fields
     if (typeof name === "string" && name.trim() === "") {
-      return res.status(400).json({ isSuccess: false, message: "Name cannot be empty", data: null });
+      return res
+        .status(400)
+        .json({
+          isSuccess: false,
+          message: "Name cannot be empty",
+          data: null,
+        });
     }
     if (typeof name === "string" && name.trim() !== "") user.name = name.trim();
     if (typeof bio === "string") user.bio = bio.trim();
@@ -142,12 +170,22 @@ exports.editProfile = async (req, res) => {
     // ---------- Image upload handling ----------
     if (req.file && req.file.buffer) {
       try {
-        if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
+        if (
+          !process.env.CLOUDINARY_CLOUD_NAME ||
+          !process.env.CLOUDINARY_API_KEY ||
+          !process.env.CLOUDINARY_API_SECRET
+        ) {
           throw new Error("Cloudinary not configured (missing env vars).");
         }
 
-        const publicId = `user_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-        const result = await uploadBufferToCloudinary(req.file.buffer, "profile_images", publicId);
+        const publicId = `user_${Date.now()}_${Math.random()
+          .toString(36)
+          .slice(2, 8)}`;
+        const result = await uploadBufferToCloudinary(
+          req.file.buffer,
+          "profile_images",
+          publicId
+        );
 
         if (!result || !result.secure_url) {
           throw new Error("Invalid upload response from Cloudinary");
@@ -160,17 +198,36 @@ exports.editProfile = async (req, res) => {
         user.profile_image_public_id = result.public_id || publicId;
 
         // Delete old Cloudinary image when replaced
-        if (oldPublicId && result.public_id && oldPublicId !== result.public_id) {
-          try { await deleteCloudinaryImage(oldPublicId); } catch (e) { console.error(e); }
+        if (
+          oldPublicId &&
+          result.public_id &&
+          oldPublicId !== result.public_id
+        ) {
+          try {
+            await deleteCloudinaryImage(oldPublicId);
+          } catch (e) {
+            console.error(e);
+          }
         }
       } catch (uploadErr) {
         console.error("Cloudinary upload failed in editProfile:", uploadErr);
-        return res.status(500).json({ isSuccess: false, message: "Image upload failed", error: uploadErr.message });
+        return res
+          .status(500)
+          .json({
+            isSuccess: false,
+            message: "Image upload failed",
+            error: uploadErr.message,
+          });
       }
     }
 
     // If client passed a profile_image URL (rare case), accept it (but we prefer file uploads)
-    if (!req.file && req.body.profile_image && typeof req.body.profile_image === "string" && req.body.profile_image.trim() !== "") {
+    if (
+      !req.file &&
+      req.body.profile_image &&
+      typeof req.body.profile_image === "string" &&
+      req.body.profile_image.trim() !== ""
+    ) {
       const url = req.body.profile_image.trim();
       user.profile_image = url;
       const extracted = extractPublicIdFromCloudinaryUrl(url);
@@ -181,17 +238,21 @@ exports.editProfile = async (req, res) => {
     // Languages
     if (rawLanguages !== undefined) {
       if (!Array.isArray(rawLanguages)) {
-        return res.status(400).json({ isSuccess: false, message: "languages must be an array" });
+        return res
+          .status(400)
+          .json({ isSuccess: false, message: "languages must be an array" });
       }
       user.languages = rawLanguages;
     }
 
-    // ---------- Interests -> store ONLY canonical tags from matched Categories ----------
-    // This will collect exact tag strings from Category.tags for matched categories (case-insensitive),
-    // flatten them, dedupe and store array of strings on user.interests.
+    // ---------- Interests -> store ONLY canonical tags from matched Categories that user selected ----------
+    // This will validate user-selected tags against Category.tags (case-insensitive),
+    // map to canonical tag strings from DB, dedupe and store only those tags the user actually selected.
     if (rawInterests !== undefined) {
       if (!Array.isArray(rawInterests)) {
-        return res.status(400).json({ isSuccess: false, message: "interests must be an array" });
+        return res
+          .status(400)
+          .json({ isSuccess: false, message: "interests must be an array" });
       }
 
       if (rawInterests.length === 0) {
@@ -199,50 +260,63 @@ exports.editProfile = async (req, res) => {
       } else {
         // sanitize input tags, remove empty
         const inputClean = rawInterests
-          .map(t => (typeof t === "string" ? t.trim() : ""))
+          .map((t) => (typeof t === "string" ? t.trim() : ""))
           .filter(Boolean);
 
         if (!inputClean.length) {
           user.interests = [];
         } else {
           // build case-insensitive regexes to match Category.tags entries
-          const tagRegexes = inputClean.map(t => new RegExp(`^${escapeRegExp(t)}$`, "i"));
+          const tagRegexes = inputClean.map(
+            (t) => new RegExp(`^${escapeRegExp(t)}$`, "i")
+          );
 
           // find categories that have any of those tags
-          const foundCategories = await Category.find({ tags: { $in: tagRegexes } });
+          const foundCategories = await Category.find({
+            tags: { $in: tagRegexes },
+          });
 
           if (!foundCategories.length) {
-            return res.status(400).json({ isSuccess: false, message: "No matching interests found", data: null });
+            return res
+              .status(400)
+              .json({
+                isSuccess: false,
+                message: "No matching interests found",
+                data: null,
+              });
           }
 
-          // collect tags from matched categories (use canonical strings from DB)
-          const collected = [];
+          // Build a canonical tag map from matched categories (lowercase -> canonicalTag)
+          const canonicalMap = new Map();
           for (const c of foundCategories) {
             if (Array.isArray(c.tags)) {
               for (const tg of c.tags) {
-                if (typeof tg === "string") collected.push(tg.trim());
+                if (typeof tg === "string") {
+                  const trimmed = tg.trim();
+                  canonicalMap.set(trimmed.toLowerCase(), trimmed);
+                }
               }
             }
           }
 
-          // dedupe preserving first occurrence order (case-insensitive dedupe)
+          // Keep only tags that user explicitly selected, using canonical tag strings
+          const result = [];
           const seen = new Set();
-          const deduped = [];
-          for (const t of collected) {
-            const key = t.toLowerCase();
+          for (const inp of inputClean) {
+            const key = inp.toLowerCase();
+            const canonical = canonicalMap.get(key);
+            if (!canonical) {
+              // If you want to accept user raw values when no canonical found, push inp here instead.
+              // For now we skip unknown tags to enforce canonical validation.
+              continue;
+            }
             if (!seen.has(key)) {
               seen.add(key);
-              deduped.push(t);
+              result.push(canonical);
             }
           }
 
-          // Optionally: if you want to store only tags that the user explicitly selected
-          // (i.e., filter deduped by inputClean), uncomment next two lines:
-          // const inputSet = new Set(inputClean.map(x => x.toLowerCase()));
-          // user.interests = deduped.filter(t => inputSet.has(t.toLowerCase()));
-
-          // By default we store all canonical tags from matched categories
-          user.interests = deduped;
+          user.interests = result;
         }
       }
     }
@@ -250,7 +324,9 @@ exports.editProfile = async (req, res) => {
     // Availability
     if (rawAvailability !== undefined) {
       if (!Array.isArray(rawAvailability)) {
-        return res.status(400).json({ isSuccess: false, message: "availability must be an array" });
+        return res
+          .status(400)
+          .json({ isSuccess: false, message: "availability must be an array" });
       }
       user.availability = rawAvailability;
     }
@@ -278,7 +354,9 @@ exports.editProfile = async (req, res) => {
     });
   } catch (err) {
     console.error("editProfile error:", err);
-    return res.status(500).json({ isSuccess: false, message: "Server error", error: err.message });
+    return res
+      .status(500)
+      .json({ isSuccess: false, message: "Server error", error: err.message });
   }
 
   // helper inside function scope

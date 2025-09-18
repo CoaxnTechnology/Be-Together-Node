@@ -31,6 +31,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api", profileRoutes);
 app.use("/api/admin/categories", categoryRoutes);
 
+
 // Connect to MongoDB (live Atlas)
 mongoose
   .connect(process.env.MONGO_URI, {

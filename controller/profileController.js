@@ -65,17 +65,36 @@ exports.getUserProfileByEmail = async (req, res) => {
     const { email } = req.body;
 
     if (!email) {
-      return res
-        .status(400)
-        .json({ isSuccess: false, message: "email is required" });
+      return res.status(400).json({ isSuccess: false, message: "email is required" });
     }
 
-    const user = await User.findOne({ email }).populate("interests");
+    // find user and populate services (full details)
+    const user = await User.findOne({ email }).populate({
+      path: "services",
+      model: "Service",
+      // select fields you want to return; remove select to return all
+      select: [
+        "_id",
+        "title",
+        "description",
+        "location",
+        "category",
+        "tags",
+        "service_type",
+        "date",
+        "start_time",
+        "end_time",
+        "recurring_days",
+        "max_participants",
+        "isFree",
+        "price",
+        "created_by",
+        "created_at",
+      ].join(" "),
+    });
 
     if (!user) {
-      return res
-        .status(404)
-        .json({ isSuccess: false, message: "User not found" });
+      return res.status(404).json({ isSuccess: false, message: "User not found" });
     }
 
     res.json({
@@ -89,17 +108,17 @@ exports.getUserProfileByEmail = async (req, res) => {
         bio: user.bio || "",
         city: user.city || "",
         languages: user.languages || [],
-        interests: user.interests || [],
+        interests: user.interests || [], // plain strings
         availability: user.availability || [],
+        services: user.services || [], // populated service documents
       },
     });
   } catch (err) {
     console.error("getUserProfileByEmail error:", err);
-    res
-      .status(500)
-      .json({ isSuccess: false, message: "Server error", error: err.message });
+    res.status(500).json({ isSuccess: false, message: "Server error", error: err.message });
   }
 };
+
 
 // ---------------- UPDATE Profile ----------------
 // ---------------- UPDATE Profile ----------------

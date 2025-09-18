@@ -1,23 +1,54 @@
+// scripts/seed-categories-cloudinary.js
+// Usage:
+//   DRY RUN (no writes):    node scripts/seed-categories-cloudinary.js --dry
+//   Normal run:             node scripts/seed-categories-cloudinary.js
+//   Force update existing:  node scripts/seed-categories-cloudinary.js --force
+//
+// Required env:
+//   MONGO_URI, CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET
+//
+// Place local icon files in ./uploads/icons/ (names like pet.png, show.png, etc.)
+require("dotenv").config();
 const mongoose = require("mongoose");
-const Category = require("./model/Category"); // 👈 aapka schema import karo
+const minimist = require("minimist");
+const path = require("path");
+const fs = require("fs");
+const cloudinary = require("cloudinary").v2;
 
-const BASE_URL =
-  "mongodb+srv://coaxntechnology_db_user:JjwzFZ07W2smzdEo@bgtogether.xg507ee.mongodb.net/?retryWrites=true&w=majority&appName=BgTogether";
+const slugify = (s) =>
+  String(s)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+const argv = minimist(process.argv.slice(2));
+const DRY_RUN = argv.dry || argv.d === true;
+const FORCE_UPDATE = argv.force || argv.f === true;
+
+const ICON_SOURCE_DIR = path.join(__dirname, "uploads", "icons");
+
+const Category = require("./model/Category");
+
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
 
 const default_categories = [
   {
     name: "Pet Care",
-    image: `${BASE_URL}/uploads/icons/pet.png`,
+    image: `pet.png`,
     tags: ["dog sitter", "pet care", "dog walking", "pet sitting"],
   },
   {
     name: "Childcare",
-    image: `${BASE_URL}/uploads/icons/childcare.png`,
+    image: `childcare.png`,
     tags: ["baby sitter", "childcare", "babysitting", "child supervision"],
   },
   {
     name: "Household Maintenance",
-    image: `${BASE_URL}/uploads/icons/house.png`,
+    image: `house.png`,
     tags: [
       "house chores",
       "cleaning",
@@ -28,7 +59,7 @@ const default_categories = [
   },
   {
     name: "Academic Support",
-    image: `${BASE_URL}/uploads/icons/academic.png`,
+    image: `academic.png`,
     tags: [
       "school tutoring",
       "academic support",
@@ -39,7 +70,7 @@ const default_categories = [
   },
   {
     name: "Home Repairs and Assembly",
-    image: `${BASE_URL}/uploads/icons/repairs.png`,
+    image: `repairs.png`,
     tags: [
       "small jobs",
       "plumbing",
@@ -50,7 +81,7 @@ const default_categories = [
   },
   {
     name: "Elderly Care",
-    image: `${BASE_URL}/uploads/icons/elderly.png`,
+    image: `elderly.png`,
     tags: [
       "elderly assistance",
       "senior care",
@@ -61,7 +92,7 @@ const default_categories = [
   },
   {
     name: "Moving Services",
-    image: `${BASE_URL}/uploads/icons/moving.png`,
+    image: `moving.png`,
     tags: [
       "moving help",
       "furniture moving",
@@ -71,17 +102,18 @@ const default_categories = [
   },
   {
     name: "Language Services",
-    image: `${BASE_URL}/uploads/icons/language.png`,
+    image: `language.png`,
     tags: [
       "translations",
       "document translation",
       "CV translation",
       "language services",
+      "interpreter"
     ],
   },
   {
     name: "Garden and Plant Maintenance",
-    image: `${BASE_URL}/uploads/icons/garden.png`,
+    image: `garden.png`,
     tags: [
       "garden care",
       "plant care",
@@ -90,20 +122,20 @@ const default_categories = [
       "gardening",
     ],
   },
-  {
-    name: "Translator",
-    image: `${BASE_URL}/uploads/icons/translator.png`,
-    tags: [
-      "translation services",
-      "language translation",
-      "document translation",
-      "interpreter",
-      "multilingual",
-    ],
-  },
+  // {
+  //   name: "Translator",
+  //   image: `translator.png`,
+  //   tags: [
+  //     "translation services",
+  //     "language translation",
+  //     "document translation",
+  //     "interpreter",
+  //     "multilingual",
+  //   ],
+  // },
   {
     name: "Plumber",
-    image: `${BASE_URL}/uploads/icons/plumber.png`,
+    image: `plumber.png`,
     tags: [
       "plumbing",
       "pipe repair",
@@ -114,7 +146,7 @@ const default_categories = [
   },
   {
     name: "Cooking",
-    image: `${BASE_URL}/uploads/icons/cooking.png`,
+    image: `cooking.png`,
     tags: [
       "cooking services",
       "meal preparation",
@@ -125,7 +157,7 @@ const default_categories = [
   },
   {
     name: "Join an Event",
-    image: `${BASE_URL}/uploads/icons/event.png`,
+    image: `party.png`,
     tags: [
       "event participation",
       "event registration",
@@ -136,7 +168,7 @@ const default_categories = [
   },
   {
     name: "Explore Area",
-    image: `${BASE_URL}/uploads/icons/explore.png`,
+    image: `explore.png`,
     tags: [
       "local exploration",
       "sightseeing",
@@ -147,7 +179,7 @@ const default_categories = [
   },
   {
     name: "Attend Show",
-    image: `${BASE_URL}/uploads/icons/show.png`,
+    image: `show.png`,
     tags: [
       "theater tickets",
       "live performances",
@@ -158,7 +190,7 @@ const default_categories = [
   },
   {
     name: "Transport",
-    image: `${BASE_URL}/uploads/icons/transport.png`,
+    image: `transport.png`,
     tags: [
       "transportation",
       "delivery services",
@@ -169,7 +201,7 @@ const default_categories = [
   },
   {
     name: "Sports",
-    image: `${BASE_URL}/uploads/icons/sports.png`,
+    image: `sports.png`,
     tags: [
       "sports activities",
       "fitness",
@@ -180,7 +212,7 @@ const default_categories = [
   },
   {
     name: "Keep Company",
-    image: `${BASE_URL}/uploads/icons/company.png`,
+    image: `company.png`,
     tags: [
       "companionship",
       "social support",
@@ -191,7 +223,7 @@ const default_categories = [
   },
   {
     name: "Find a Ride",
-    image: `${BASE_URL}/uploads/icons/ride.png`,
+    image: `ride.png`,
     tags: [
       "ride sharing",
       "carpool",
@@ -202,12 +234,12 @@ const default_categories = [
   },
   {
     name: "Fashion & Beauty",
-    image: `${BASE_URL}/uploads/icons/fashion.png`,
+    image: `fashion.png`,
     tags: ["makeup", "stylist", "salon", "skincare", "cosmetics"],
   },
   {
     name: "Party",
-    image: `${BASE_URL}/uploads/icons/party.png`,
+    image: `party.png`,
     tags: [
       "DJ",
       "makeup artist",
@@ -218,41 +250,130 @@ const default_categories = [
   },
 ];
 
-async function seedCategories() {
+async function uploadIconIfLocal(imageValue, publicIdBase) {
+  // If imageValue already looks like an http/https URL — return as-is
+  if (!imageValue) return null;
+  if (
+    typeof imageValue === "string" &&
+    (imageValue.startsWith("http://") || imageValue.startsWith("https://"))
+  ) {
+    return imageValue;
+  }
+
+  // If imageValue is a filename (e.g., "pet.png"), try to upload local file
+  const localPath = path.join(ICON_SOURCE_DIR, imageValue);
+  if (!fs.existsSync(localPath)) {
+    console.warn(
+      `⚠️ Local icon file not found: ${localPath} — skipping upload, keeping original value if any.`
+    );
+    return null;
+  }
+
+  const pubId = `${publicIdBase}`; // e.g., categories/pet-care
   try {
-    for (let cat of default_categories) {
-      // Check if category already exists
-      let existing = await Category.findOne({ name: cat.name });
-      if (existing) {
-        console.log(`⚠️ Category already exists: ${cat.name}`);
-        continue;
-      }
-
-      // Create new category with tags as plain strings
-      const newCategory = new Category({
-        name: cat.name,
-        image: cat.image,
-        tags: cat.tags, // 👈 directly use the array of strings
-      });
-
-      await newCategory.save();
-      console.log(`✅ Category created: ${cat.name}`);
+    console.log(`⬆️ Uploading ${localPath} to Cloudinary as ${pubId} ...`);
+    const res = await cloudinary.uploader.upload(localPath, {
+      folder: "categories",
+      public_id: pubId.replace(/^categories\/?/, ""), // cloudinary will place into folder
+      overwrite: true,
+      resource_type: "image",
+    });
+    if (res && res.secure_url) {
+      console.log(`  -> uploaded: ${res.secure_url}`);
+      return res.secure_url;
     }
-    console.log("🎉 Default categories seeding done!");
+    console.warn("  -> upload returned no secure_url, result:", res);
+    return null;
   } catch (err) {
-    console.error("❌ Error seeding categories:", err);
-  } finally {
-    mongoose.disconnect();
+    console.error("  -> Cloudinary upload error:", err);
+    return null;
   }
 }
 
+async function seed() {
+  const mongoUri = process.env.MONGO_URI;
+  if (!mongoUri) {
+    console.error("ERROR: set MONGO_URI env var before running.");
+    process.exit(1);
+  }
+  if (
+    !process.env.CLOUDINARY_CLOUD_NAME ||
+    !process.env.CLOUDINARY_API_KEY ||
+    !process.env.CLOUDINARY_API_SECRET
+  ) {
+    console.error(
+      "ERROR: set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET env vars."
+    );
+    process.exit(1);
+  }
 
-mongoose
-  .connect(
-    "mongodb+srv://coaxntechnology_db_user:JjwzFZ07W2smzdEo@bgtogether.xg507ee.mongodb.net/?retryWrites=true&w=majority&appName=BgTogether"
-  )
-  .then(() => {
-    console.log("🚀 MongoDB connected");
-    seedCategories();
-  })
-  .catch((err) => console.error("❌ DB connection error:", err));
+  await mongoose.connect(mongoUri, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+  });
+  console.log("✅ Connected to MongoDB");
+
+  for (const cat of default_categories) {
+    try {
+      const slug = slugify(cat.name);
+      const publicIdBase = `categories/${slug}`;
+
+      const existing = await Category.findOne({ name: cat.name });
+
+      if (existing && !FORCE_UPDATE) {
+        console.log(`⏭️ Category exists: ${cat.name} (skipping)`);
+        continue;
+      }
+
+      // upload local icon if provided as filename; otherwise if cat.image is already URL, keep it
+      let imageUrl = cat.image;
+      // If cat.image looks like a filename (no http) try local upload
+      if (
+        imageUrl &&
+        !imageUrl.startsWith("http://") &&
+        !imageUrl.startsWith("https://")
+      ) {
+        const uploaded = await uploadIconIfLocal(imageUrl, publicIdBase);
+        if (uploaded) imageUrl = uploaded;
+        else {
+          // fallback: if upload failed and the original value was a filename, set imageUrl null so DB stores null
+          imageUrl = null;
+        }
+      }
+
+      const payload = {
+        name: cat.name,
+        image: imageUrl,
+        tags: Array.isArray(cat.tags) ? cat.tags : [],
+      };
+
+      if (DRY_RUN) {
+        console.log("DRY RUN -> would create/update category:", payload);
+        continue;
+      }
+
+      if (existing) {
+        // update existing
+        existing.image = payload.image;
+        existing.tags = payload.tags;
+        await existing.save();
+        console.log(`🔁 Updated category: ${cat.name}`);
+      } else {
+        const created = new Category(payload);
+        await created.save();
+        console.log(`✅ Created category: ${cat.name}`);
+      }
+    } catch (errCat) {
+      console.error(`❌ Error handling category ${cat.name}:`, errCat);
+    }
+  }
+
+  console.log("🎉 Seeding complete.");
+  await mongoose.disconnect();
+  process.exit(0);
+}
+
+seed().catch((err) => {
+  console.error("Fatal error:", err);
+  process.exit(1);
+});

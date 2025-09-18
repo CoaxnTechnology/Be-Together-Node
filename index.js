@@ -13,20 +13,13 @@ const app = express();
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
-app.use(cors({
-    origin: '*', // Allow all origins (not recommended for production)
-    methods: ['GET', 'POST', 'PUT', 'DELETE'],
-    credentials: true
-  }));
-
-// Serve uploaded profile images
 app.use(
-  "/uploads/profile_images",
-  express.static(path.join(__dirname, "uploads/profile_images"))
+  cors({
+    origin: "*", // Allow all origins (not recommended for production)
+    methods: ["GET", "POST", "PUT", "DELETE"],
+    credentials: true,
+  })
 );
-
-// Serve static files from templates directory
-app.use(express.static(path.join(__dirname, "templates")));
 
 // Route to serve terms_and_conditions.html
 app.get("/terms", (req, res) => {

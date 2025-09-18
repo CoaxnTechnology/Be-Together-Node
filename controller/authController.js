@@ -45,6 +45,7 @@ function uploadBufferToCloudinary(
 }
 
 // ---------------- REGISTER ----------------
+// ---------------- REGISTER ----------------
 exports.register = async (req, res) => {
   let uploadedPublicId = null; // for cleanup if needed
   try {
@@ -68,14 +69,20 @@ exports.register = async (req, res) => {
     // check existing user BEFORE heavy work
     const existing = await User.findOne({ email });
     if (existing) {
+      // If user exists and is google_auth, consider returning success (or require login)
       return res
         .status(409)
         .json({ IsSucces: false, message: "Email already registered." });
     }
 
-    // hash password when manual registration
+    // Prepare fields that differ by registration type
     let hashedPassword = null;
+    let otp = null; // we'll keep it null for google_auth
+    let expiry = null;
+    let otp_verified = false;
+
     if (register_type === "manual") {
+      // manual registration: require password, hash it, and generate OTP
       if (!password) {
         return res
           .status(400)
@@ -85,6 +92,22 @@ exports.register = async (req, res) => {
           });
       }
       hashedPassword = await bcrypt.hash(String(password), 10);
+
+      // Generate OTP for manual flow
+      const otpObj = generateOTP();
+      otp = otpObj.otp;
+      expiry = otpObj.expiry;
+      otp_verified = false;
+    } else if (register_type === "google_auth") {
+      // google registration: do NOT require or store password
+      hashedPassword = null;
+      otp = null;
+      expiry = null;
+      otp_verified = true; // mark verified immediately
+
+      // OPTIONAL / RECOMMENDED: verify incoming Google id token here
+      // e.g. const idToken = req.body.id_token; verify with Google APIs
+      // If verification fails, return 401. (Not implemented here.)
     }
 
     // Determine profile image URL:
@@ -93,7 +116,7 @@ exports.register = async (req, res) => {
     // 2) Else if req.file with buffer exists (server upload flow), upload to Cloudinary and use returned secure_url.
     let profileImageUrl = null;
 
-    // 1) check client-provided URL
+    // 1) check client-provided URL (this is how google profile image should be passed)
     if (req.body && req.body.profile_image) {
       // Basic validation: must be a non-empty string. (You may add stronger validation if needed.)
       profileImageUrl = String(req.body.profile_image).trim() || null;
@@ -116,9 +139,6 @@ exports.register = async (req, res) => {
       }
     }
 
-    // Generate OTP
-    const { otp, expiry } = generateOTP();
-
     // Create user document (store profile image URL as a string)
     const newUser = new User({
       uid: uid ? String(uid) : null,
@@ -127,7 +147,7 @@ exports.register = async (req, res) => {
       mobile: mobile ? String(mobile) : null,
       hashed_password: hashedPassword,
       register_type,
-      otp_verified: false,
+      otp_verified,
       otp_code: otp,
       otp_expiry: expiry,
       profile_image: profileImageUrl, // string URL or null
@@ -135,16 +155,49 @@ exports.register = async (req, res) => {
 
     await newUser.save();
 
-    // Send OTP email (best-effort)
-    try {
-      await sendOtpEmail(email, otp);
-    } catch (emailErr) {
-      console.error("Failed to send OTP email (non-fatal):", emailErr);
+    // If manual registration, send OTP email (best-effort)
+    if (register_type === "manual") {
+      try {
+        await sendOtpEmail(email, otp);
+      } catch (emailErr) {
+        console.error("Failed to send OTP email (non-fatal):", emailErr);
+      }
+
+      return res
+        .status(201)
+        .json({ IsSucces: true, message: "OTP sent. Please verify." });
     }
 
-    return res
-      .status(201)
-      .json({ IsSucces: true, message: "OTP sent. Please verify." });
+    // If google_auth: immediately create session, token and return user details
+    if (register_type === "google_auth") {
+      const session_id = randomUUID();
+      const access_token = createAccessToken({ id: newUser._id, session_id });
+
+      newUser.session_id = session_id;
+      newUser.access_token = access_token;
+      await newUser.save();
+
+      return res.status(201).json({
+        IsSucces: true,
+        message: "Registered successfully",
+        access_token,
+        session_id,
+        token_type: "bearer",
+        user: {
+          id: newUser._id,
+          uid: newUser.uid,
+          name: newUser.name,
+          email: newUser.email,
+          mobile: newUser.mobile,
+          profile_image: getFullImageUrl(newUser.profile_image),
+          register_type: newUser.register_type,
+          otp_verified: newUser.otp_verified,
+        },
+      });
+    }
+
+    // Fallback (shouldn't be reached)
+    return res.status(500).json({ IsSucces: false, message: "Server error" });
   } catch (err) {
     console.error("❌ Register Error:", err);
 
@@ -177,6 +230,7 @@ exports.register = async (req, res) => {
     return res.status(500).json({ IsSucces: false, message: "Server error" });
   }
 };
+
 
 // ---------------- VERIFY OTP (REGISTER) ----------------
 exports.verifyOtpRegister = async (req, res) => {

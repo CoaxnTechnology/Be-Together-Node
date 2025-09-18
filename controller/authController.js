@@ -1,4 +1,4 @@
-// controller/authController.js
+// controller/authController.js (UPDATED)
 const bcrypt = require("bcryptjs");
 const mongoose = require("mongoose");
 const User = require("../model/User");
@@ -11,14 +11,12 @@ const cloudinary = require("cloudinary").v2;
 const streamifier = require("streamifier");
 const multer = require("multer"); // for MulterError checks
 
-// configure cloudinary (env vars must be set)
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// helper: upload buffer to Cloudinary
 function uploadBufferToCloudinary(buffer, folder = "profile_images", publicId = null) {
   return new Promise((resolve, reject) => {
     const opts = {
@@ -40,66 +38,95 @@ function uploadBufferToCloudinary(buffer, folder = "profile_images", publicId = 
 
 // ---------------- REGISTER ----------------
 exports.register = async (req, res) => {
-  let uploadedPublicId = null; // for cleanup if needed
+  let uploadedPublicId = null;
   try {
-    let { name, email, mobile, password, register_type } = req.body;
+    let { name, email, mobile, password, register_type, provider_id, provider_uid } = req.body;
     if (email) email = String(email).toLowerCase();
 
-    // validate register_type
     if (!["manual", "google_auth"].includes(register_type)) {
       return res.status(400).json({ IsSucces: false, message: "Invalid register_type." });
     }
 
-    // basic required fields
     if (!email) {
       return res.status(400).json({ IsSucces: false, message: "Email required." });
     }
 
     // check existing user BEFORE heavy work
     const existing = await User.findOne({ email });
-    if (existing) {
+
+    // If user exists and was created via google_auth, and current flow is google_auth -> treat as login
+    if (existing && register_type === "google_auth") {
+      // If existing was created manually, reject to avoid potential clash
+      if (existing.register_type && existing.register_type === "manual") {
+        return res.status(409).json({ IsSucces: false, message: "Email already registered with manual method." });
+      }
+
+      // existing is google_auth (or not set) -> create session and return tokens (idempotent)
+      const session_id = randomUUID();
+      const access_token = createAccessToken({ id: existing._id, session_id });
+
+      existing.session_id = session_id;
+      existing.access_token = access_token;
+      existing.otp_verified = true;
+      // if provider info provided, update it
+      if (provider_id) existing.provider_id = provider_id;
+      if (provider_uid) existing.provider_uid = provider_uid;
+      await existing.save();
+
+      return res.status(200).json({
+        IsSucces: true,
+        message: "Login (existing google account).",
+        access_token,
+        session_id,
+        token_type: "bearer",
+        user: {
+          id: existing._id,
+          name: existing.name,
+          email: existing.email,
+          mobile: existing.mobile,
+          profile_image: getFullImageUrl(existing.profile_image),
+          register_type: existing.register_type,
+          otp_verified: existing.otp_verified,
+        },
+      });
+    }
+
+    // If existing and trying to register manually -> error
+    if (existing && register_type === "manual") {
       return res.status(409).json({ IsSucces: false, message: "Email already registered." });
     }
 
-    // Prepare fields that differ by registration type
+    // Prepare fields based on registration type
     let hashedPassword = null;
-    let otp = null; // we'll keep it null for google_auth
+    let otp = null;
     let expiry = null;
     let otp_verified = false;
 
     if (register_type === "manual") {
-      // manual registration: require password, hash it, and generate OTP
       if (!password) {
         return res.status(400).json({ IsSucces: false, message: "Password required for manual registration." });
       }
       hashedPassword = await bcrypt.hash(String(password), 10);
-
-      // Generate OTP for manual flow
       const otpObj = generateOTP();
       otp = otpObj.otp;
       expiry = otpObj.expiry;
       otp_verified = false;
     } else if (register_type === "google_auth") {
-      // google registration: do NOT require or store password
+      // Accept missing password & mobile from firebase
       hashedPassword = null;
       otp = null;
       expiry = null;
-      otp_verified = true; // mark verified immediately
-
-      // OPTIONAL: verify incoming Google id token here (not implemented)
+      otp_verified = true;
+      // (OPTIONAL) You could verify an incoming Google ID token here
     }
 
-    // Determine profile image URL:
-    // Priority:
-    // 1) If client sent `profile_image` (string URL) in body (Flutter direct upload flow), use it.
-    // 2) Else if req.file with buffer exists (server upload flow), upload to Cloudinary and use returned secure_url.
+    // Handle profile image:
     let profileImageUrl = null;
-
-    // 1) check client-provided URL
     if (req.body && req.body.profile_image) {
+      // client provided an image URL (common with Firebase)
       profileImageUrl = String(req.body.profile_image).trim() || null;
     } else if (req.file && req.file.buffer) {
-      // 2) server-side upload to Cloudinary
+      // server-side upload flow
       try {
         const publicId = `user_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
         const result = await uploadBufferToCloudinary(req.file.buffer, "profile_images", publicId);
@@ -107,11 +134,11 @@ exports.register = async (req, res) => {
         profileImageUrl = result.secure_url || null;
       } catch (uploadErr) {
         console.error("Cloudinary upload failed (non-fatal):", uploadErr);
-        // Do not block registration; proceed without profile image
+        // Proceed without profile image
       }
     }
 
-    // Create user document (store profile image URL as a string)
+    // Create new user
     const newUser = new User({
       _id: new mongoose.Types.ObjectId(),
       name: name ? String(name) : null,
@@ -122,23 +149,24 @@ exports.register = async (req, res) => {
       otp_verified,
       otp_code: otp,
       otp_expiry: expiry,
-      profile_image: profileImageUrl, // string URL or null
+      profile_image: profileImageUrl,
+      provider_id: provider_id || null,
+      provider_uid: provider_uid || null,
     });
 
     await newUser.save();
 
-    // If manual registration, send OTP email (best-effort)
     if (register_type === "manual") {
+      // send OTP best-effort
       try {
         await sendOtpEmail(email, otp);
       } catch (emailErr) {
         console.error("Failed to send OTP email (non-fatal):", emailErr);
       }
-
       return res.status(201).json({ IsSucces: true, message: "OTP sent. Please verify." });
     }
 
-    // If google_auth: immediately create session, token and return user details (no uid)
+    // google_auth: create session and return tokens
     if (register_type === "google_auth") {
       const session_id = randomUUID();
       const access_token = createAccessToken({ id: newUser._id, session_id });
@@ -165,14 +193,12 @@ exports.register = async (req, res) => {
       });
     }
 
-    // Fallback (shouldn't be reached)
     return res.status(500).json({ IsSucces: false, message: "Server error" });
   } catch (err) {
     console.error("❌ Register Error:", err);
 
-    // If multer threw, handle gracefully
     if (err instanceof multer.MulterError) {
-      // if we uploaded to Cloudinary but DB save failed, attempt cleanup
+      // cleanup cloudinary if needed
       if (uploadedPublicId) {
         try {
           await cloudinary.uploader.destroy(uploadedPublicId, { resource_type: "image" });
@@ -183,7 +209,6 @@ exports.register = async (req, res) => {
       return res.status(400).json({ IsSucces: false, message: err.message });
     }
 
-    // if cloudinary uploaded but DB save failed, attempt to delete the uploaded image
     if (uploadedPublicId) {
       try {
         await cloudinary.uploader.destroy(uploadedPublicId, { resource_type: "image" });
@@ -221,7 +246,6 @@ exports.verifyOtpRegister = async (req, res) => {
       return res.status(400).json({ IsSucces: false, message: "Invalid OTP" });
     }
 
-    // OTP correct → update user
     user.otp_verified = true;
     user.otp_code = null;
     user.otp_expiry = null;
@@ -245,7 +269,7 @@ exports.verifyOtpRegister = async (req, res) => {
         name: user.name,
         email: user.email,
         mobile: user.mobile,
-        profile_image: getFullImageUrl(user.profile_image), // returns string or null
+        profile_image: getFullImageUrl(user.profile_image),
         register_type: user.register_type,
         otp_verified: user.otp_verified,
       },
@@ -259,7 +283,7 @@ exports.verifyOtpRegister = async (req, res) => {
 // ---------------- LOGIN ----------------
 exports.login = async (req, res) => {
   try {
-    const { email, password, login_type } = req.body;
+    const { email, password, login_type, provider_id, provider_uid } = req.body;
     if (!email) return res.status(400).json({ IsSucces: false, message: "Email required" });
 
     const user = await User.findOne({ email: String(email).toLowerCase() });
@@ -291,13 +315,20 @@ exports.login = async (req, res) => {
     }
 
     if (login_type === "google_auth") {
-      // Do NOT accept/store external uid anymore.
+      // If user exists but was manual -> reject to avoid takeover
+      if (user.register_type && user.register_type === "manual") {
+        return res.status(409).json({ IsSucces: false, message: "Account exists with manual registration. Use manual login." });
+      }
+
+      // Accept google_auth login: create session and return tokens
       const session_id = randomUUID();
       const access_token = createAccessToken({ id: user._id, session_id });
 
       user.session_id = session_id;
       user.access_token = access_token;
       user.otp_verified = true;
+      if (provider_id) user.provider_id = provider_id;
+      if (provider_uid) user.provider_uid = provider_uid;
       await user.save();
 
       return res.json({

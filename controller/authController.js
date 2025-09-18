@@ -41,6 +41,17 @@ exports.register = async (req, res) => {
   let uploadedPublicId = null;
   try {
     let { name, email, mobile, password, register_type, provider_id, provider_uid } = req.body;
+    // DEBUG: add at very top of exports.register (dev only)
+console.log('--- REGISTER HIT ---');
+console.log('headers:', req.headers ? Object.keys(req.headers) : {});
+console.log('body (keys):', req.body ? Object.keys(req.body) : {});
+console.log('body:', req.body);
+console.log('file present:', !!req.file);
+if (req.file) {
+  console.log('file keys:', Object.keys(req.file));
+  console.log('file size:', req.file.size);
+}
+
     if (email) email = String(email).toLowerCase();
 
     if (!["manual", "google_auth"].includes(register_type)) {

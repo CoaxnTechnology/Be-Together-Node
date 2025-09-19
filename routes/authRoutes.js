@@ -8,7 +8,7 @@ const {
   verifyOtpRegister,
   login,
   verifyOtpLogin,
-
+  resendOtp,
 } = require("../controller/authController");
 
 const router = express.Router();
@@ -23,6 +23,5 @@ router.post("/register", upload.single("profile_image"), register);
 router.post("/verify-otp-reg", verifyOtpRegister);
 router.post("/login", login);
 router.post("/verify-otp-login", verifyOtpLogin);
-router.post("/resend-otp", authController.resendOtp);
-;
+router.post("/resend-otp", resendOtp);
 module.exports = router;

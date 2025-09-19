@@ -507,48 +507,51 @@ exports.verifyOtpLogin = async (req, res) => {
   }
 };
 // ---------------- RESEND OTP (Unified for signup/login) ----------------
+// controller/authController.js
+const User = require("../model/User");
+const { generateOTP } = require("../utils/otp");
+const { sendOtpEmail } = require("../utils/email");
+
 exports.resendOtp = async (req, res) => {
   try {
-    let { email } = req.body;
+    const { email } = req.body;
 
     if (!email) {
-      return res.status(400).json({ IsSucces: false, message: "Email is required" });
+      return res
+        .status(400)
+        .json({ IsSucces: false, message: "Email is required" });
     }
 
-    email = String(email).toLowerCase();
-    const user = await User.findOne({ email });
-
+    const user = await User.findOne({ email: String(email).toLowerCase() });
     if (!user) {
-      return res.status(404).json({ IsSucces: false, message: "User not found" });
+      return res
+        .status(404)
+        .json({ IsSucces: false, message: "User not found" });
     }
 
-    // Only manual registration accounts require OTP
-    if (user.register_type !== "manual") {
-      return res.status(400).json({ IsSucces: false, message: "OTP not required for this account type" });
-    }
-
-    // Generate new OTP
+    // Generate OTP
     const { otp, expiry } = generateOTP();
+
+    // Save to user
     user.otp_code = otp;
     user.otp_expiry = expiry;
-    user.otp_verified = false; // mark OTP as unverified
+    user.otp_verified = false; // mark as unverified
     await user.save();
 
-    // Send OTP email (non-fatal)
-    try {
-      await sendOtpEmail(user.email, otp);
-    } catch (err) {
-      console.error("Failed to send OTP email (non-fatal):", err);
-    }
+    // Send OTP email (non-blocking)
+    sendOtpEmail(user.email, otp).catch((err) => {
+      console.error("OTP email failed:", err);
+    });
 
+    // Return response without exposing sensitive info
     return res.status(200).json({
       IsSucces: true,
       message: "OTP resent successfully",
-      otp,    // optional: remove in production
-      expiry, // optional: remove in production
     });
   } catch (error) {
-    console.error("Error in resendOtp:", error);
-    return res.status(500).json({ IsSucces: false, message: "Internal Server Error" });
+    console.error("Resend OTP error:", error);
+    return res
+      .status(500)
+      .json({ IsSucces: false, message: "Internal Server Error" });
   }
 };

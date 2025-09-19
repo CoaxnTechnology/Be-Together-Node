@@ -4,9 +4,12 @@ const mongoose = require("mongoose");
 const User = require("../model/User");
 const { createAccessToken } = require("../utils/jwt");
 const { generateOTP } = require("../utils/otp");
-const { sendOtpEmail } = require("../utils/email");
+const { sendOtpEmail,sendResetEmail } = require("../utils/email");
 const { getFullImageUrl } = require("../utils/image");
 const { randomUUID } = require("crypto");
+const crypto = require("crypto");
+const { createResetToken } = require("../utils/token");
+//const { sendResetEmail, sendOtpEmail } = require("../utils/email");
 const cloudinary = require("cloudinary").v2;
 const streamifier = require("streamifier");
 const multer = require("multer"); // for MulterError checks
@@ -612,6 +615,113 @@ exports.resendOtp = async (req, res) => {
     });
   } catch (err) {
     console.error("❌ Resend OTP Error:", err);
+    return res.status(500).json({ IsSucces: false, message: "Server error" });
+  }
+};
+
+// ---------------- FORGOT / RESET (single route) ----------------
+/**
+ * POST /auth/forgot-password
+ *
+ * Two modes depending on the request body:
+ * 1) Request reset link: body: { email }
+ * 2) Perform reset:     body: { email, token, new_password }
+ */
+exports.forgotOrResetPassword = async (req, res) => {
+  try {
+    const { email, token, new_password } = req.body;
+    if (!email) {
+      return res.status(400).json({ IsSucces: false, message: "Email required" });
+    }
+
+    const lowerEmail = String(email).toLowerCase();
+    const user = await User.findOne({ email: lowerEmail });
+    if (!user) {
+      // Keep same behavior as your other endpoints (404). You can also return generic response for security.
+      return res.status(404).json({ IsSucces: false, message: "User not found" });
+    }
+
+    // Mode 1: request reset (no token & no new_password provided)
+    if (!token && !new_password) {
+      // Optionally block google_auth accounts from password reset
+      if (user.register_type === "google_auth" || user.is_google_auth) {
+        return res.status(400).json({ IsSucces: false, message: "Password reset not allowed for Google accounts" });
+      }
+
+      // Optional cooldown for abuse prevention
+      const COOLDOWN_SECONDS = 60;
+      if (user.lastResetRequestAt) {
+        const elapsedSec = Math.floor((Date.now() - new Date(user.lastResetRequestAt).getTime()) / 1000);
+        if (elapsedSec < COOLDOWN_SECONDS) {
+          return res.status(429).json({
+            IsSucces: false,
+            message: `Please wait ${COOLDOWN_SECONDS - elapsedSec} seconds before requesting again.`,
+          });
+        }
+      }
+
+      // Generate secure token + hashed version
+      const { token: plainToken, hashed } = createResetToken();
+      const expiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour expiry
+
+      user.reset_password_token = hashed;
+      user.reset_password_expiry = expiry;
+      user.reset_password_used = false;
+      user.lastResetRequestAt = new Date();
+
+      await user.save();
+
+      // Send email with plaintext token link (best-effort)
+      try {
+        await sendResetEmail(user.email, plainToken);
+      } catch (emailErr) {
+        console.error("Failed to send reset email (non-fatal):", emailErr);
+        // Still respond success to avoid leaking info
+      }
+
+      return res.json({ IsSucces: true, message: "If the email is registered, a reset link has been sent." });
+    }
+
+    // Mode 2: perform reset (token + new_password provided)
+    if (!token || !new_password) {
+      return res.status(400).json({ IsSucces: false, message: "Token and new_password required to reset password." });
+    }
+
+    // check there's an active reset
+    if (!user.reset_password_token || !user.reset_password_expiry) {
+      return res.status(400).json({ IsSucces: false, message: "No active reset request found" });
+    }
+
+    if (user.reset_password_used) {
+      return res.status(400).json({ IsSucces: false, message: "This reset link has already been used" });
+    }
+
+    // check expiry
+    if (Date.now() > new Date(user.reset_password_expiry).getTime()) {
+      return res.status(400).json({ IsSucces: false, message: "Reset link expired" });
+    }
+
+    // validate token
+    const hashedToken = crypto.createHash("sha256").update(String(token)).digest("hex");
+    if (hashedToken !== user.reset_password_token) {
+      return res.status(400).json({ IsSucces: false, message: "Invalid reset token" });
+    }
+
+    // all good -> update password
+    const hashedPassword = await bcrypt.hash(String(new_password), 10);
+    user.hashed_password = hashedPassword;
+
+    // invalidate reset token so link cannot be reused
+    user.reset_password_token = null;
+    user.reset_password_expiry = null;
+    user.reset_password_used = true;
+    user.lastPasswordResetAt = new Date();
+
+    await user.save();
+
+    return res.json({ IsSucces: true, message: "Password updated successfully" });
+  } catch (err) {
+    console.error("❌ forgotOrResetPassword Error:", err);
     return res.status(500).json({ IsSucces: false, message: "Server error" });
   }
 };

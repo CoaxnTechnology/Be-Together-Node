@@ -45,7 +45,7 @@ const userSchema = new mongoose.Schema(
           times: [
             {
               start_time: { type: String, required: true }, // "09:00"
-              end_time: { type: String, required: true },   // "12:00"
+              end_time: { type: String, required: true }, // "12:00"
             },
           ],
         },
@@ -62,7 +62,11 @@ const userSchema = new mongoose.Schema(
     services: [{ type: mongoose.Schema.Types.ObjectId, ref: "Service" }],
     lastResendAt: { type: Date, default: null },
 
-
+    reset_password_token: { type: String, default: null }, // store hashed token
+    reset_password_expiry: { type: Date, default: null },
+    reset_password_used: { type: Boolean, default: false },
+    lastResetRequestAt: { type: Date, default: null }, // optional cooldown
+    lastPasswordResetAt: { type: Date, default: null },
     created_at: { type: Date, default: Date.now },
     updated_at: { type: Date, default: Date.now },
     last_login: { type: Date, default: null },

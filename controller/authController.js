@@ -506,90 +506,112 @@ exports.verifyOtpLogin = async (req, res) => {
     return res.status(500).json({ IsSucces: false, message: "Server error" });
   }
 };
-
-// Improved resendOtp - await, log, persist provider response
+// ---------------- RESEND OTP ----------------
+/**
+ * POST /auth/resend-otp
+ * body: { email: string, purpose?: "register" | "login" }
+ *
+ * Behavior:
+ * - ALWAYS generates a new OTP and expiry on every call (so previous OTPs are invalid immediately)
+ * - Updates otp_attempt_version (optional bookkeeping)
+ * - Enforces a resend cooldown
+ */
 exports.resendOtp = async (req, res) => {
   try {
-    console.log("--- RESEND OTP HIT ---");
-    console.log("headers:", req.headers ? Object.keys(req.headers) : {});
-    console.log("body:", req.body);
+    const { email, purpose = "register" } = req.body;
 
-    const { email } = req.body || {};
     if (!email) {
-      console.warn("resendOtp: missing email");
-      return res.status(400).json({ IsSucces: false, message: "Email is required" });
+      return res
+        .status(400)
+        .json({ IsSucces: false, message: "Email required" });
     }
 
-    const normalizedEmail = String(email).toLowerCase();
+    const lowerEmail = String(email).toLowerCase();
+    const user = await User.findOne({ email: lowerEmail });
 
-    // check DB connection for debugging
-    try { console.log("mongoose readyState:", require("mongoose").connection.readyState); } catch (e) {}
-
-    const user = await User.findOne({ email: normalizedEmail });
     if (!user) {
-      console.warn("resendOtp: user not found:", normalizedEmail);
-      return res.status(404).json({ IsSucces: false, message: "User not found" });
+      return res
+        .status(404)
+        .json({ IsSucces: false, message: "User not found" });
     }
 
-    // Generate OTP defensively
-    let otpObj;
-    try {
-      otpObj = generateOTP();
-      if (!otpObj || !otpObj.otp || !otpObj.expiry) {
-        throw new Error("generateOTP returned invalid object");
-      }
-    } catch (genErr) {
-      console.error("generateOTP failed:", genErr);
-      return res.status(500).json({ IsSucces: false, message: "Failed to generate OTP" });
-    }
-
-    user.otp_code = otpObj.otp;
-    user.otp_expiry = otpObj.expiry;
-    user.otp_verified = false;
-
-    // Save the OTP in DB BEFORE sending (so both flows match register/login)
-    try {
-      await user.save();
-    } catch (saveErr) {
-      console.error("user.save() failed:", saveErr);
-      return res.status(500).json({ IsSucces: false, message: "Failed to persist OTP" });
-    }
-
-    // Await the email send and persist provider response
-    try {
-      const info = await sendOtpEmail(user.email, otpObj.otp);
-      console.log("sendOtpEmail returned:", info && (info.messageId || info.response || info));
-
-      // Persist the send result for auditing
-      user.last_otp_sent_at = new Date();
-      user.last_otp_send_result = JSON.stringify({
-        ok: true,
-        messageId: info.messageId || null,
-        response: info.response || info,
-      });
-      await user.save();
-
-      return res.status(200).json({
-        IsSucces: true,
-        message: "OTP resent successfully",
-      });
-    } catch (sendErr) {
-      console.error("sendOtpEmail failed:", sendErr && (sendErr.stack || sendErr));
-
-      user.last_otp_sent_at = new Date();
-      user.last_otp_send_result = JSON.stringify({
-        ok: false,
-        error: sendErr && (sendErr.message || String(sendErr)),
-      });
-      await user.save();
-
-      return res.status(500).json({
+    // Only manual accounts use OTP flows
+    if (user.register_type === "google_auth" || user.is_google_auth) {
+      return res.status(400).json({
         IsSucces: false,
-        message: "Failed to send OTP email",
+        message: "OTP not required for Google accounts",
       });
     }
-  } catch (error) {
-    console.error("Resend OTP error (outer):", error && (error.stack || error));
-    return res.status(500).json({ IsSucces: false, message: "Internal Server Error" });
+
+    // Purpose checks
+    if (purpose === "register") {
+      if (user.otp_verified) {
+        return res.status(400).json({
+          IsSucces: false,
+          message: "Account already verified",
+        });
+      }
+    } else if (purpose === "login") {
+      if (!user.hashed_password) {
+        return res.status(400).json({
+          IsSucces: false,
+          message: "Login OTP not available for this account",
+        });
+      }
+    } else {
+      return res
+        .status(400)
+        .json({ IsSucces: false, message: "Invalid purpose" });
+    }
+
+    // Cooldown protection
+    const RESEND_COOLDOWN_SECONDS = 60; // tweak as needed
+    if (user.lastResendAt) {
+      const elapsed = Date.now() - new Date(user.lastResendAt).getTime();
+      const elapsedSec = Math.floor(elapsed / 1000);
+      if (elapsedSec < RESEND_COOLDOWN_SECONDS) {
+        const wait = RESEND_COOLDOWN_SECONDS - elapsedSec;
+        return res.status(429).json({
+          IsSucces: false,
+          message: `Please wait ${wait} seconds before requesting a new OTP.`,
+        });
+      }
+    }
+
+    // ALWAYS generate a new OTP -> this overwrites previous OTP and invalidates it immediately
+    const { otp, expiry } = generateOTP();
+
+    // Optional bookkeeping: version for OTP attempts (useful for logs or analytics)
+    if (typeof user.otp_attempt_version === "undefined" || user.otp_attempt_version === null) {
+      user.otp_attempt_version = 1;
+    } else {
+      user.otp_attempt_version = Number(user.otp_attempt_version) + 1;
+    }
+
+    // Overwrite OTP fields (immediately invalidates old OTP)
+    user.otp_code = String(otp);
+    user.otp_expiry = expiry;
+    user.otp_verified = false;
+    user.lastResendAt = new Date();
+
+    await user.save();
+
+    // Send email (best-effort)
+    try {
+      await sendOtpEmail(user.email, otp);
+    } catch (emailErr) {
+      console.error("Failed to send OTP email (non-fatal):", emailErr);
+      // Don't fail the request -- OTP is stored in DB regardless.
+    }
+
+    return res.json({
+      IsSucces: true,
+      message: "A new OTP has been generated and sent to your email.",
+      require_otp: true,
+      // note: DO NOT include the otp in responses in production
+    });
+  } catch (err) {
+    console.error("❌ Resend OTP Error:", err);
+    return res.status(500).json({ IsSucces: false, message: "Server error" });
   }
 };

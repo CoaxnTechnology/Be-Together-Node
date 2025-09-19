@@ -372,30 +372,13 @@ exports.editProfile = async (req, res) => {
 //       return res.status(400).json({ isSuccess: false, message: "email is required" });
 //     }
 
-//     // find user and populate services (full details)
-//     const user = await User.findOne({ email }).populate({
-//       path: "services",
-//       model: "Service",
-//       // select fields you want to return; remove select to return all
-//       select: [
-//         "_id",
-//         "title",
-//         "description",
-//         "location",
-//         "category",
-//         "tags",
-//         "service_type",
-//         "date",
-//         "start_time",
-//         "end_time",
-//         "recurring_days",
-//         "max_participants",
-//         "isFree",
-//         "price",
-//         "created_by",
-//         "created_at",
-//       ].join(" "),
-//     });
+//     // ✅ Find user and populate full service details
+//     const user = await User.findOne({ email })
+//       .populate({
+//         path: "services",
+//         model: "Service",
+//         select: "-__v -updated_at", // hide unneeded fields, keep all useful ones
+//       });
 
 //     if (!user) {
 //       return res.status(404).json({ isSuccess: false, message: "User not found" });
@@ -414,11 +397,16 @@ exports.editProfile = async (req, res) => {
 //         languages: user.languages || [],
 //         interests: user.interests || [], // plain strings
 //         availability: user.availability || [],
-//         services: user.services || [], // populated service documents
+//         servicesCount: user.services.length, // ✅ total services count
+//         services: user.services || [], // ✅ full service details
 //       },
 //     });
 //   } catch (err) {
 //     console.error("getUserProfileByEmail error:", err);
-//     res.status(500).json({ isSuccess: false, message: "Server error", error: err.message });
+//     res.status(500).json({
+//       isSuccess: false,
+//       message: "Server error",
+//       error: err.message,
+//     });
 //   }
 // };

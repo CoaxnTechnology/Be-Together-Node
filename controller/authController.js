@@ -17,7 +17,11 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-function uploadBufferToCloudinary(buffer, folder = "profile_images", publicId = null) {
+function uploadBufferToCloudinary(
+  buffer,
+  folder = "profile_images",
+  publicId = null
+) {
   return new Promise((resolve, reject) => {
     const opts = {
       folder,
@@ -27,10 +31,13 @@ function uploadBufferToCloudinary(buffer, folder = "profile_images", publicId = 
     };
     if (publicId) opts.public_id = publicId;
 
-    const uploadStream = cloudinary.uploader.upload_stream(opts, (error, result) => {
-      if (error) return reject(error);
-      resolve(result);
-    });
+    const uploadStream = cloudinary.uploader.upload_stream(
+      opts,
+      (error, result) => {
+        if (error) return reject(error);
+        resolve(result);
+      }
+    );
 
     streamifier.createReadStream(buffer).pipe(uploadStream);
   });
@@ -40,26 +47,38 @@ function uploadBufferToCloudinary(buffer, folder = "profile_images", publicId = 
 exports.register = async (req, res) => {
   let uploadedPublicId = null;
   try {
-    let { name, email, mobile, password, register_type, provider_id, provider_uid } = req.body;
+    let {
+      name,
+      email,
+      mobile,
+      password,
+      register_type,
+      provider_id,
+      provider_uid,
+    } = req.body;
     // DEBUG: add at very top of exports.register (dev only)
-console.log('--- REGISTER HIT ---');
-console.log('headers:', req.headers ? Object.keys(req.headers) : {});
-console.log('body (keys):', req.body ? Object.keys(req.body) : {});
-console.log('body:', req.body);
-console.log('file present:', !!req.file);
-if (req.file) {
-  console.log('file keys:', Object.keys(req.file));
-  console.log('file size:', req.file.size);
-}
+    console.log("--- REGISTER HIT ---");
+    console.log("headers:", req.headers ? Object.keys(req.headers) : {});
+    console.log("body (keys):", req.body ? Object.keys(req.body) : {});
+    console.log("body:", req.body);
+    console.log("file present:", !!req.file);
+    if (req.file) {
+      console.log("file keys:", Object.keys(req.file));
+      console.log("file size:", req.file.size);
+    }
 
     if (email) email = String(email).toLowerCase();
 
     if (!["manual", "google_auth"].includes(register_type)) {
-      return res.status(400).json({ IsSucces: false, message: "Invalid register_type." });
+      return res
+        .status(400)
+        .json({ IsSucces: false, message: "Invalid register_type." });
     }
 
     if (!email) {
-      return res.status(400).json({ IsSucces: false, message: "Email required." });
+      return res
+        .status(400)
+        .json({ IsSucces: false, message: "Email required." });
     }
 
     // check existing user BEFORE heavy work
@@ -69,7 +88,10 @@ if (req.file) {
     if (existing && register_type === "google_auth") {
       // If existing was created manually, reject to avoid potential clash
       if (existing.register_type && existing.register_type === "manual") {
-        return res.status(409).json({ IsSucces: false, message: "Email already registered with manual method." });
+        return res.status(409).json({
+          IsSucces: false,
+          message: "Email already registered with manual method.",
+        });
       }
 
       // existing is google_auth (or not set) -> create session and return tokens (idempotent)
@@ -104,7 +126,9 @@ if (req.file) {
 
     // If existing and trying to register manually -> error
     if (existing && register_type === "manual") {
-      return res.status(409).json({ IsSucces: false, message: "Email already registered." });
+      return res
+        .status(409)
+        .json({ IsSucces: false, message: "Email already registered." });
     }
 
     // Prepare fields based on registration type
@@ -115,7 +139,10 @@ if (req.file) {
 
     if (register_type === "manual") {
       if (!password) {
-        return res.status(400).json({ IsSucces: false, message: "Password required for manual registration." });
+        return res.status(400).json({
+          IsSucces: false,
+          message: "Password required for manual registration.",
+        });
       }
       hashedPassword = await bcrypt.hash(String(password), 10);
       const otpObj = generateOTP();
@@ -139,8 +166,14 @@ if (req.file) {
     } else if (req.file && req.file.buffer) {
       // server-side upload flow
       try {
-        const publicId = `user_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-        const result = await uploadBufferToCloudinary(req.file.buffer, "profile_images", publicId);
+        const publicId = `user_${Date.now()}_${Math.random()
+          .toString(36)
+          .slice(2, 8)}`;
+        const result = await uploadBufferToCloudinary(
+          req.file.buffer,
+          "profile_images",
+          publicId
+        );
         uploadedPublicId = result.public_id;
         profileImageUrl = result.secure_url || null;
       } catch (uploadErr) {
@@ -174,7 +207,9 @@ if (req.file) {
       } catch (emailErr) {
         console.error("Failed to send OTP email (non-fatal):", emailErr);
       }
-      return res.status(201).json({ IsSucces: true, message: "OTP sent. Please verify." });
+      return res
+        .status(201)
+        .json({ IsSucces: true, message: "OTP sent. Please verify." });
     }
 
     // google_auth: create session and return tokens
@@ -212,7 +247,9 @@ if (req.file) {
       // cleanup cloudinary if needed
       if (uploadedPublicId) {
         try {
-          await cloudinary.uploader.destroy(uploadedPublicId, { resource_type: "image" });
+          await cloudinary.uploader.destroy(uploadedPublicId, {
+            resource_type: "image",
+          });
         } catch (e) {
           console.error("cleanup failed", e);
         }
@@ -222,7 +259,9 @@ if (req.file) {
 
     if (uploadedPublicId) {
       try {
-        await cloudinary.uploader.destroy(uploadedPublicId, { resource_type: "image" });
+        await cloudinary.uploader.destroy(uploadedPublicId, {
+          resource_type: "image",
+        });
       } catch (e) {
         console.error("cleanup failed", e);
       }
@@ -236,27 +275,47 @@ if (req.file) {
 exports.verifyOtpRegister = async (req, res) => {
   try {
     let { email, otp } = req.body;
-    if (!email) return res.status(400).json({ IsSucces: false, message: "Email required" });
-    if (!otp) return res.status(400).json({ IsSucces: false, message: "OTP required" });
+    if (!email) {
+      return res
+        .status(400)
+        .json({ IsSucces: false, message: "Email required" });
+    }
+    if (!otp) {
+      return res.status(400).json({ IsSucces: false, message: "OTP required" });
+    }
 
     email = String(email).toLowerCase();
     otp = String(otp);
 
     const user = await User.findOne({ email });
-    if (!user) return res.status(404).json({ IsSucces: false, message: "User not found" });
-
-    if (!user.otp_code || !user.otp_expiry) {
-      return res.status(400).json({ IsSucces: false, message: "No OTP generated" });
+    if (!user) {
+      return res
+        .status(404)
+        .json({ IsSucces: false, message: "User not found" });
     }
 
+    if (!user.otp_code || !user.otp_expiry) {
+      return res
+        .status(400)
+        .json({ IsSucces: false, message: "No OTP generated" });
+    }
+
+    // Debug logs
+    console.log("Now:", new Date());
+    console.log("From DB:", user.otp_expiry, typeof user.otp_expiry);
+    console.log("getTime:", new Date(user.otp_expiry).getTime());
+
+    // Expiry check
     if (Date.now() > new Date(user.otp_expiry).getTime()) {
       return res.status(400).json({ IsSucces: false, message: "OTP expired" });
     }
 
+    // OTP match check
     if (String(user.otp_code) !== otp) {
       return res.status(400).json({ IsSucces: false, message: "Invalid OTP" });
     }
 
+    // Mark verified
     user.otp_verified = true;
     user.otp_code = null;
     user.otp_expiry = null;
@@ -269,7 +328,7 @@ exports.verifyOtpRegister = async (req, res) => {
 
     await user.save();
 
-    res.json({
+    return res.json({
       IsSucces: true,
       message: "Registered successfully",
       access_token,
@@ -295,16 +354,31 @@ exports.verifyOtpRegister = async (req, res) => {
 exports.login = async (req, res) => {
   try {
     const { email, password, login_type, provider_id, provider_uid } = req.body;
-    if (!email) return res.status(400).json({ IsSucces: false, message: "Email required" });
+    if (!email)
+      return res
+        .status(400)
+        .json({ IsSucces: false, message: "Email required" });
 
     const user = await User.findOne({ email: String(email).toLowerCase() });
-    if (!user) return res.status(404).json({ IsSucces: false, message: "User not found" });
+    if (!user)
+      return res
+        .status(404)
+        .json({ IsSucces: false, message: "User not found" });
 
     if (login_type === "manual") {
-      if (!user.hashed_password || !password) return res.status(400).json({ IsSucces: false, message: "Password required" });
+      if (!user.hashed_password || !password)
+        return res
+          .status(400)
+          .json({ IsSucces: false, message: "Password required" });
 
-      const valid = await bcrypt.compare(String(password), user.hashed_password);
-      if (!valid) return res.status(401).json({ IsSucces: false, message: "Invalid password" });
+      const valid = await bcrypt.compare(
+        String(password),
+        user.hashed_password
+      );
+      if (!valid)
+        return res
+          .status(401)
+          .json({ IsSucces: false, message: "Invalid password" });
 
       const { otp, expiry } = generateOTP();
       user.otp_code = otp;
@@ -328,7 +402,10 @@ exports.login = async (req, res) => {
     if (login_type === "google_auth") {
       // If user exists but was manual -> reject to avoid takeover
       if (user.register_type && user.register_type === "manual") {
-        return res.status(409).json({ IsSucces: false, message: "Account exists with manual registration. Use manual login." });
+        return res.status(409).json({
+          IsSucces: false,
+          message: "Account exists with manual registration. Use manual login.",
+        });
       }
 
       // Accept google_auth login: create session and return tokens
@@ -360,7 +437,9 @@ exports.login = async (req, res) => {
       });
     }
 
-    return res.status(400).json({ IsSucces: false, message: "Invalid login_type" });
+    return res
+      .status(400)
+      .json({ IsSucces: false, message: "Invalid login_type" });
   } catch (err) {
     console.error("❌ Login Error:", err);
     return res.status(500).json({ IsSucces: false, message: "Server error" });
@@ -371,17 +450,29 @@ exports.login = async (req, res) => {
 exports.verifyOtpLogin = async (req, res) => {
   try {
     const { email, otp } = req.body;
-    if (!email) return res.status(400).json({ IsSucces: false, message: "Email required" });
-    if (!otp) return res.status(400).json({ IsSucces: false, message: "OTP required" });
+    if (!email)
+      return res
+        .status(400)
+        .json({ IsSucces: false, message: "Email required" });
+    if (!otp)
+      return res.status(400).json({ IsSucces: false, message: "OTP required" });
 
     const user = await User.findOne({ email: String(email).toLowerCase() });
-    if (!user) return res.status(404).json({ IsSucces: false, message: "User not found" });
+    if (!user)
+      return res
+        .status(404)
+        .json({ IsSucces: false, message: "User not found" });
 
-    if (!user.otp_code || !user.otp_expiry) return res.status(400).json({ IsSucces: false, message: "No OTP generated" });
+    if (!user.otp_code || !user.otp_expiry)
+      return res
+        .status(400)
+        .json({ IsSucces: false, message: "No OTP generated" });
 
-    if (Date.now() > new Date(user.otp_expiry).getTime()) return res.status(400).json({ IsSucces: false, message: "OTP expired" });
+    if (Date.now() > new Date(user.otp_expiry).getTime())
+      return res.status(400).json({ IsSucces: false, message: "OTP expired" });
 
-    if (String(user.otp_code) !== String(otp)) return res.status(400).json({ IsSucces: false, message: "Invalid OTP" });
+    if (String(user.otp_code) !== String(otp))
+      return res.status(400).json({ IsSucces: false, message: "Invalid OTP" });
 
     user.otp_verified = true;
     user.otp_code = null;
@@ -413,5 +504,51 @@ exports.verifyOtpLogin = async (req, res) => {
   } catch (err) {
     console.error("❌ Verify OTP (login) Error:", err);
     return res.status(500).json({ IsSucces: false, message: "Server error" });
+  }
+};
+// ---------------- RESEND OTP (Unified for signup/login) ----------------
+exports.resendOtp = async (req, res) => {
+  try {
+    let { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ IsSucces: false, message: "Email is required" });
+    }
+
+    email = String(email).toLowerCase();
+    const user = await User.findOne({ email });
+
+    if (!user) {
+      return res.status(404).json({ IsSucces: false, message: "User not found" });
+    }
+
+    // Only manual registration accounts require OTP
+    if (user.register_type !== "manual") {
+      return res.status(400).json({ IsSucces: false, message: "OTP not required for this account type" });
+    }
+
+    // Generate new OTP
+    const { otp, expiry } = generateOTP();
+    user.otp_code = otp;
+    user.otp_expiry = expiry;
+    user.otp_verified = false; // mark OTP as unverified
+    await user.save();
+
+    // Send OTP email (non-fatal)
+    try {
+      await sendOtpEmail(user.email, otp);
+    } catch (err) {
+      console.error("Failed to send OTP email (non-fatal):", err);
+    }
+
+    return res.status(200).json({
+      IsSucces: true,
+      message: "OTP resent successfully",
+      otp,    // optional: remove in production
+      expiry, // optional: remove in production
+    });
+  } catch (error) {
+    console.error("Error in resendOtp:", error);
+    return res.status(500).json({ IsSucces: false, message: "Internal Server Error" });
   }
 };

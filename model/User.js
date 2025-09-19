@@ -60,6 +60,8 @@ const userSchema = new mongoose.Schema(
     interests: { type: [String], default: [] },
 
     services: [{ type: mongoose.Schema.Types.ObjectId, ref: "Service" }],
+    lastResendAt: { type: Date, default: null },
+
 
     created_at: { type: Date, default: Date.now },
     updated_at: { type: Date, default: Date.now },

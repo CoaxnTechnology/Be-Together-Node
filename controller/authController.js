@@ -506,48 +506,90 @@ exports.verifyOtpLogin = async (req, res) => {
     return res.status(500).json({ IsSucces: false, message: "Server error" });
   }
 };
-// ---------------- RESEND OTP (Unified for signup/login) ----------------
 
+// Improved resendOtp - await, log, persist provider response
 exports.resendOtp = async (req, res) => {
   try {
-    const { email } = req.body;
+    console.log("--- RESEND OTP HIT ---");
+    console.log("headers:", req.headers ? Object.keys(req.headers) : {});
+    console.log("body:", req.body);
 
+    const { email } = req.body || {};
     if (!email) {
-      return res
-        .status(400)
-        .json({ IsSucces: false, message: "Email is required" });
+      console.warn("resendOtp: missing email");
+      return res.status(400).json({ IsSucces: false, message: "Email is required" });
     }
 
-    const user = await User.findOne({ email: String(email).toLowerCase() });
+    const normalizedEmail = String(email).toLowerCase();
+
+    // check DB connection for debugging
+    try { console.log("mongoose readyState:", require("mongoose").connection.readyState); } catch (e) {}
+
+    const user = await User.findOne({ email: normalizedEmail });
     if (!user) {
-      return res
-        .status(404)
-        .json({ IsSucces: false, message: "User not found" });
+      console.warn("resendOtp: user not found:", normalizedEmail);
+      return res.status(404).json({ IsSucces: false, message: "User not found" });
     }
 
-    // Generate OTP
-    const { otp, expiry } = generateOTP();
+    // Generate OTP defensively
+    let otpObj;
+    try {
+      otpObj = generateOTP();
+      if (!otpObj || !otpObj.otp || !otpObj.expiry) {
+        throw new Error("generateOTP returned invalid object");
+      }
+    } catch (genErr) {
+      console.error("generateOTP failed:", genErr);
+      return res.status(500).json({ IsSucces: false, message: "Failed to generate OTP" });
+    }
 
-    // Save to user
-    user.otp_code = otp;
-    user.otp_expiry = expiry;
-    user.otp_verified = false; // mark as unverified
-    await user.save();
+    user.otp_code = otpObj.otp;
+    user.otp_expiry = otpObj.expiry;
+    user.otp_verified = false;
 
-    // Send OTP email (non-blocking)
-    sendOtpEmail(user.email, otp).catch((err) => {
-      console.error("OTP email failed:", err);
-    });
+    // Save the OTP in DB BEFORE sending (so both flows match register/login)
+    try {
+      await user.save();
+    } catch (saveErr) {
+      console.error("user.save() failed:", saveErr);
+      return res.status(500).json({ IsSucces: false, message: "Failed to persist OTP" });
+    }
 
-    // Return response without exposing sensitive info
-    return res.status(200).json({
-      IsSucces: true,
-      message: "OTP resent successfully",
-    });
+    // Await the email send and persist provider response
+    try {
+      const info = await sendOtpEmail(user.email, otpObj.otp);
+      console.log("sendOtpEmail returned:", info && (info.messageId || info.response || info));
+
+      // Persist the send result for auditing
+      user.last_otp_sent_at = new Date();
+      user.last_otp_send_result = JSON.stringify({
+        ok: true,
+        messageId: info.messageId || null,
+        response: info.response || info,
+      });
+      await user.save();
+
+      return res.status(200).json({
+        IsSucces: true,
+        message: "OTP resent successfully",
+      });
+    } catch (sendErr) {
+      console.error("sendOtpEmail failed:", sendErr && (sendErr.stack || sendErr));
+
+      user.last_otp_sent_at = new Date();
+      user.last_otp_send_result = JSON.stringify({
+        ok: false,
+        error: sendErr && (sendErr.message || String(sendErr)),
+      });
+      await user.save();
+
+      return res.status(500).json({
+        IsSucces: false,
+        message: "Failed to send OTP email",
+      });
+    }
   } catch (error) {
-    console.error("Resend OTP error:", error);
-    return res
-      .status(500)
-      .json({ IsSucces: false, message: "Internal Server Error" });
+    console.error("Resend OTP error (outer):", error && (error.stack || error));
+    return res.status(500).json({ IsSucces: false, message: "Internal Server Error" });
   }
 };

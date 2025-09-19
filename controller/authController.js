@@ -507,10 +507,6 @@ exports.verifyOtpLogin = async (req, res) => {
   }
 };
 // ---------------- RESEND OTP (Unified for signup/login) ----------------
-// controller/authController.js
-const User = require("../model/User");
-const { generateOTP } = require("../utils/otp");
-const { sendOtpEmail } = require("../utils/email");
 
 exports.resendOtp = async (req, res) => {
   try {

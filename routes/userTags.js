@@ -4,6 +4,6 @@ const router = express.Router();
 const { updateUserTags } = require("../controller/updateUserTags");
 //const { checkAuth } = require("../middleware/auth"); // assume exists
 
-router.post("/users/:userId/tags", updateUserTags);
+router.post("/:userId/tags", updateUserTags);
 
 module.exports = router;

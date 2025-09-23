@@ -8,10 +8,10 @@ const mongoose = require("mongoose");
  */
 async function updateUserTags(req, res) {
   try {
-    const userIdPath = req.params.userId;
-    const userIdToken = req.user && req.user.id; // auth middleware must set req.user
+    const userIdBody  = req.params.userId;
+    //const userIdToken = req.user && req.user.id; // auth middleware must set req.user
     if (!userIdToken) return res.status(401).json({ error: "Unauthorized" });
-    if (userIdPath !== userIdToken)
+    if (userIdBody  !== userIdToken)
       return res.status(403).json({ error: "Forbidden" });
 
     const { type, tags, action = "add", categoryId } = req.body;
@@ -77,7 +77,7 @@ async function updateUserTags(req, res) {
     }
 
     // update user
-    const user = await User.findByIdAndUpdate(userIdPath, update, {
+    const user = await User.findByIdAndUpdate(userIdBody , update, {
       new: true,
     }).select(field);
     if (!user) return res.status(404).json({ error: "User not found" });
@@ -87,12 +87,12 @@ async function updateUserTags(req, res) {
       const catFilter = { categoryId: Number(categoryId) };
       if (action === "add") {
         await Category.updateOne(catFilter, {
-          $addToSet: { users: mongoose.Types.ObjectId(userIdPath) },
+          $addToSet: { users: mongoose.Types.ObjectId(userIdBody ) },
         });
       } else {
         // remove
         await Category.updateOne(catFilter, {
-          $pull: { users: mongoose.Types.ObjectId(userIdPath) },
+          $pull: { users: mongoose.Types.ObjectId(userIdBody ) },
         });
       }
     } catch (catErr) {
@@ -114,3 +114,5 @@ async function updateUserTags(req, res) {
 }
 
 module.exports = { updateUserTags };
+//68d27e89dff32aa270fe3b52
+//eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY4ZDI3ZTg5ZGZmMzJhYTI3MGZlM2I1MiIsInNlc3Npb25faWQiOiJiZWJkYzVlOS03ZjFlLTQzYjMtYmUyYi1jYWYyMGM3OTFiNzciLCJpYXQiOjE3NTg2MjU1MzEsImV4cCI6MTc1OTIzMDMzMX0.-YXbwUXCllDIyQvdFZOsKAaXaurwLxhHdmsDaqasGF8

@@ -6,7 +6,8 @@ const cors = require("cors");
 const authRoutes = require("./routes/authRoutes");
 const profileRoutes = require("./routes/profileRoutes");
 const categoryRoutes = require("./routes/categoryRoutes");
-
+const serviceRoutes = require("./routes/serviceRoutes");
+const userTags = require("./routes/userTags")
 const app = express();
 
 // Middleware
@@ -30,8 +31,8 @@ app.get("/terms", (req, res) => {
 app.use("/api/auth", authRoutes);
 app.use("/api", profileRoutes);
 app.use("/api/admin/categories", categoryRoutes);
-
-
+app.use("/api/service", serviceRoutes);
+app.use("/api/onbording",userTags)
 // Connect to MongoDB (live Atlas)
 mongoose
   .connect(process.env.MONGO_URI, {

@@ -58,6 +58,7 @@ const userSchema = new mongoose.Schema(
 
     // INTERESTS: store canonical category tags (strings)
     interests: { type: [String], default: [] },
+    offeredTags: { type: [String], default: [] },
 
     services: [{ type: mongoose.Schema.Types.ObjectId, ref: "Service" }],
     lastResendAt: { type: Date, default: null },

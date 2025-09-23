@@ -145,13 +145,11 @@ exports.editProfile = async (req, res) => {
 
     // Basic fields
     if (typeof name === "string" && name.trim() === "") {
-      return res
-        .status(400)
-        .json({
-          isSuccess: false,
-          message: "Name cannot be empty",
-          data: null,
-        });
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Name cannot be empty",
+        data: null,
+      });
     }
     if (typeof name === "string" && name.trim() !== "") user.name = name.trim();
     if (typeof bio === "string") user.bio = bio.trim();
@@ -211,13 +209,11 @@ exports.editProfile = async (req, res) => {
         }
       } catch (uploadErr) {
         console.error("Cloudinary upload failed in editProfile:", uploadErr);
-        return res
-          .status(500)
-          .json({
-            isSuccess: false,
-            message: "Image upload failed",
-            error: uploadErr.message,
-          });
+        return res.status(500).json({
+          isSuccess: false,
+          message: "Image upload failed",
+          error: uploadErr.message,
+        });
       }
     }
 
@@ -277,13 +273,11 @@ exports.editProfile = async (req, res) => {
           });
 
           if (!foundCategories.length) {
-            return res
-              .status(400)
-              .json({
-                isSuccess: false,
-                message: "No matching interests found",
-                data: null,
-              });
+            return res.status(400).json({
+              isSuccess: false,
+              message: "No matching interests found",
+              data: null,
+            });
           }
 
           // Build a canonical tag map from matched categories (lowercase -> canonicalTag)
@@ -396,6 +390,7 @@ exports.editProfile = async (req, res) => {
 //         city: user.city || "",
 //         languages: user.languages || [],
 //         interests: user.interests || [], // plain strings
+//offeredTags: user.offeredTags || [],
 //         availability: user.availability || [],
 //         servicesCount: user.services.length, // ✅ total services count
 //         services: user.services || [], // ✅ full service details

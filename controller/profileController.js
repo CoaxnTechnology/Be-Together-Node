@@ -60,46 +60,46 @@ async function deleteCloudinaryImage(publicId) {
 }
 
 // ---------------- GET Profile ----------------
-exports.getUserProfileByEmail = async (req, res) => {
-  try {
-    const { email } = req.body;
+// exports.getUserProfileByEmail = async (req, res) => {
+//   try {
+//     const { email } = req.body;
 
-    if (!email) {
-      return res
-        .status(400)
-        .json({ isSuccess: false, message: "email is required" });
-    }
+//     if (!email) {
+//       return res
+//         .status(400)
+//         .json({ isSuccess: false, message: "email is required" });
+//     }
 
-    const user = await User.findOne({ email }).populate("interests");
+//     const user = await User.findOne({ email }).populate("interests");
 
-    if (!user) {
-      return res
-        .status(404)
-        .json({ isSuccess: false, message: "User not found" });
-    }
+//     if (!user) {
+//       return res
+//         .status(404)
+//         .json({ isSuccess: false, message: "User not found" });
+//     }
 
-    res.json({
-      isSuccess: true,
-      message: "Profile fetched successfully",
-      data: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        profile_image: getFullImageUrl(user.profile_image),
-        bio: user.bio || "",
-        city: user.city || "",
-        languages: user.languages || [],
-        interests: user.interests || [],
-        availability: user.availability || [],
-      },
-    });
-  } catch (err) {
-    console.error("getUserProfileByEmail error:", err);
-    res
-      .status(500)
-      .json({ isSuccess: false, message: "Server error", error: err.message });
-  }
-};
+//     res.json({
+//       isSuccess: true,
+//       message: "Profile fetched successfully",
+//       data: {
+//         id: user._id,
+//         name: user.name,
+//         email: user.email,
+//         profile_image: getFullImageUrl(user.profile_image),
+//         bio: user.bio || "",
+//         city: user.city || "",
+//         languages: user.languages || [],
+//         interests: user.interests || [],
+//         availability: user.availability || [],
+//       },
+//     });
+//   } catch (err) {
+//     console.error("getUserProfileByEmail error:", err);
+//     res
+//       .status(500)
+//       .json({ isSuccess: false, message: "Server error", error: err.message });
+//   }
+// };
 
 // ---------------- UPDATE Profile ----------------
 // ---------------- UPDATE Profile ----------------
@@ -358,50 +358,50 @@ exports.editProfile = async (req, res) => {
     return String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
 };
-// exports.getUserProfileByEmail = async (req, res) => {
-//   try {
-//     const { email } = req.body;
+exports.getUserProfileByEmail = async (req, res) => {
+  try {
+    const { email } = req.body;
 
-//     if (!email) {
-//       return res.status(400).json({ isSuccess: false, message: "email is required" });
-//     }
+    if (!email) {
+      return res.status(400).json({ isSuccess: false, message: "email is required" });
+    }
 
-//     // ✅ Find user and populate full service details
-//     const user = await User.findOne({ email })
-//       .populate({
-//         path: "services",
-//         model: "Service",
-//         select: "-__v -updated_at", // hide unneeded fields, keep all useful ones
-//       });
+    // ✅ Find user and populate full service details
+    const user = await User.findOne({ email })
+      .populate({
+        path: "services",
+        model: "Service",
+        select: "-__v -updated_at", // hide unneeded fields, keep all useful ones
+      });
 
-//     if (!user) {
-//       return res.status(404).json({ isSuccess: false, message: "User not found" });
-//     }
+    if (!user) {
+      return res.status(404).json({ isSuccess: false, message: "User not found" });
+    }
 
-//     res.json({
-//       isSuccess: true,
-//       message: "Profile fetched successfully",
-//       data: {
-//         id: user._id,
-//         name: user.name,
-//         email: user.email,
-//         profile_image: getFullImageUrl(user.profile_image),
-//         bio: user.bio || "",
-//         city: user.city || "",
-//         languages: user.languages || [],
-//         interests: user.interests || [], // plain strings
-//offeredTags: user.offeredTags || [],
-//         availability: user.availability || [],
-//         servicesCount: user.services.length, // ✅ total services count
-//         services: user.services || [], // ✅ full service details
-//       },
-//     });
-//   } catch (err) {
-//     console.error("getUserProfileByEmail error:", err);
-//     res.status(500).json({
-//       isSuccess: false,
-//       message: "Server error",
-//       error: err.message,
-//     });
-//   }
-// };
+    res.json({
+      isSuccess: true,
+      message: "Profile fetched successfully",
+      data: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        profile_image: getFullImageUrl(user.profile_image),
+        bio: user.bio || "",
+        city: user.city || "",
+        languages: user.languages || [],
+        interests: user.interests || [], // plain strings
+offeredTags: user.offeredTags || [],
+        availability: user.availability || [],
+        servicesCount: user.services.length, // ✅ total services count
+        services: user.services || [], // ✅ full service details
+      },
+    });
+  } catch (err) {
+    console.error("getUserProfileByEmail error:", err);
+    res.status(500).json({
+      isSuccess: false,
+      message: "Server error",
+      error: err.message,
+    });
+  }
+};

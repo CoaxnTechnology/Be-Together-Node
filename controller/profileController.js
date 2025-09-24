@@ -58,8 +58,6 @@ async function deleteCloudinaryImage(publicId) {
     console.error("deleteCloudinaryImage error (non-fatal):", err);
   }
 }
-
-// ---------------- UPDATE Profile ----------------
 // ---------------- UPDATE Profile ----------------
 exports.editProfile = async (req, res) => {
   try {
@@ -85,6 +83,7 @@ exports.editProfile = async (req, res) => {
 
     const rawLanguages = tryParse(req.body.languages);
     const rawInterests = tryParse(req.body.interests);
+    const rawOfferedTags = tryParse(req.body.offeredTags);
 
     // Identify user
     let user = null;
@@ -199,8 +198,6 @@ exports.editProfile = async (req, res) => {
     }
 
     // ---------- Interests -> store ONLY canonical tags from matched Categories that user selected ----------
-    // This will validate user-selected tags against Category.tags (case-insensitive),
-    // map to canonical tag strings from DB, dedupe and store only those tags the user actually selected.
     if (rawInterests !== undefined) {
       if (!Array.isArray(rawInterests)) {
         return res
@@ -211,7 +208,6 @@ exports.editProfile = async (req, res) => {
       if (rawInterests.length === 0) {
         user.interests = [];
       } else {
-        // sanitize input tags, remove empty
         const inputClean = rawInterests
           .map((t) => (typeof t === "string" ? t.trim() : ""))
           .filter(Boolean);
@@ -219,12 +215,10 @@ exports.editProfile = async (req, res) => {
         if (!inputClean.length) {
           user.interests = [];
         } else {
-          // build case-insensitive regexes to match Category.tags entries
           const tagRegexes = inputClean.map(
             (t) => new RegExp(`^${escapeRegExp(t)}$`, "i")
           );
 
-          // find categories that have any of those tags
           const foundCategories = await Category.find({
             tags: { $in: tagRegexes },
           });
@@ -237,7 +231,6 @@ exports.editProfile = async (req, res) => {
             });
           }
 
-          // Build a canonical tag map from matched categories (lowercase -> canonicalTag)
           const canonicalMap = new Map();
           for (const c of foundCategories) {
             if (Array.isArray(c.tags)) {
@@ -250,15 +243,12 @@ exports.editProfile = async (req, res) => {
             }
           }
 
-          // Keep only tags that user explicitly selected, using canonical tag strings
           const result = [];
           const seen = new Set();
           for (const inp of inputClean) {
             const key = inp.toLowerCase();
             const canonical = canonicalMap.get(key);
             if (!canonical) {
-              // If you want to accept user raw values when no canonical found, push inp here instead.
-              // For now we skip unknown tags to enforce canonical validation.
               continue;
             }
             if (!seen.has(key)) {
@@ -272,10 +262,77 @@ exports.editProfile = async (req, res) => {
       }
     }
 
-    await user.save();
+    // ---------- OfferedTags -> store ONLY canonical tags from matched Categories that user selected ----------
+    if (rawOfferedTags !== undefined) {
+      if (!Array.isArray(rawOfferedTags)) {
+        return res
+          .status(400)
+          .json({ isSuccess: false, message: "offeredTags must be an array" });
+      }
 
-    // NOTE: do NOT populate interests because now it's an array of strings
-    // user = await user.populate("interests");
+      if (rawOfferedTags.length === 0) {
+        user.offeredTags = [];
+      } else {
+        // Clean input
+        const inputClean = rawOfferedTags
+          .map((t) => (typeof t === "string" ? t.trim() : ""))
+          .filter(Boolean);
+
+        if (!inputClean.length) {
+          user.offeredTags = [];
+        } else {
+          // Build regexes and query categories for matching tags
+          const tagRegexes = inputClean.map(
+            (t) => new RegExp(`^${escapeRegExp(t)}$`, "i")
+          );
+
+          const foundCategories = await Category.find({
+            tags: { $in: tagRegexes },
+          });
+
+          if (!foundCategories.length) {
+            // If no canonical tags found, return error to force canonical selection
+            return res.status(400).json({
+              isSuccess: false,
+              message: "No matching offeredTags found",
+              data: null,
+            });
+          }
+
+          // Build canonical map from matched categories
+          const canonicalMap = new Map();
+          for (const c of foundCategories) {
+            if (Array.isArray(c.tags)) {
+              for (const tg of c.tags) {
+                if (typeof tg === "string") {
+                  const trimmed = tg.trim();
+                  canonicalMap.set(trimmed.toLowerCase(), trimmed);
+                }
+              }
+            }
+          }
+
+          const result = [];
+          const seen = new Set();
+          for (const inp of inputClean) {
+            const key = inp.toLowerCase();
+            const canonical = canonicalMap.get(key);
+            if (!canonical) {
+              // Skip unknown offeredTag values (you could alternatively push raw value)
+              continue;
+            }
+            if (!seen.has(key)) {
+              seen.add(key);
+              result.push(canonical);
+            }
+          }
+
+          user.offeredTags = result;
+        }
+      }
+    }
+
+    await user.save();
 
     return res.json({
       isSuccess: true,
@@ -290,6 +347,7 @@ exports.editProfile = async (req, res) => {
         city: user.city,
         languages: user.languages || [],
         interests: user.interests || [],
+        offeredTags: user.offeredTags || [],
       },
     });
   } catch (err) {
@@ -304,6 +362,7 @@ exports.editProfile = async (req, res) => {
     return String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
 };
+
 exports.getUserProfileByEmail = async (req, res) => {
   try {
     const { email } = req.body;

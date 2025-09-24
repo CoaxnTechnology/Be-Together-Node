@@ -59,48 +59,6 @@ async function deleteCloudinaryImage(publicId) {
   }
 }
 
-// ---------------- GET Profile ----------------
-// exports.getUserProfileByEmail = async (req, res) => {
-//   try {
-//     const { email } = req.body;
-
-//     if (!email) {
-//       return res
-//         .status(400)
-//         .json({ isSuccess: false, message: "email is required" });
-//     }
-
-//     const user = await User.findOne({ email }).populate("interests");
-
-//     if (!user) {
-//       return res
-//         .status(404)
-//         .json({ isSuccess: false, message: "User not found" });
-//     }
-
-//     res.json({
-//       isSuccess: true,
-//       message: "Profile fetched successfully",
-//       data: {
-//         id: user._id,
-//         name: user.name,
-//         email: user.email,
-//         profile_image: getFullImageUrl(user.profile_image),
-//         bio: user.bio || "",
-//         city: user.city || "",
-//         languages: user.languages || [],
-//         interests: user.interests || [],
-//         availability: user.availability || [],
-//       },
-//     });
-//   } catch (err) {
-//     console.error("getUserProfileByEmail error:", err);
-//     res
-//       .status(500)
-//       .json({ isSuccess: false, message: "Server error", error: err.message });
-//   }
-// };
-
 // ---------------- UPDATE Profile ----------------
 // ---------------- UPDATE Profile ----------------
 exports.editProfile = async (req, res) => {
@@ -127,7 +85,6 @@ exports.editProfile = async (req, res) => {
 
     const rawLanguages = tryParse(req.body.languages);
     const rawInterests = tryParse(req.body.interests);
-    const rawAvailability = tryParse(req.body.availability);
 
     // Identify user
     let user = null;
@@ -315,16 +272,6 @@ exports.editProfile = async (req, res) => {
       }
     }
 
-    // Availability
-    if (rawAvailability !== undefined) {
-      if (!Array.isArray(rawAvailability)) {
-        return res
-          .status(400)
-          .json({ isSuccess: false, message: "availability must be an array" });
-      }
-      user.availability = rawAvailability;
-    }
-
     await user.save();
 
     // NOTE: do NOT populate interests because now it's an array of strings
@@ -343,7 +290,6 @@ exports.editProfile = async (req, res) => {
         city: user.city,
         languages: user.languages || [],
         interests: user.interests || [],
-        availability: user.availability || [],
       },
     });
   } catch (err) {
@@ -363,19 +309,22 @@ exports.getUserProfileByEmail = async (req, res) => {
     const { email } = req.body;
 
     if (!email) {
-      return res.status(400).json({ isSuccess: false, message: "email is required" });
+      return res
+        .status(400)
+        .json({ isSuccess: false, message: "email is required" });
     }
 
     // ✅ Find user and populate full service details
-    const user = await User.findOne({ email })
-      .populate({
-        path: "services",
-        model: "Service",
-        select: "-__v -updated_at", // hide unneeded fields, keep all useful ones
-      });
+    const user = await User.findOne({ email }).populate({
+      path: "services",
+      model: "Service",
+      select: "-__v -updated_at", // hide unneeded fields, keep all useful ones
+    });
 
     if (!user) {
-      return res.status(404).json({ isSuccess: false, message: "User not found" });
+      return res
+        .status(404)
+        .json({ isSuccess: false, message: "User not found" });
     }
 
     res.json({
@@ -390,8 +339,8 @@ exports.getUserProfileByEmail = async (req, res) => {
         city: user.city || "",
         languages: user.languages || [],
         interests: user.interests || [], // plain strings
-offeredTags: user.offeredTags || [],
-        availability: user.availability || [],
+        offeredTags: user.offeredTags || [],
+
         servicesCount: user.services.length, // ✅ total services count
         services: user.services || [], // ✅ full service details
       },

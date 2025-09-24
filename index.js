@@ -7,7 +7,8 @@ const authRoutes = require("./routes/authRoutes");
 const profileRoutes = require("./routes/profileRoutes");
 const categoryRoutes = require("./routes/categoryRoutes");
 const serviceRoutes = require("./routes/serviceRoutes");
-const userTags = require("./routes/userTags")
+const userTags = require("./routes/userTags");
+const  location  = require("./routes/location");
 const app = express();
 
 // Middleware
@@ -32,7 +33,8 @@ app.use("/api/auth", authRoutes);
 app.use("/api", profileRoutes);
 app.use("/api/admin/categories", categoryRoutes);
 app.use("/api/service", serviceRoutes);
-app.use("/api/onbording",userTags)
+app.use("/api/onbording", userTags);
+app.use("api/user", location);
 // Connect to MongoDB (live Atlas)
 mongoose
   .connect(process.env.MONGO_URI, {

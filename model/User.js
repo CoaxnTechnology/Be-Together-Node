@@ -1,5 +1,10 @@
 // models/User.js
 const mongoose = require("mongoose");
+const PointSchema = new mongoose.Schema({
+  type: { type: String, enum: ['Point'], default: 'Point' },
+  // GeoJSON order: [longitude, latitude]
+  coordinates: { type: [Number], default: [0, 0] }
+}, { _id: false });
 
 const userSchema = new mongoose.Schema(
   {
@@ -38,21 +43,7 @@ const userSchema = new mongoose.Schema(
     session_id: { type: String, default: null },
 
     // Inline availability definition — no separate schemas
-    availability: {
-      type: [
-        {
-          day: { type: String, required: true }, // e.g. "Monday"
-          times: [
-            {
-              start_time: { type: String, required: true }, // "09:00"
-              end_time: { type: String, required: true }, // "12:00"
-            },
-          ],
-        },
-      ],
-      default: [],
-    },
-
+    
     // Relationships / simple arrays
     languages: { type: [String], default: [] },
 
@@ -62,7 +53,16 @@ const userSchema = new mongoose.Schema(
 
     services: [{ type: mongoose.Schema.Types.ObjectId, ref: "Service" }],
     lastResendAt: { type: Date, default: null },
-
+    lastLocation: {
+      coords: {
+        type: PointSchema,
+        default: { type: "Point", coordinates: [0, 0] },
+      },
+      accuracy: { type: Number, default: null }, // optional if you want
+      provider: { type: String, default: null }, // optional
+      recordedAt: { type: Date, default: null },
+      updatedAt: { type: Date, default: Date.now },
+    },
     reset_password_token: { type: String, default: null }, // store hashed token
     reset_password_expiry: { type: Date, default: null },
     reset_password_used: { type: Boolean, default: false },
@@ -87,5 +87,7 @@ userSchema.pre("save", function (next) {
   this.updated_at = Date.now();
   next();
 });
+// ✅ Add geospatial index here
+userSchema.index({ 'lastLocation.coords': '2dsphere' });
 
 module.exports = mongoose.model("User", userSchema);

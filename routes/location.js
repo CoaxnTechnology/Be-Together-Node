@@ -1,11 +1,11 @@
 // routes/location.js
-const express = require("express");
+const express = require('express');
 const router = express.Router();
 
-const authMiddleware = require("../Middleware/authMiddleware");
+const authMiddleware = require('../Middleware/authMiddleware');
 
-const location = require("../controller/Location");
+const { location } = require('../controller/Location');
 
-router.post("/location", authMiddleware, location.location);
+router.post("/getlocation", authMiddleware, location);
 
 module.exports = router;

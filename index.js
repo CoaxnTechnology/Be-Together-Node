@@ -34,7 +34,7 @@ app.use("/api", profileRoutes);
 app.use("/api/admin/categories", categoryRoutes);
 app.use("/api/service", serviceRoutes);
 app.use("/api/onbording", userTags);
-app.use("api/user", location);
+// app.use("api/user", location);
 
 // Connect to MongoDB (live Atlas)
 mongoose

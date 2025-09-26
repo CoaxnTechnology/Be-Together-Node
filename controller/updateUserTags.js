@@ -1,7 +1,6 @@
 // controllers/updateUserTags.js
 const User = require("../model/User");
 const Category = require("../model/Category");
-const mongoose = require("mongoose");
 
 /** helper: normalize tags input (array / JSON string / comma string) */
 function normalizeTags(raw) {
@@ -30,7 +29,7 @@ async function updateUserTags(req, res) {
     const userIdParam = req.params && req.params.userId ? String(req.params.userId).trim() : null;
     const userId = userIdBody || userIdParam;
 
-    // If you use auth middleware set req.user (uncomment check if using auth)
+    // If you use auth middleware set req.user
     const userIdToken = req.user && req.user.id ? String(req.user.id) : null;
 
     // If you're using auth, enforce the token==userId check:
@@ -38,23 +37,15 @@ async function updateUserTags(req, res) {
       if (!userId) return res.status(400).json({ error: "userId required in body or params" });
       if (userId !== userIdToken) return res.status(403).json({ error: "Forbidden" });
     } else {
-      // If no auth middleware, require userId to be provided in body or param.
       if (!userId) return res.status(400).json({ error: "userId required in body or params" });
-      // Note: you may want to remove this branch if you rely only on token-based auth.
     }
 
-    // accept body values (works with application/json)
-    let { type, tags: rawTags, action = "add", categoryId } = req.body;
+    // accept body values
+    let { type, tags: rawTags, action = "add" } = req.body;
 
-    // Normalize simple strings (form-data could send these as strings)
+    // Normalize simple strings
     type = typeof type === "string" ? type.trim().toLowerCase() : type;
     action = typeof action === "string" ? action.trim().toLowerCase() : action;
-    if (categoryId !== undefined && categoryId !== null) {
-      if (typeof categoryId === "string" && categoryId.trim() !== "") {
-        const n = Number(categoryId);
-        categoryId = Number.isNaN(n) ? categoryId : n;
-      }
-    }
 
     const tags = normalizeTags(rawTags);
 
@@ -68,32 +59,32 @@ async function updateUserTags(req, res) {
     if (!["add", "remove"].includes(action)) {
       return res.status(400).json({ error: 'action must be "add" or "remove"' });
     }
-    if (categoryId === undefined || categoryId === null) {
-      return res.status(400).json({ error: "categoryId is required for tag verification" });
-    }
 
-    // load category
-    const category = await Category.findOne({ categoryId: Number(categoryId) }).lean();
-    if (!category) return res.status(404).json({ error: "Category not found" });
-
-    // case-insensitive matching + return canonical-case tags from category
-    const catMap = {};
-    (category.tags || []).forEach(t => {
-      catMap[String(t).trim().toLowerCase()] = String(t).trim();
+    // ✅ load all categories (for validation only)
+    const categories = await Category.find({}).lean();
+    const allCategoryTags = new Map();
+    categories.forEach(cat => {
+      (cat.tags || []).forEach(t => {
+        const key = String(t).trim().toLowerCase();
+        allCategoryTags.set(key, String(t).trim()); // canonical text
+      });
     });
 
+    // validate tags
     const acceptedTags = [];
     const rejectedTags = [];
-
     tags.forEach(t => {
       const k = String(t).trim().toLowerCase();
-      if (k && catMap[k]) acceptedTags.push(catMap[k]); // store canonical tag text
-      else rejectedTags.push(t);
+      if (k && allCategoryTags.has(k)) {
+        acceptedTags.push(allCategoryTags.get(k));
+      } else {
+        rejectedTags.push(t);
+      }
     });
 
     if (acceptedTags.length === 0) {
       return res.status(400).json({
-        error: "No valid tags found in this category",
+        error: "No valid tags found",
         acceptedTags: [],
         rejectedTags
       });
@@ -113,18 +104,6 @@ async function updateUserTags(req, res) {
     // update user
     const user = await User.findByIdAndUpdate(userId, update, { new: true }).select(field);
     if (!user) return res.status(404).json({ error: "User not found" });
-
-    // Optionally update Category.users membership (best-effort)
-    try {
-      const catFilter = { categoryId: Number(categoryId) };
-      if (action === "add") {
-        await Category.updateOne(catFilter, { $addToSet: { users: mongoose.Types.ObjectId(userId) } });
-      } else {
-        await Category.updateOne(catFilter, { $pull: { users: mongoose.Types.ObjectId(userId) } });
-      }
-    } catch (catErr) {
-      console.error("Category.users update failed", catErr);
-    }
 
     return res.status(200).json({
       success: true,

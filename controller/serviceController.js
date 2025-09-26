@@ -19,6 +19,7 @@ function isValidDateISO(d) {
 
 exports.createService = async (req, res) => {
   try {
+    // Get userId from body or auth token
     const userId = req.body.userId || (req.user && req.user.id);
     if (!userId) return res.status(400).json({ isSuccess: false, message: "userId is required" });
 
@@ -27,21 +28,22 @@ exports.createService = async (req, res) => {
     if (!user.is_active) return res.status(403).json({ isSuccess: false, message: "User is not active" });
 
     const body = req.body;
+
+    // Basic fields
     const title = body.title && String(body.title).trim();
     const description = body.description || "";
-    const language = body.Language || body.language || "English"; // fallback
+    const language = body.Language || body.language || "English";
     const isFree = body.isFree === true || body.isFree === "true";
     const price = isFree ? 0 : Number(body.price || 0);
-
     const location = tryParse(body.location);
     const service_type = body.service_type || "one_time";
     const date = body.date;
     const start_time = body.start_time;
     const end_time = body.end_time;
     const max_participants = Number(body.max_participants || 1);
-
     const categoryId = body.categoryId;
     const selectedTags = tryParse(body.selectedTags) || [];
+    const recurring_schedule = tryParse(body.recurring_schedule) || [];
 
     // ---- Validation ----
     if (!title) return res.status(400).json({ isSuccess: false, message: "Title is required" });
@@ -57,16 +59,16 @@ exports.createService = async (req, res) => {
       return res.status(400).json({ isSuccess: false, message: "selectedTags must be a non-empty array" });
     }
 
-    const validTags = category.tags.filter((tag) =>
-      selectedTags.map((t) => t.toLowerCase()).includes(tag.toLowerCase())
+    const validTags = category.tags.filter(tag =>
+      selectedTags.map(t => t.toLowerCase()).includes(tag.toLowerCase())
     );
     if (!validTags.length) return res.status(400).json({ isSuccess: false, message: "No valid tags selected from this category" });
 
-    // Build payload
+    // ---- Build payload ----
     const servicePayload = {
       title,
       description,
-      Language: language,             // matches schema
+      Language: language,
       isFree,
       price,
       location_name: location.name,
@@ -76,9 +78,10 @@ exports.createService = async (req, res) => {
       tags: validTags,
       max_participants,
       service_type,
-      owner: user._id,                // matches schema
+      owner: user._id,
     };
 
+    // ---- One-time service ----
     if (service_type === "one_time") {
       if (!isValidTime(start_time) || !isValidTime(end_time))
         return res.status(400).json({ isSuccess: false, message: "Invalid start_time or end_time" });
@@ -90,11 +93,30 @@ exports.createService = async (req, res) => {
       servicePayload.end_time = end_time;
     }
 
-    // Save service
+    // ---- Recurring service ----
+    if (service_type === "recurring") {
+      if (!Array.isArray(recurring_schedule) || recurring_schedule.length === 0) {
+        return res.status(400).json({ isSuccess: false, message: "Recurring schedule is required for recurring services" });
+      }
+
+      // Validate each schedule item
+      for (const item of recurring_schedule) {
+        if (!item.day_of_week || !isValidTime(item.start_time) || !isValidTime(item.end_time)) {
+          return res.status(400).json({
+            isSuccess: false,
+            message: "Each recurring schedule item must include day_of_week, start_time, end_time in HH:mm format"
+          });
+        }
+      }
+
+      servicePayload.recurring_schedule = recurring_schedule;
+    }
+
+    // ---- Save service ----
     const createdService = new Service(servicePayload);
     await createdService.save();
 
-    // Link service to user
+    // ---- Link service to user ----
     user.services.push(createdService._id);
     await user.save();
 
@@ -105,7 +127,6 @@ exports.createService = async (req, res) => {
     res.status(500).json({ isSuccess: false, message: "Server error", error: err.message });
   }
 };
-
 
 // ----------- Get Services -------------
 exports.getServices = async (req, res) => {

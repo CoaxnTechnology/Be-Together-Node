@@ -16,10 +16,8 @@ function isValidTime(t) {
 function isValidDateISO(d) {
   return typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d) && !isNaN(new Date(d).getTime());
 }
-
 exports.createService = async (req, res) => {
   try {
-    // Get userId from body or auth token
     const userId = req.body.userId || (req.user && req.user.id);
     if (!userId) return res.status(400).json({ isSuccess: false, message: "userId is required" });
 
@@ -28,13 +26,12 @@ exports.createService = async (req, res) => {
     if (!user.is_active) return res.status(403).json({ isSuccess: false, message: "User is not active" });
 
     const body = req.body;
-
-    // Basic fields
     const title = body.title && String(body.title).trim();
     const description = body.description || "";
-    const language = body.Language || body.language || "English";
+    const language = body.language || body.Language || "English";
     const isFree = body.isFree === true || body.isFree === "true";
     const price = isFree ? 0 : Number(body.price || 0);
+
     const location = tryParse(body.location);
     const service_type = body.service_type || "one_time";
     const date = body.date;
@@ -43,7 +40,6 @@ exports.createService = async (req, res) => {
     const max_participants = Number(body.max_participants || 1);
     const categoryId = body.categoryId;
     const selectedTags = tryParse(body.selectedTags) || [];
-    const recurring_schedule = tryParse(body.recurring_schedule) || [];
 
     // ---- Validation ----
     if (!title) return res.status(400).json({ isSuccess: false, message: "Title is required" });
@@ -64,7 +60,7 @@ exports.createService = async (req, res) => {
     );
     if (!validTags.length) return res.status(400).json({ isSuccess: false, message: "No valid tags selected from this category" });
 
-    // ---- Build payload ----
+    // Build payload
     const servicePayload = {
       title,
       description,
@@ -78,45 +74,45 @@ exports.createService = async (req, res) => {
       tags: validTags,
       max_participants,
       service_type,
-      owner: user._id,
+      owner: user._id
     };
 
-    // ---- One-time service ----
     if (service_type === "one_time") {
-      if (!isValidTime(start_time) || !isValidTime(end_time))
+      if (!isValidTime(start_time) || !isValidTime(end_time)) {
         return res.status(400).json({ isSuccess: false, message: "Invalid start_time or end_time" });
-      if (!isValidDateISO(date))
+      }
+      if (!isValidDateISO(date)) {
         return res.status(400).json({ isSuccess: false, message: "Valid date (YYYY-MM-DD) required for one_time" });
-
+      }
       servicePayload.date = new Date(date + "T00:00:00.000Z");
       servicePayload.start_time = start_time;
       servicePayload.end_time = end_time;
     }
 
-    // ---- Recurring service ----
     if (service_type === "recurring") {
+      const recurring_schedule = tryParse(body.recurring_schedule) || [];
       if (!Array.isArray(recurring_schedule) || recurring_schedule.length === 0) {
         return res.status(400).json({ isSuccess: false, message: "Recurring schedule is required for recurring services" });
       }
 
-      // Validate each schedule item
-      for (const item of recurring_schedule) {
-        if (!item.day_of_week || !isValidTime(item.start_time) || !isValidTime(item.end_time)) {
-          return res.status(400).json({
-            isSuccess: false,
-            message: "Each recurring schedule item must include day_of_week, start_time, end_time in HH:mm format"
-          });
+      servicePayload.recurring_schedule = recurring_schedule.map(item => {
+        if (!item.day || !isValidDateISO(item.date) || !isValidTime(item.start_time) || !isValidTime(item.end_time)) {
+          throw new Error("Each recurring schedule item must include day, date, start_time, end_time in HH:mm format");
         }
-      }
-
-      servicePayload.recurring_schedule = recurring_schedule;
+        return {
+          day: item.day,
+          date: new Date(item.date + "T00:00:00.000Z"),
+          start_time: item.start_time,
+          end_time: item.end_time
+        };
+      });
     }
 
-    // ---- Save service ----
+    // Save service
     const createdService = new Service(servicePayload);
     await createdService.save();
 
-    // ---- Link service to user ----
+    // Link service to user
     user.services.push(createdService._id);
     await user.save();
 

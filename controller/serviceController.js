@@ -2,46 +2,21 @@ const Service = require("../model/Service");
 const Category = require("../model/Category");
 const User = require("../model/User");
 
-// ----------- Helpers ----------------
+// Helpers
 function tryParse(val) {
   if (val === undefined || val === null) return val;
   if (typeof val !== "string") return val;
   try { return JSON.parse(val); } catch (e) { return val; }
 }
 
-function isValidTime(time) {
-  if (typeof time !== "string") return false;
-  return /^([01]\d|2[0-3]):([0-5]\d)$/.test(time); // HH:mm 24hr
+// Simple date/time validators
+function isValidTime(t) {
+  return typeof t === "string" && /^\d{2}:\d{2}$/.test(t);
+}
+function isValidDateISO(d) {
+  return typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d) && !isNaN(new Date(d).getTime());
 }
 
-function isValidDateISO(dateStr) {
-  if (typeof dateStr !== "string") return false;
-  return /^\d{4}-\d{2}-\d{2}$/.test(dateStr); // YYYY-MM-DD
-}
-
-function bboxForLatLon(lat, lon, radiusKm = 5) {
-  const R = 6371; 
-  const degLat = (radiusKm / R) * (180 / Math.PI);
-  const degLon = (radiusKm / R) * (180 / Math.PI) / Math.cos(lat * Math.PI / 180);
-  return {
-    minLat: lat - degLat,
-    maxLat: lat + degLat,
-    minLon: lon - degLon,
-    maxLon: lon + degLon,
-  };
-}
-
-function looksLikeObjectId(s) {
-  return typeof s === "string" && /^[0-9a-fA-F]{24}$/.test(s);
-}
-
-function dateRangeForDay(dateStr) {
-  const start = new Date(dateStr + "T00:00:00.000Z");
-  const end = new Date(dateStr + "T23:59:59.999Z");
-  return { start, end };
-}
-
-// ----------- Create Service -------------
 exports.createService = async (req, res) => {
   try {
     const userId = req.body.userId || (req.user && req.user.id);
@@ -54,7 +29,7 @@ exports.createService = async (req, res) => {
     const body = req.body;
     const title = body.title && String(body.title).trim();
     const description = body.description || "";
-    const language = body.language || "English";
+    const language = body.Language || body.language || "English"; // fallback
     const isFree = body.isFree === true || body.isFree === "true";
     const price = isFree ? 0 : Number(body.price || 0);
 
@@ -87,22 +62,21 @@ exports.createService = async (req, res) => {
     );
     if (!validTags.length) return res.status(400).json({ isSuccess: false, message: "No valid tags selected from this category" });
 
+    // Build payload
     const servicePayload = {
       title,
       description,
-      language,
+      Language: language,             // matches schema
       isFree,
       price,
-      location: {
-        name: location.name,
-        latitude: Number(location.latitude),
-        longitude: Number(location.longitude),
-      },
+      location_name: location.name,
+      latitude: Number(location.latitude),
+      longitude: Number(location.longitude),
       category: category._id,
       tags: validTags,
       max_participants,
       service_type,
-      created_by: user._id,
+      owner: user._id,                // matches schema
     };
 
     if (service_type === "one_time") {
@@ -116,7 +90,7 @@ exports.createService = async (req, res) => {
       servicePayload.end_time = end_time;
     }
 
-    // Save
+    // Save service
     const createdService = new Service(servicePayload);
     await createdService.save();
 
@@ -125,11 +99,13 @@ exports.createService = async (req, res) => {
     await user.save();
 
     return res.json({ isSuccess: true, message: "Service created successfully", data: createdService });
+
   } catch (err) {
     console.error("createService error:", err);
     res.status(500).json({ isSuccess: false, message: "Server error", error: err.message });
   }
 };
+
 
 // ----------- Get Services -------------
 exports.getServices = async (req, res) => {

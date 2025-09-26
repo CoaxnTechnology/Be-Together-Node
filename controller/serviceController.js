@@ -110,14 +110,16 @@ exports.createService = async (req, res) => {
 // ----------- Get Services -------------
 exports.getServices = async (req, res) => {
   try {
-    const q = Object.assign({}, req.query || {}, req.body || {});
+    const q = { ...req.query, ...req.body };
+
+    // ---------- QUERY PARAMS ----------
     const categoryId = q.categoryId || null;
     const tags = tryParse(q.tags) || (q.tags ? [q.tags] : []);
     const isFree = q.isFree === undefined ? null : (q.isFree === "true" || q.isFree === true);
     const dateStr = q.date || null;
     const lat = q.latitude !== undefined ? Number(q.latitude) : null;
     const lon = q.longitude !== undefined ? Number(q.longitude) : null;
-    const radiusKm = q.radius_km !== undefined ? Number(q.radius_km) : 5;
+    const radiusKm = q.radius_km !== undefined ? Number(q.radius_km) : 3;
 
     const page = Math.max(1, Number(q.page || 1));
     const limit = Math.min(100, Number(q.limit || 20));
@@ -126,21 +128,28 @@ exports.getServices = async (req, res) => {
     const sortDir = q.sortDir === "asc" ? 1 : -1;
 
     const and = [];
+
+    // ---------- CATEGORY FILTER ----------
     if (categoryId) {
-      if (!looksLikeObjectId(categoryId)) return res.status(400).json({ isSuccess: false, message: "Invalid categoryId" });
+      if (!looksLikeObjectId(categoryId))
+        return res.status(400).json({ isSuccess: false, message: "Invalid categoryId" });
       and.push({ category: categoryId });
     }
 
-    if (tags && Array.isArray(tags) && tags.length) {
-      const normalized = tags.map(t => String(t).trim()).filter(Boolean);
-      if (normalized.length) and.push({ tags: { $in: normalized } });
+    // ---------- TAGS FILTER ----------
+    if (tags.length) {
+      const normalizedTags = tags.map(t => String(t).trim()).filter(Boolean);
+      if (normalizedTags.length) and.push({ tags: { $in: normalizedTags } });
     }
 
+    // ---------- ISFREE FILTER ----------
     if (isFree !== null) and.push({ isFree: !!isFree });
 
+    // ---------- DATE FILTER ----------
     if (dateStr) {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr))
         return res.status(400).json({ isSuccess: false, message: "Invalid date format, expected YYYY-MM-DD" });
+
       const dateRange = dateRangeForDay(dateStr);
       and.push({
         $or: [
@@ -150,24 +159,147 @@ exports.getServices = async (req, res) => {
       });
     }
 
-    if (lat !== null && lon !== null && !Number.isNaN(lat) && !Number.isNaN(lon)) {
-      const box = bboxForLatLon(lat, lon, isNaN(radiusKm) ? 5 : radiusKm);
+    // ---------- INTEREST-BASED FILTER ----------
+    let userInterests = [];
+    if ((!categoryId && !tags.length) && req.user?.id) {
+      const user = await User.findById(req.user.id);
+      if (user?.interests?.length) userInterests = user.interests;
+      if (userInterests.length) {
+        and.push({
+          $or: [
+            { category: { $in: userInterests } },
+            { tags: { $in: userInterests } }
+          ]
+        });
+      }
+    }
+
+    // ---------- LOCATION FILTER ----------
+    if (lat != null && lon != null && !Number.isNaN(lat) && !Number.isNaN(lon)) {
+      const box = bboxForLatLon(lat, lon, radiusKm);
       and.push({ "location.latitude": { $gte: box.minLat, $lte: box.maxLat } });
       and.push({ "location.longitude": { $gte: box.minLon, $lte: box.maxLon } });
     }
 
     const mongoQuery = and.length ? { $and: and } : {};
+
+    // ---------- TOTAL COUNT ----------
     const totalCount = await Service.countDocuments(mongoQuery);
 
-    let sortObj = {};
-    if (sortBy === "price") sortObj.price = sortDir;
-    else sortObj.created_at = sortDir;
+    // ---------- FETCH SERVICES ----------
+    let services = await Service.find(mongoQuery)
+      .select("-__v")
+      .skip(skip)
+      .limit(limit)
+      .lean();
 
-    const services = await Service.find(mongoQuery).select("-__v").sort(sortObj).skip(skip).limit(limit).lean();
+    // ---------- DISTANCE CALCULATION ----------
+    if (lat != null && lon != null) {
+      const toRad = v => (v * Math.PI) / 180;
+      services.forEach(s => {
+        if (s.location?.latitude != null && s.location?.longitude != null) {
+          const lat1 = lat, lon1 = lon;
+          const lat2 = Number(s.location.latitude), lon2 = Number(s.location.longitude);
+          const R = 6371; // km
+          const dLat = toRad(lat2 - lat1);
+          const dLon = toRad(lon2 - lon1);
+          const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon/2)**2;
+          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+          s.distance_km = Math.round(R * c * 100) / 100;
+        } else s.distance_km = null;
+      });
 
-    return res.json({ isSuccess: true, message: "Services fetched", data: { totalCount, page, limit, services } });
+      if (!q.sortBy || q.sortBy === "distance") {
+        services.sort((a, b) => (a.distance_km || 9999) - (b.distance_km || 9999));
+      }
+    }
+
+    return res.json({
+      isSuccess: true,
+      message: "Services fetched successfully",
+      data: { totalCount, page, limit, services }
+    });
+
   } catch (err) {
     console.error("getServices error:", err);
     return res.status(500).json({ isSuccess: false, message: "Server error", error: err.message });
+  }
+};
+
+
+
+exports.searchUsers = async (req, res) => {
+  try {
+    const {
+      latitude,
+      longitude,
+      radius = 3000, // default 3km
+      category,      // string (ex: Sports)
+      tags,          // array of strings (ex: ["training", "fitness"])
+      language,      // string (ex: Hindi)
+      page = 1,
+      limit = 10
+    } = req.query;
+
+    if (!latitude || !longitude) {
+      return res.status(400).json({
+        success: false,
+        message: "Latitude and longitude are required",
+      });
+    }
+
+    // build query
+    const query = {
+      "lastLocation.coords": {
+        $near: {
+          $geometry: {
+            type: "Point",
+            coordinates: [parseFloat(longitude), parseFloat(latitude)],
+          },
+          $maxDistance: parseInt(radius), // in meters
+        },
+      },
+    };
+
+    // category/tag match
+    if (category) {
+      query.interests = { $regex: new RegExp(category, "i") };
+    }
+
+    if (tags) {
+      const tagsArray = Array.isArray(tags) ? tags : tags.split(",");
+      query.interests = { $in: tagsArray };
+    }
+
+    // language filter
+    if (language) {
+      query.languages = { $regex: new RegExp(language, "i") };
+    }
+
+    // pagination
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    // fetch users
+    const users = await User.find(query)
+      .select("name email profile_image languages interests lastLocation")
+      .skip(skip)
+      .limit(parseInt(limit));
+
+    // total count
+    const total = await User.countDocuments(query);
+
+    res.json({
+      success: true,
+      total,
+      page: parseInt(page),
+      limit: parseInt(limit),
+      users,
+    });
+  } catch (error) {
+    console.error("Error searching users:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+    });
   }
 };

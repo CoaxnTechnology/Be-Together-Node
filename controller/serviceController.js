@@ -234,9 +234,9 @@ exports.searchUsers = async (req, res) => {
       latitude,
       longitude,
       radius = 3000, // default 3km
-      category,      // string (ex: Sports)
-      tags,          // array of strings (ex: ["training", "fitness"])
-      language,      // string (ex: Hindi)
+      category,
+      tags,
+      language,
       page = 1,
       limit = 10
     } = req.query;
@@ -248,7 +248,7 @@ exports.searchUsers = async (req, res) => {
       });
     }
 
-    // build query
+    // Base query -> sirf location
     const query = {
       "lastLocation.coords": {
         $near: {
@@ -261,19 +261,25 @@ exports.searchUsers = async (req, res) => {
       },
     };
 
-    // category/tag match
+    // extra filters -> tabhi apply honge jab user query bheje
+    const andFilters = [];
+
     if (category) {
-      query.interests = { $regex: new RegExp(category, "i") };
+      andFilters.push({ interests: { $regex: new RegExp(category, "i") } });
     }
 
     if (tags) {
       const tagsArray = Array.isArray(tags) ? tags : tags.split(",");
-      query.interests = { $in: tagsArray };
+      andFilters.push({ interests: { $in: tagsArray } });
     }
 
-    // language filter
     if (language) {
-      query.languages = { $regex: new RegExp(language, "i") };
+      andFilters.push({ languages: { $regex: new RegExp(language, "i") } });
+    }
+
+    // final query
+    if (andFilters.length > 0) {
+      query.$and = andFilters;
     }
 
     // pagination
@@ -303,3 +309,4 @@ exports.searchUsers = async (req, res) => {
     });
   }
 };
+

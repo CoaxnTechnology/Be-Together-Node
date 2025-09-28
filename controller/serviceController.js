@@ -1,6 +1,7 @@
 const Service = require("../model/Service");
 const Category = require("../model/Category");
 const User = require("../model/User");
+const mongoose = require("mongoose");
 
 // Helpers
 function tryParse(val) {
@@ -69,12 +70,10 @@ exports.createService = async (req, res) => {
       location.latitude == null ||
       location.longitude == null
     ) {
-      return res
-        .status(400)
-        .json({
-          isSuccess: false,
-          message: "Location (name, latitude, longitude) is required",
-        });
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Location (name, latitude, longitude) is required",
+      });
     }
     if (!categoryId)
       return res
@@ -88,24 +87,20 @@ exports.createService = async (req, res) => {
         .json({ isSuccess: false, message: "Category not found" });
 
     if (!Array.isArray(selectedTags) || !selectedTags.length) {
-      return res
-        .status(400)
-        .json({
-          isSuccess: false,
-          message: "selectedTags must be a non-empty array",
-        });
+      return res.status(400).json({
+        isSuccess: false,
+        message: "selectedTags must be a non-empty array",
+      });
     }
 
     const validTags = category.tags.filter((tag) =>
       selectedTags.map((t) => t.toLowerCase()).includes(tag.toLowerCase())
     );
     if (!validTags.length)
-      return res
-        .status(400)
-        .json({
-          isSuccess: false,
-          message: "No valid tags selected from this category",
-        });
+      return res.status(400).json({
+        isSuccess: false,
+        message: "No valid tags selected from this category",
+      });
 
     // Build payload
     const servicePayload = {
@@ -126,20 +121,16 @@ exports.createService = async (req, res) => {
 
     if (service_type === "one_time") {
       if (!isValidTime(start_time) || !isValidTime(end_time)) {
-        return res
-          .status(400)
-          .json({
-            isSuccess: false,
-            message: "Invalid start_time or end_time",
-          });
+        return res.status(400).json({
+          isSuccess: false,
+          message: "Invalid start_time or end_time",
+        });
       }
       if (!isValidDateISO(date)) {
-        return res
-          .status(400)
-          .json({
-            isSuccess: false,
-            message: "Valid date (YYYY-MM-DD) required for one_time",
-          });
+        return res.status(400).json({
+          isSuccess: false,
+          message: "Valid date (YYYY-MM-DD) required for one_time",
+        });
       }
       servicePayload.date = new Date(date + "T00:00:00.000Z");
       servicePayload.start_time = start_time;
@@ -152,12 +143,10 @@ exports.createService = async (req, res) => {
         !Array.isArray(recurring_schedule) ||
         recurring_schedule.length === 0
       ) {
-        return res
-          .status(400)
-          .json({
-            isSuccess: false,
-            message: "Recurring schedule is required for recurring services",
-          });
+        return res.status(400).json({
+          isSuccess: false,
+          message: "Recurring schedule is required for recurring services",
+        });
       }
 
       servicePayload.recurring_schedule = recurring_schedule.map((item) => {
@@ -272,12 +261,10 @@ exports.createService = async (req, res) => {
       location.latitude == null ||
       location.longitude == null
     ) {
-      return res
-        .status(400)
-        .json({
-          isSuccess: false,
-          message: "Location (name, latitude, longitude) is required",
-        });
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Location (name, latitude, longitude) is required",
+      });
     }
     if (!categoryId)
       return res
@@ -291,24 +278,20 @@ exports.createService = async (req, res) => {
         .json({ isSuccess: false, message: "Category not found" });
 
     if (!Array.isArray(selectedTags) || !selectedTags.length) {
-      return res
-        .status(400)
-        .json({
-          isSuccess: false,
-          message: "selectedTags must be a non-empty array",
-        });
+      return res.status(400).json({
+        isSuccess: false,
+        message: "selectedTags must be a non-empty array",
+      });
     }
 
     const validTags = category.tags.filter((tag) =>
       selectedTags.map((t) => t.toLowerCase()).includes(tag.toLowerCase())
     );
     if (!validTags.length)
-      return res
-        .status(400)
-        .json({
-          isSuccess: false,
-          message: "No valid tags selected from this category",
-        });
+      return res.status(400).json({
+        isSuccess: false,
+        message: "No valid tags selected from this category",
+      });
 
     // Build payload
     const servicePayload = {
@@ -329,20 +312,16 @@ exports.createService = async (req, res) => {
 
     if (service_type === "one_time") {
       if (!isValidTime(start_time) || !isValidTime(end_time)) {
-        return res
-          .status(400)
-          .json({
-            isSuccess: false,
-            message: "Invalid start_time or end_time",
-          });
+        return res.status(400).json({
+          isSuccess: false,
+          message: "Invalid start_time or end_time",
+        });
       }
       if (!isValidDateISO(date)) {
-        return res
-          .status(400)
-          .json({
-            isSuccess: false,
-            message: "Valid date (YYYY-MM-DD) required for one_time",
-          });
+        return res.status(400).json({
+          isSuccess: false,
+          message: "Valid date (YYYY-MM-DD) required for one_time",
+        });
       }
       servicePayload.date = new Date(date + "T00:00:00.000Z");
       servicePayload.start_time = start_time;
@@ -355,12 +334,10 @@ exports.createService = async (req, res) => {
         !Array.isArray(recurring_schedule) ||
         recurring_schedule.length === 0
       ) {
-        return res
-          .status(400)
-          .json({
-            isSuccess: false,
-            message: "Recurring schedule is required for recurring services",
-          });
+        return res.status(400).json({
+          isSuccess: false,
+          message: "Recurring schedule is required for recurring services",
+        });
       }
 
       servicePayload.recurring_schedule = recurring_schedule.map((item) => {
@@ -407,7 +384,9 @@ exports.createService = async (req, res) => {
 // ---------------- GET SERVICES ----------------
 exports.getServices = async (req, res) => {
   try {
+    console.log("===== getServices called =====");
     const q = { ...req.query, ...req.body };
+    console.log("Received query/body:", q);
 
     // ---------- QUERY PARAMS ----------
     const categoryId = q.categoryId || null;
@@ -420,32 +399,50 @@ exports.getServices = async (req, res) => {
     const limit = Math.min(100, Number(q.limit || 20));
     const skip = (page - 1) * limit;
 
+    console.log({ page, limit, skip, categoryId, tags, lat, lon, radiusKm });
+
     const and = [];
 
     // ---------- CATEGORY FILTER ----------
     if (categoryId) {
-      if (!looksLikeObjectId(categoryId))
-        return res.status(400).json({ isSuccess: false, message: "Invalid categoryId" });
+      if (!looksLikeObjectId(categoryId)) {
+        console.log("Invalid categoryId:", categoryId);
+        return res
+          .status(400)
+          .json({ isSuccess: false, message: "Invalid categoryId" });
+      }
       and.push({ category: categoryId });
+      console.log("Category filter applied:", categoryId);
     }
 
     // ---------- TAGS FILTER ----------
     if (tags.length) {
       const normalizedTags = tags.map((t) => String(t).trim()).filter(Boolean);
-      if (normalizedTags.length) and.push({ tags: { $in: normalizedTags } });
+      if (normalizedTags.length) {
+        and.push({ tags: { $in: normalizedTags } });
+        console.log("Tags filter applied:", normalizedTags);
+      }
     }
 
     // ---------- LOCATION FILTER ----------
-    if (lat != null && lon != null && !Number.isNaN(lat) && !Number.isNaN(lon)) {
+    if (
+      lat != null &&
+      lon != null &&
+      !Number.isNaN(lat) &&
+      !Number.isNaN(lon)
+    ) {
       const box = bboxForLatLon(lat, lon, radiusKm);
-      and.push({ "location.latitude": { $gte: box.minLat, $lte: box.maxLat } });
-      and.push({ "location.longitude": { $gte: box.minLon, $lte: box.maxLon } });
+      console.log("Bounding box for location filter:", box);
+      and.push({ latitude: { $gte: box.minLat, $lte: box.maxLat } });
+      and.push({ longitude: { $gte: box.minLon, $lte: box.maxLon } });
     }
 
     const mongoQuery = and.length ? { $and: and } : {};
+    console.log("Final MongoDB query:", mongoQuery);
 
     // ---------- TOTAL COUNT ----------
     const totalCount = await Service.countDocuments(mongoQuery);
+    console.log("Total services count matching query:", totalCount);
 
     // ---------- FETCH SERVICES ----------
     let services = await Service.find(mongoQuery)
@@ -453,30 +450,50 @@ exports.getServices = async (req, res) => {
       .skip(skip)
       .limit(limit)
       .lean();
+    console.log(
+      "Fetched services before distance calculation:",
+      services.length
+    );
+    // ---------- NO SERVICES CHECK ----------
+    if (!services.length) {
+      console.log("No services found for this location/filter.");
+      return res.json({
+        isSuccess: true,
+        message: "No services available at your location",
+        data: { totalCount: 0, page, limit, services: [] },
+      });
+    }
 
     // ---------- DISTANCE CALCULATION ----------
     if (lat != null && lon != null) {
       const toRad = (v) => (v * Math.PI) / 180;
       services.forEach((s) => {
-        if (s.location?.latitude != null && s.location?.longitude != null) {
+        if (s.latitude != null && s.longitude != null) {
           const lat1 = lat,
             lon1 = lon;
-          const lat2 = Number(s.location.latitude),
-            lon2 = Number(s.location.longitude);
+          const lat2 = Number(s.latitude),
+            lon2 = Number(s.longitude);
           const R = 6371; // km
           const dLat = toRad(lat2 - lat1);
           const dLon = toRad(lon2 - lon1);
           const a =
             Math.sin(dLat / 2) ** 2 +
-            Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+            Math.cos(toRad(lat1)) *
+              Math.cos(toRad(lat2)) *
+              Math.sin(dLon / 2) ** 2;
           const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
           s.distance_km = Math.round(R * c * 100) / 100;
         } else s.distance_km = null;
       });
 
-      // Sort by distance by default
-      services.sort((a, b) => (a.distance_km || 9999) - (b.distance_km || 9999));
+      // Sort by distance
+      services.sort(
+        (a, b) => (a.distance_km || 9999) - (b.distance_km || 9999)
+      );
+      console.log("Services sorted by distance.");
     }
+
+    console.log("Final services to return:", services.length);
 
     return res.json({
       isSuccess: true,
@@ -485,75 +502,76 @@ exports.getServices = async (req, res) => {
     });
   } catch (err) {
     console.error("getServices error:", err);
-    return res.status(500).json({ isSuccess: false, message: "Server error", error: err.message });
+    return res
+      .status(500)
+      .json({ isSuccess: false, message: "Server error", error: err.message });
   }
 };
 
-exports.searchUsers = async (req, res) => {
+// controllers/userController.js
+
+
+exports.getInterestedUsers = async (req, res) => {
   try {
     const {
-      latitude,
-      longitude,
-      radius = 3000, // default 3km
-      category,
-      tags,
-      language,
+      latitude = 0,
+      longitude = 0,
+      radius_km = 3,
+      categoryId,
+      tags = [],
       page = 1,
       limit = 10,
-    } = req.query;
+    } = req.body;
 
-    if (!latitude || !longitude) {
-      return res.status(400).json({
-        success: false,
-        message: "Latitude and longitude are required",
-      });
-    }
+    const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    // Base query -> sirf location
-    const query = {
-      "lastLocation.coords": {
+    // Base query
+    const query = {};
+
+    // Location filter only if lat/lon are non-zero
+    if (Number(latitude) !== 0 && Number(longitude) !== 0) {
+      query["lastLocation.coords"] = {
         $near: {
           $geometry: {
             type: "Point",
             coordinates: [parseFloat(longitude), parseFloat(latitude)],
           },
-          $maxDistance: parseInt(radius), // in meters
+          $maxDistance: parseFloat(radius_km) * 1000, // convert km -> meters
         },
-      },
-    };
-
-    // extra filters -> tabhi apply honge jab user query bheje
-    const andFilters = [];
-
-    if (category) {
-      andFilters.push({ interests: { $regex: new RegExp(category, "i") } });
+      };
     }
 
-    if (tags) {
-      const tagsArray = Array.isArray(tags) ? tags : tags.split(",");
-      andFilters.push({ interests: { $in: tagsArray } });
+    // Interest filter (match at least one service tag)
+    if (tags.length > 0) {
+      query.interests = { $in: tags };
     }
 
-    if (language) {
-      andFilters.push({ languages: { $regex: new RegExp(language, "i") } });
+    // Optional: you can also filter by categoryId if needed
+    if (categoryId) {
+      query.interests = query.interests
+        ? { $in: [...tags, categoryId] }
+        : { $in: [categoryId] };
     }
 
-    // final query
-    if (andFilters.length > 0) {
-      query.$and = andFilters;
-    }
-
-    // pagination
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-
-    // fetch users
+    // Fetch users
     const users = await User.find(query)
-      .select("name email profile_image languages interests lastLocation")
+      .select("name email profile_image interests lastLocation")
       .skip(skip)
       .limit(parseInt(limit));
 
-    // total count
+    // Total count
     const total = await User.countDocuments(query);
+
+    if (users.length === 0) {
+      return res.json({
+        success: true,
+        total: 0,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        message: "No users found matching this service and location.",
+        users: [],
+      });
+    }
 
     res.json({
       success: true,
@@ -563,13 +581,14 @@ exports.searchUsers = async (req, res) => {
       users,
     });
   } catch (error) {
-    console.error("Error searching users:", error);
+    console.error("Error fetching interested users:", error);
     res.status(500).json({
       success: false,
       message: "Internal Server Error",
     });
   }
 };
+
 // ----------- Get All Services -------------
 exports.getAllServices = async (req, res) => {
   try {

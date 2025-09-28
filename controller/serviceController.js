@@ -6,7 +6,11 @@ const User = require("../model/User");
 function tryParse(val) {
   if (val === undefined || val === null) return val;
   if (typeof val !== "string") return val;
-  try { return JSON.parse(val); } catch (e) { return val; }
+  try {
+    return JSON.parse(val);
+  } catch (e) {
+    return val;
+  }
 }
 
 // Simple date/time validators
@@ -14,16 +18,29 @@ function isValidTime(t) {
   return typeof t === "string" && /^\d{2}:\d{2}$/.test(t);
 }
 function isValidDateISO(d) {
-  return typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d) && !isNaN(new Date(d).getTime());
+  return (
+    typeof d === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(d) &&
+    !isNaN(new Date(d).getTime())
+  );
 }
 exports.createService = async (req, res) => {
   try {
     const userId = req.body.userId || (req.user && req.user.id);
-    if (!userId) return res.status(400).json({ isSuccess: false, message: "userId is required" });
+    if (!userId)
+      return res
+        .status(400)
+        .json({ isSuccess: false, message: "userId is required" });
 
     const user = await User.findById(userId);
-    if (!user) return res.status(404).json({ isSuccess: false, message: "User not found" });
-    if (!user.is_active) return res.status(403).json({ isSuccess: false, message: "User is not active" });
+    if (!user)
+      return res
+        .status(404)
+        .json({ isSuccess: false, message: "User not found" });
+    if (!user.is_active)
+      return res
+        .status(403)
+        .json({ isSuccess: false, message: "User is not active" });
 
     const body = req.body;
     const title = body.title && String(body.title).trim();
@@ -42,23 +59,53 @@ exports.createService = async (req, res) => {
     const selectedTags = tryParse(body.selectedTags) || [];
 
     // ---- Validation ----
-    if (!title) return res.status(400).json({ isSuccess: false, message: "Title is required" });
-    if (!location || !location.name || location.latitude == null || location.longitude == null) {
-      return res.status(400).json({ isSuccess: false, message: "Location (name, latitude, longitude) is required" });
+    if (!title)
+      return res
+        .status(400)
+        .json({ isSuccess: false, message: "Title is required" });
+    if (
+      !location ||
+      !location.name ||
+      location.latitude == null ||
+      location.longitude == null
+    ) {
+      return res
+        .status(400)
+        .json({
+          isSuccess: false,
+          message: "Location (name, latitude, longitude) is required",
+        });
     }
-    if (!categoryId) return res.status(400).json({ isSuccess: false, message: "categoryId is required" });
+    if (!categoryId)
+      return res
+        .status(400)
+        .json({ isSuccess: false, message: "categoryId is required" });
 
     const category = await Category.findById(categoryId);
-    if (!category) return res.status(404).json({ isSuccess: false, message: "Category not found" });
+    if (!category)
+      return res
+        .status(404)
+        .json({ isSuccess: false, message: "Category not found" });
 
     if (!Array.isArray(selectedTags) || !selectedTags.length) {
-      return res.status(400).json({ isSuccess: false, message: "selectedTags must be a non-empty array" });
+      return res
+        .status(400)
+        .json({
+          isSuccess: false,
+          message: "selectedTags must be a non-empty array",
+        });
     }
 
-    const validTags = category.tags.filter(tag =>
-      selectedTags.map(t => t.toLowerCase()).includes(tag.toLowerCase())
+    const validTags = category.tags.filter((tag) =>
+      selectedTags.map((t) => t.toLowerCase()).includes(tag.toLowerCase())
     );
-    if (!validTags.length) return res.status(400).json({ isSuccess: false, message: "No valid tags selected from this category" });
+    if (!validTags.length)
+      return res
+        .status(400)
+        .json({
+          isSuccess: false,
+          message: "No valid tags selected from this category",
+        });
 
     // Build payload
     const servicePayload = {
@@ -74,15 +121,25 @@ exports.createService = async (req, res) => {
       tags: validTags,
       max_participants,
       service_type,
-      owner: user._id
+      owner: user._id,
     };
 
     if (service_type === "one_time") {
       if (!isValidTime(start_time) || !isValidTime(end_time)) {
-        return res.status(400).json({ isSuccess: false, message: "Invalid start_time or end_time" });
+        return res
+          .status(400)
+          .json({
+            isSuccess: false,
+            message: "Invalid start_time or end_time",
+          });
       }
       if (!isValidDateISO(date)) {
-        return res.status(400).json({ isSuccess: false, message: "Valid date (YYYY-MM-DD) required for one_time" });
+        return res
+          .status(400)
+          .json({
+            isSuccess: false,
+            message: "Valid date (YYYY-MM-DD) required for one_time",
+          });
       }
       servicePayload.date = new Date(date + "T00:00:00.000Z");
       servicePayload.start_time = start_time;
@@ -91,19 +148,34 @@ exports.createService = async (req, res) => {
 
     if (service_type === "recurring") {
       const recurring_schedule = tryParse(body.recurring_schedule) || [];
-      if (!Array.isArray(recurring_schedule) || recurring_schedule.length === 0) {
-        return res.status(400).json({ isSuccess: false, message: "Recurring schedule is required for recurring services" });
+      if (
+        !Array.isArray(recurring_schedule) ||
+        recurring_schedule.length === 0
+      ) {
+        return res
+          .status(400)
+          .json({
+            isSuccess: false,
+            message: "Recurring schedule is required for recurring services",
+          });
       }
 
-      servicePayload.recurring_schedule = recurring_schedule.map(item => {
-        if (!item.day || !isValidDateISO(item.date) || !isValidTime(item.start_time) || !isValidTime(item.end_time)) {
-          throw new Error("Each recurring schedule item must include day, date, start_time, end_time in HH:mm format");
+      servicePayload.recurring_schedule = recurring_schedule.map((item) => {
+        if (
+          !item.day ||
+          !isValidDateISO(item.date) ||
+          !isValidTime(item.start_time) ||
+          !isValidTime(item.end_time)
+        ) {
+          throw new Error(
+            "Each recurring schedule item must include day, date, start_time, end_time in HH:mm format"
+          );
         }
         return {
           day: item.day,
           date: new Date(item.date + "T00:00:00.000Z"),
           start_time: item.start_time,
-          end_time: item.end_time
+          end_time: item.end_time,
         };
       });
     }
@@ -116,34 +188,18 @@ exports.createService = async (req, res) => {
     user.services.push(createdService._id);
     await user.save();
 
-    return res.json({ isSuccess: true, message: "Service created successfully", data: createdService });
-
+    return res.json({
+      isSuccess: true,
+      message: "Service created successfully",
+      data: createdService,
+    });
   } catch (err) {
     console.error("createService error:", err);
-    res.status(500).json({ isSuccess: false, message: "Server error", error: err.message });
+    res
+      .status(500)
+      .json({ isSuccess: false, message: "Server error", error: err.message });
   }
 };
-
-// ----------- Get Services -------------
-const Service = require("../model/Service");
-const Category = require("../model/Category");
-const User = require("../model/User");
-const mongoose = require("mongoose");
-
-// Helpers
-function tryParse(val) {
-  if (val === undefined || val === null) return val;
-  if (typeof val !== "string") return val;
-  try { return JSON.parse(val); } catch (e) { return val; }
-}
-
-// Simple date/time validators
-function isValidTime(t) {
-  return typeof t === "string" && /^\d{2}:\d{2}$/.test(t);
-}
-function isValidDateISO(d) {
-  return typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d) && !isNaN(new Date(d).getTime());
-}
 
 function looksLikeObjectId(id) {
   return mongoose.Types.ObjectId.isValid(id);
@@ -153,12 +209,13 @@ function looksLikeObjectId(id) {
 function bboxForLatLon(lat, lon, radiusKm = 3) {
   const R = 6371; // km
   const deltaLat = (radiusKm / R) * (180 / Math.PI);
-  const deltaLon = (radiusKm / R) * (180 / Math.PI) / Math.cos(lat * Math.PI/180);
+  const deltaLon =
+    ((radiusKm / R) * (180 / Math.PI)) / Math.cos((lat * Math.PI) / 180);
   return {
     minLat: lat - deltaLat,
     maxLat: lat + deltaLat,
     minLon: lon - deltaLon,
-    maxLon: lon + deltaLon
+    maxLon: lon + deltaLon,
   };
 }
 
@@ -173,11 +230,20 @@ function dateRangeForDay(dateStr) {
 exports.createService = async (req, res) => {
   try {
     const userId = req.body.userId || (req.user && req.user.id);
-    if (!userId) return res.status(400).json({ isSuccess: false, message: "userId is required" });
+    if (!userId)
+      return res
+        .status(400)
+        .json({ isSuccess: false, message: "userId is required" });
 
     const user = await User.findById(userId);
-    if (!user) return res.status(404).json({ isSuccess: false, message: "User not found" });
-    if (!user.is_active) return res.status(403).json({ isSuccess: false, message: "User is not active" });
+    if (!user)
+      return res
+        .status(404)
+        .json({ isSuccess: false, message: "User not found" });
+    if (!user.is_active)
+      return res
+        .status(403)
+        .json({ isSuccess: false, message: "User is not active" });
 
     const body = req.body;
     const title = body.title && String(body.title).trim();
@@ -196,23 +262,53 @@ exports.createService = async (req, res) => {
     const selectedTags = tryParse(body.selectedTags) || [];
 
     // ---- Validation ----
-    if (!title) return res.status(400).json({ isSuccess: false, message: "Title is required" });
-    if (!location || !location.name || location.latitude == null || location.longitude == null) {
-      return res.status(400).json({ isSuccess: false, message: "Location (name, latitude, longitude) is required" });
+    if (!title)
+      return res
+        .status(400)
+        .json({ isSuccess: false, message: "Title is required" });
+    if (
+      !location ||
+      !location.name ||
+      location.latitude == null ||
+      location.longitude == null
+    ) {
+      return res
+        .status(400)
+        .json({
+          isSuccess: false,
+          message: "Location (name, latitude, longitude) is required",
+        });
     }
-    if (!categoryId) return res.status(400).json({ isSuccess: false, message: "categoryId is required" });
+    if (!categoryId)
+      return res
+        .status(400)
+        .json({ isSuccess: false, message: "categoryId is required" });
 
     const category = await Category.findById(categoryId);
-    if (!category) return res.status(404).json({ isSuccess: false, message: "Category not found" });
+    if (!category)
+      return res
+        .status(404)
+        .json({ isSuccess: false, message: "Category not found" });
 
     if (!Array.isArray(selectedTags) || !selectedTags.length) {
-      return res.status(400).json({ isSuccess: false, message: "selectedTags must be a non-empty array" });
+      return res
+        .status(400)
+        .json({
+          isSuccess: false,
+          message: "selectedTags must be a non-empty array",
+        });
     }
 
-    const validTags = category.tags.filter(tag =>
-      selectedTags.map(t => t.toLowerCase()).includes(tag.toLowerCase())
+    const validTags = category.tags.filter((tag) =>
+      selectedTags.map((t) => t.toLowerCase()).includes(tag.toLowerCase())
     );
-    if (!validTags.length) return res.status(400).json({ isSuccess: false, message: "No valid tags selected from this category" });
+    if (!validTags.length)
+      return res
+        .status(400)
+        .json({
+          isSuccess: false,
+          message: "No valid tags selected from this category",
+        });
 
     // Build payload
     const servicePayload = {
@@ -228,15 +324,25 @@ exports.createService = async (req, res) => {
       tags: validTags,
       max_participants,
       service_type,
-      owner: user._id
+      owner: user._id,
     };
 
     if (service_type === "one_time") {
       if (!isValidTime(start_time) || !isValidTime(end_time)) {
-        return res.status(400).json({ isSuccess: false, message: "Invalid start_time or end_time" });
+        return res
+          .status(400)
+          .json({
+            isSuccess: false,
+            message: "Invalid start_time or end_time",
+          });
       }
       if (!isValidDateISO(date)) {
-        return res.status(400).json({ isSuccess: false, message: "Valid date (YYYY-MM-DD) required for one_time" });
+        return res
+          .status(400)
+          .json({
+            isSuccess: false,
+            message: "Valid date (YYYY-MM-DD) required for one_time",
+          });
       }
       servicePayload.date = new Date(date + "T00:00:00.000Z");
       servicePayload.start_time = start_time;
@@ -245,19 +351,34 @@ exports.createService = async (req, res) => {
 
     if (service_type === "recurring") {
       const recurring_schedule = tryParse(body.recurring_schedule) || [];
-      if (!Array.isArray(recurring_schedule) || recurring_schedule.length === 0) {
-        return res.status(400).json({ isSuccess: false, message: "Recurring schedule is required for recurring services" });
+      if (
+        !Array.isArray(recurring_schedule) ||
+        recurring_schedule.length === 0
+      ) {
+        return res
+          .status(400)
+          .json({
+            isSuccess: false,
+            message: "Recurring schedule is required for recurring services",
+          });
       }
 
-      servicePayload.recurring_schedule = recurring_schedule.map(item => {
-        if (!item.day || !isValidDateISO(item.date) || !isValidTime(item.start_time) || !isValidTime(item.end_time)) {
-          throw new Error("Each recurring schedule item must include day, date, start_time, end_time in HH:mm format");
+      servicePayload.recurring_schedule = recurring_schedule.map((item) => {
+        if (
+          !item.day ||
+          !isValidDateISO(item.date) ||
+          !isValidTime(item.start_time) ||
+          !isValidTime(item.end_time)
+        ) {
+          throw new Error(
+            "Each recurring schedule item must include day, date, start_time, end_time in HH:mm format"
+          );
         }
         return {
           day: item.day,
           date: new Date(item.date + "T00:00:00.000Z"),
           start_time: item.start_time,
-          end_time: item.end_time
+          end_time: item.end_time,
         };
       });
     }
@@ -270,11 +391,16 @@ exports.createService = async (req, res) => {
     user.services.push(createdService._id);
     await user.save();
 
-    return res.json({ isSuccess: true, message: "Service created successfully", data: createdService });
-
+    return res.json({
+      isSuccess: true,
+      message: "Service created successfully",
+      data: createdService,
+    });
   } catch (err) {
     console.error("createService error:", err);
-    res.status(500).json({ isSuccess: false, message: "Server error", error: err.message });
+    res
+      .status(500)
+      .json({ isSuccess: false, message: "Server error", error: err.message });
   }
 };
 
@@ -285,54 +411,110 @@ exports.getServices = async (req, res) => {
 
     // ---------- QUERY PARAMS ----------
     const categoryId = q.categoryId || null;
-    const tags = tryParse(q.tags) || (q.tags ? [q.tags] : []);
-    const isFree = q.isFree === undefined ? null : (q.isFree === "true" || q.isFree === true);
+    const tags = Array.isArray(q.tags)
+      ? q.tags
+      : tryParse(q.tags) || (q.tags ? [q.tags] : []);
+    const isFree =
+      q.isFree === undefined ? null : q.isFree === "true" || q.isFree === true;
     const dateStr = q.date || null;
-    const lat = q.latitude !== undefined ? Number(q.latitude) : null;
-    const lon = q.longitude !== undefined ? Number(q.longitude) : null;
-    const radiusKm = q.radius_km !== undefined ? Number(q.radius_km) : 3;
+    const lat =
+      q.latitude !== undefined && !isNaN(q.latitude)
+        ? Number(q.latitude)
+        : null;
+    const lon =
+      q.longitude !== undefined && !isNaN(q.longitude)
+        ? Number(q.longitude)
+        : null;
+    const radiusKm =
+      q.radius_km !== undefined && !isNaN(q.radius_km)
+        ? Number(q.radius_km)
+        : 3;
 
     const page = Math.max(1, Number(q.page || 1));
     const limit = Math.min(100, Number(q.limit || 20));
     const skip = (page - 1) * limit;
+    const sortBy = q.sortBy || "created_at";
+    const sortDir = q.sortDir === "asc" ? 1 : -1;
 
     const and = [];
 
     // ---------- CATEGORY FILTER ----------
     if (categoryId) {
+      if (!looksLikeObjectId(categoryId)) {
+        return res
+          .status(400)
+          .json({ isSuccess: false, message: "Invalid categoryId" });
+      }
       and.push({ category: mongoose.Types.ObjectId(categoryId) });
     }
 
     // ---------- TAGS FILTER ----------
     if (tags.length) {
-      const normalizedTags = tags.map(t => String(t).trim()).filter(Boolean);
+      const normalizedTags = tags.map((t) => String(t).trim()).filter(Boolean);
       if (normalizedTags.length) {
-        and.push({ tags: { $all: normalizedTags } }); // all tags must match
+        and.push({ tags: { $in: normalizedTags } });
       }
     }
 
     // ---------- ISFREE FILTER ----------
-    if (isFree !== null) and.push({ isFree: !!isFree });
+    if (isFree !== null) {
+      and.push({ isFree: !!isFree });
+    }
 
     // ---------- DATE FILTER ----------
     if (dateStr) {
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr))
-        return res.status(400).json({ isSuccess: false, message: "Invalid date format, expected YYYY-MM-DD" });
-
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+        return res
+          .status(400)
+          .json({
+            isSuccess: false,
+            message: "Invalid date format, expected YYYY-MM-DD",
+          });
+      }
       const dateRange = dateRangeForDay(dateStr);
       and.push({
         $or: [
-          { $and: [{ service_type: "one_time" }, { date: { $gte: dateRange.start, $lt: dateRange.end } }] },
-          { $and: [{ service_type: "recurring" }, { "recurring_schedule.date": { $exists: true, $gte: dateRange.start, $lt: dateRange.end } }] }
-        ]
+          {
+            $and: [
+              { service_type: "one_time" },
+              { date: { $gte: dateRange.start, $lt: dateRange.end } },
+            ],
+          },
+          {
+            $and: [
+              { service_type: "recurring" },
+              {
+                "recurring_schedule.date": {
+                  $gte: dateRange.start,
+                  $lt: dateRange.end,
+                },
+              },
+            ],
+          },
+        ],
       });
     }
 
+    // ---------- INTEREST-BASED FILTER ----------
+    if (!categoryId && !tags.length && req.user?.id) {
+      const user = await User.findById(req.user.id);
+      if (user?.interests?.length) {
+        and.push({
+          $or: [
+            { category: { $in: user.interests } },
+            { tags: { $in: user.interests } },
+          ],
+        });
+      }
+    }
+
     // ---------- LOCATION FILTER ----------
-    if (lat != null && lon != null && !Number.isNaN(lat) && !Number.isNaN(lon)) {
+    if (lat != null && lon != null) {
       const box = bboxForLatLon(lat, lon, radiusKm);
-      and.push({ latitude: { $gte: box.minLat, $lte: box.maxLat } });
-      and.push({ longitude: { $gte: box.minLon, $lte: box.maxLon } });
+      and.push({ "location.latitude": { $gte: box.minLat, $lte: box.maxLat } });
+      and.push({
+        "location.longitude": { $gte: box.minLon, $lte: box.maxLon },
+      });
     }
 
     const mongoQuery = and.length ? { $and: and } : {};
@@ -349,38 +531,47 @@ exports.getServices = async (req, res) => {
 
     // ---------- DISTANCE CALCULATION ----------
     if (lat != null && lon != null) {
-      const toRad = v => (v * Math.PI) / 180;
-      services.forEach(s => {
+      const toRad = (v) => (v * Math.PI) / 180;
+      services.forEach((s) => {
         if (s.latitude != null && s.longitude != null) {
-          const lat1 = lat, lon1 = lon;
-          const lat2 = Number(s.latitude), lon2 = Number(s.longitude);
+          const lat1 = lat,
+            lon1 = lon;
+          const lat2 = Number(s.latitude),
+            lon2 = Number(s.longitude);
           const R = 6371; // km
           const dLat = toRad(lat2 - lat1);
           const dLon = toRad(lon2 - lon1);
-          const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon/2)**2;
-          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+          const a =
+            Math.sin(dLat / 2) ** 2 +
+            Math.cos(toRad(lat1)) *
+              Math.cos(toRad(lat2)) *
+              Math.sin(dLon / 2) ** 2;
+          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
           s.distance_km = Math.round(R * c * 100) / 100;
-        } else s.distance_km = null;
+        } else {
+          s.distance_km = null;
+        }
       });
 
       if (!q.sortBy || q.sortBy === "distance") {
-        services.sort((a, b) => (a.distance_km || 9999) - (b.distance_km || 9999));
+        services.sort(
+          (a, b) => (a.distance_km || 9999) - (b.distance_km || 9999)
+        );
       }
     }
 
     return res.json({
       isSuccess: true,
       message: "Services fetched successfully",
-      data: { totalCount, page, limit, services }
+      data: { totalCount, page, limit, services },
     });
-
   } catch (err) {
     console.error("getServices error:", err);
-    return res.status(500).json({ isSuccess: false, message: "Server error", error: err.message });
+    return res
+      .status(500)
+      .json({ isSuccess: false, message: "Server error", error: err.message });
   }
 };
-
-
 
 exports.searchUsers = async (req, res) => {
   try {
@@ -392,7 +583,7 @@ exports.searchUsers = async (req, res) => {
       tags,
       language,
       page = 1,
-      limit = 10
+      limit = 10,
     } = req.query;
 
     if (!latitude || !longitude) {
@@ -479,8 +670,8 @@ exports.getAllServices = async (req, res) => {
 
     // fetch services
     const services = await Service.find()
-      .populate("category", "name")       // category ka naam include hoga
-      .populate("owner", "name email")    // service owner details
+      .populate("category", "name") // category ka naam include hoga
+      .populate("owner", "name email") // service owner details
       .sort({ [sortBy]: sortDir })
       .skip(skip)
       .limit(limit)
@@ -505,4 +696,3 @@ exports.getAllServices = async (req, res) => {
     });
   }
 };
-

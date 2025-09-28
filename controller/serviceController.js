@@ -508,7 +508,6 @@ exports.getServices = async (req, res) => {
   }
 };
 
-// controllers/userController.js
 
 
 exports.getInterestedUsers = async (req, res) => {
@@ -528,40 +527,37 @@ exports.getInterestedUsers = async (req, res) => {
     // Base query
     const query = {};
 
-    // Location filter only if lat/lon are non-zero
+    // ---------- LOCATION FILTER ----------
     if (Number(latitude) !== 0 && Number(longitude) !== 0) {
       query["lastLocation.coords"] = {
-        $near: {
-          $geometry: {
-            type: "Point",
-            coordinates: [parseFloat(longitude), parseFloat(latitude)],
-          },
-          $maxDistance: parseFloat(radius_km) * 1000, // convert km -> meters
+        $geoWithin: {
+          $centerSphere: [
+            [parseFloat(longitude), parseFloat(latitude)],
+            parseFloat(radius_km) / 6371, // radius in radians
+          ],
         },
       };
     }
 
-    // Interest filter (match at least one service tag)
-    if (tags.length > 0) {
+    // ---------- INTEREST / CATEGORY FILTER ----------
+    if (tags.length > 0 && categoryId) {
+      query.interests = { $in: [...tags, categoryId] };
+    } else if (tags.length > 0) {
       query.interests = { $in: tags };
+    } else if (categoryId) {
+      query.interests = { $in: [categoryId] };
     }
 
-    // Optional: you can also filter by categoryId if needed
-    if (categoryId) {
-      query.interests = query.interests
-        ? { $in: [...tags, categoryId] }
-        : { $in: [categoryId] };
-    }
-
-    // Fetch users
+    // ---------- FETCH USERS ----------
     const users = await User.find(query)
       .select("name email profile_image interests lastLocation")
       .skip(skip)
       .limit(parseInt(limit));
 
-    // Total count
+    // ---------- TOTAL COUNT ----------
     const total = await User.countDocuments(query);
 
+    // ---------- RESPONSE ----------
     if (users.length === 0) {
       return res.json({
         success: true,

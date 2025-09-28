@@ -326,4 +326,46 @@ exports.searchUsers = async (req, res) => {
     });
   }
 };
+// ----------- Get All Services -------------
+exports.getAllServices = async (req, res) => {
+  try {
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const limit = Math.min(100, Number(req.query.limit) || 20);
+    const skip = (page - 1) * limit;
+
+    // sort by created_at (default)
+    const sortBy = req.query.sortBy || "createdAt";
+    const sortDir = req.query.sortDir === "asc" ? 1 : -1;
+
+    // total count
+    const totalCount = await Service.countDocuments();
+
+    // fetch services
+    const services = await Service.find()
+      .populate("category", "name")       // category ka naam include hoga
+      .populate("owner", "name email")    // service owner details
+      .sort({ [sortBy]: sortDir })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    res.json({
+      isSuccess: true,
+      message: "All services fetched successfully",
+      data: {
+        totalCount,
+        page,
+        limit,
+        services,
+      },
+    });
+  } catch (err) {
+    console.error("getAllServices error:", err);
+    res.status(500).json({
+      isSuccess: false,
+      message: "Server error",
+      error: err.message,
+    });
+  }
+};
 

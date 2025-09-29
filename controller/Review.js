@@ -54,7 +54,7 @@ exports.getServiceReviews = async (req, res) => {
   try {
     const { serviceId } = req.params;
 
-    const reviews = await Review.find({ service: serviceId })
+    const reviews = await Review.find({ service: new mongoose.Types.ObjectId(serviceId), })
       .populate("user", "name email"); // ✅ yaha se username mil jayega
 
     return res.json({

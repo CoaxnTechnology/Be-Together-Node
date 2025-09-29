@@ -8,31 +8,48 @@ exports.createReview = async (req, res) => {
 
     // Validate input
     if (!serviceId || !userId || rating == null) {
-      return res.status(400).json({ isSuccess: false, message: "serviceId, userId and rating are required" });
+      return res.status(400).json({ 
+        isSuccess: false, 
+        message: "serviceId, userId and rating are required" 
+      });
     }
 
     const service = await Service.findById(serviceId);
-    if (!service) return res.status(404).json({ isSuccess: false, message: "Service not found" });
+    if (!service) {
+      return res.status(404).json({ isSuccess: false, message: "Service not found" });
+    }
 
-    const user = await User.findById(userId);
-    if (!user) return res.status(404).json({ isSuccess: false, message: "User not found" });
+    const user = await User.findById(userId).select("name email");
+    if (!user) {
+      return res.status(404).json({ isSuccess: false, message: "User not found" });
+    }
 
-    // Create review
+    // Create review with username automatically
     const review = new Review({
       service: service._id,
       user: user._id,
+      username: user.name,   // ✅ Extracted username
       rating: Number(rating),
       text: text || "",
     });
 
     await review.save();
 
-    return res.json({ isSuccess: true, message: "Review submitted successfully", data: review });
+    return res.json({ 
+      isSuccess: true, 
+      message: "Review submitted successfully", 
+      data: review 
+    });
   } catch (err) {
     console.error("createReview error:", err);
-    return res.status(500).json({ isSuccess: false, message: "Server error", error: err.message });
+    return res.status(500).json({ 
+      isSuccess: false, 
+      message: "Server error", 
+      error: err.message 
+    });
   }
 };
+
 exports.getServiceReviews = async (req, res) => {
   try {
     const { serviceId } = req.query;

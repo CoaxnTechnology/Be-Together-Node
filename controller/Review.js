@@ -1,13 +1,13 @@
+const mongoose = require("mongoose");
 const Review = require("../model/review");
 const Service = require("../model/Service");
 const User = require("../model/User");
-const mongoose = require("mongoose");
 
+// Create a review
 exports.createReview = async (req, res) => {
   try {
     const { serviceId, userId, rating, text } = req.body;
 
-    // Validate input
     if (!serviceId || !userId || rating == null) {
       return res.status(400).json({ 
         isSuccess: false, 
@@ -16,20 +16,14 @@ exports.createReview = async (req, res) => {
     }
 
     const service = await Service.findById(serviceId);
-    if (!service) {
-      return res.status(404).json({ isSuccess: false, message: "Service not found" });
-    }
+    if (!service) return res.status(404).json({ isSuccess: false, message: "Service not found" });
 
-    const user = await User.findById(userId).select("name email");
-    if (!user) {
-      return res.status(404).json({ isSuccess: false, message: "User not found" });
-    }
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ isSuccess: false, message: "User not found" });
 
-    // Create review with username automatically
     const review = new Review({
       service: service._id,
       user: user._id,
-      username: user.name,   // ✅ Extracted username
       rating: Number(rating),
       text: text || "",
     });
@@ -50,26 +44,45 @@ exports.createReview = async (req, res) => {
     });
   }
 };
-//getServiceReviews
+
+// Get reviews for a service
+
 exports.getServiceReviews = async (req, res) => {
   try {
-    const { serviceId } = req.params;
+    // Accept serviceId from params or body
+    const serviceId = req.params.serviceId || req.body.serviceId;
 
+    if (!serviceId) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "serviceId is required",
+      });
+    }
+
+    // Validate ObjectId
+    if (!mongoose.Types.ObjectId.isValid(serviceId)) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Invalid serviceId",
+      });
+    }
+
+    // Fetch reviews and populate user info
     const reviews = await Review.find({ service: serviceId })
-      .populate("user", "name email profile_image"); // ✅ username via populate
+      .populate("user", "name profile_image") // gets the reviewer's name and profile
+      .sort({ created_at: -1 });
 
     return res.json({
       isSuccess: true,
-      data: reviews
+      data: reviews,
     });
   } catch (err) {
     console.error("getServiceReviews error:", err);
     return res.status(500).json({
       isSuccess: false,
       message: "Server error",
-      error: err.message
+      error: err.message,
     });
   }
 };
-
 

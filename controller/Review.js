@@ -55,15 +55,15 @@ exports.getServiceReviews = async (req, res) => {
   try {
     const { serviceId } = req.params;
 
-    const reviews = await Review.find({ service: new mongoose.Types.ObjectId(serviceId), })
-      .populate("user", "name email"); // ✅ yaha se username mil jayega
+    const reviews = await Review.find({ service: serviceId })
+      .populate("user", "name email profile_image"); // ✅ username via populate
 
     return res.json({
       isSuccess: true,
       data: reviews
     });
   } catch (err) {
-    console.error("getReviewsByService error:", err);
+    console.error("getServiceReviews error:", err);
     return res.status(500).json({
       isSuccess: false,
       message: "Server error",
@@ -71,4 +71,5 @@ exports.getServiceReviews = async (req, res) => {
     });
   }
 };
+
 

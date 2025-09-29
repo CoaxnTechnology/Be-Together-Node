@@ -49,26 +49,25 @@ exports.createReview = async (req, res) => {
     });
   }
 };
-
+//getServiceReviews
 exports.getServiceReviews = async (req, res) => {
   try {
-    const { serviceId } = req.query;
-    if (!serviceId) return res.status(400).json({ isSuccess: false, message: "serviceId is required" });
+    const { serviceId } = req.params;
 
     const reviews = await Review.find({ service: serviceId })
-      .populate({ path: "user", select: "name avatar" })
-      .sort({ created_at: -1 })
-      .lean();
+      .populate("user", "name email"); // ✅ yaha se username mil jayega
 
-    // Calculate average rating
-    const avgRating =
-      reviews.length > 0
-        ? reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length
-        : 0;
-
-    return res.json({ isSuccess: true, data: { reviews, avgRating } });
+    return res.json({
+      isSuccess: true,
+      data: reviews
+    });
   } catch (err) {
-    console.error("getServiceReviews error:", err);
-    return res.status(500).json({ isSuccess: false, message: "Server error", error: err.message });
+    console.error("getReviewsByService error:", err);
+    return res.status(500).json({
+      isSuccess: false,
+      message: "Server error",
+      error: err.message
+    });
   }
 };
+

@@ -25,8 +25,6 @@ function isValidDateISO(d) {
     !isNaN(new Date(d).getTime())
   );
 }
-const axios = require("axios");
-
 exports.createService = async (req, res) => {
   try {
     const userId = req.body.userId || (req.user && req.user.id);
@@ -61,41 +59,11 @@ exports.createService = async (req, res) => {
     const categoryId = body.categoryId;
     const selectedTags = tryParse(body.selectedTags) || [];
 
-    // ✅ City: use body.city OR fetch from OpenStreetMap if not provided
-    let city = body.city ? String(body.city).trim() : null;
-    if (!city && location?.latitude && location?.longitude) {
-      try {
-        const response = await axios.get(
-          `https://nominatim.openstreetmap.org/reverse`,
-          {
-            params: {
-              lat: location.latitude,
-              lon: location.longitude,
-              format: "json",
-            },
-            headers: { "User-Agent": "Betogether-App" },
-          }
-        );
-
-        if (response.data && response.data.address) {
-          city =
-            response.data.address.city ||
-            response.data.address.town ||
-            response.data.address.village ||
-            response.data.address.state ||
-            null;
-        }
-      } catch (geoErr) {
-        console.warn("⚠️ OpenStreetMap reverse geocoding failed:", geoErr.message);
-      }
-    }
-
     // ---- Validation ----
     if (!title)
       return res
         .status(400)
         .json({ isSuccess: false, message: "Title is required" });
-
     if (
       !location ||
       !location.name ||
@@ -107,7 +75,6 @@ exports.createService = async (req, res) => {
         message: "Location (name, latitude, longitude) is required",
       });
     }
-
     if (!categoryId)
       return res
         .status(400)
@@ -135,7 +102,7 @@ exports.createService = async (req, res) => {
         message: "No valid tags selected from this category",
       });
 
-    // ---- Build payload ----
+    // Build payload
     const servicePayload = {
       title,
       description,
@@ -145,7 +112,6 @@ exports.createService = async (req, res) => {
       location_name: location.name,
       latitude: Number(location.latitude),
       longitude: Number(location.longitude),
-      city, // ✅ Automatically set city
       category: category._id,
       tags: validTags,
       max_participants,

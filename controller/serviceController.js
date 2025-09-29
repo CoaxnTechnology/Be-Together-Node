@@ -382,208 +382,206 @@ exports.createService = async (req, res) => {
 };
 
 // ---------------- GET SERVICES ----------------
-exports.getServices = async (req, res) => {
-  try {
-    console.log("===== getServices called =====");
-    const q = { ...req.query, ...req.body };
-    console.log("Received query/body:", q);
+// exports.getServices = async (req, res) => {
+//   try {
+//     console.log("===== getServices called =====");
+//     const q = { ...req.query, ...req.body };
+//     console.log("Received query/body:", q);
 
-    // ---------- QUERY PARAMS ----------
-    const categoryId = q.categoryId || null;
-    const tags = tryParse(q.tags) || (q.tags ? [q.tags] : []);
-    const lat = q.latitude !== undefined ? Number(q.latitude) : null;
-    const lon = q.longitude !== undefined ? Number(q.longitude) : null;
-    const radiusKm = q.radius_km !== undefined ? Number(q.radius_km) : 3;
+//     // ---------- QUERY PARAMS ----------
+//     const categoryId = q.categoryId || null;
+//     const tags = tryParse(q.tags) || (q.tags ? [q.tags] : []);
+//     const lat = q.latitude !== undefined ? Number(q.latitude) : null;
+//     const lon = q.longitude !== undefined ? Number(q.longitude) : null;
+//     const radiusKm = q.radius_km !== undefined ? Number(q.radius_km) : 3;
 
-    const page = Math.max(1, Number(q.page || 1));
-    const limit = Math.min(100, Number(q.limit || 20));
-    const skip = (page - 1) * limit;
+//     const page = Math.max(1, Number(q.page || 1));
+//     const limit = Math.min(100, Number(q.limit || 20));
+//     const skip = (page - 1) * limit;
 
-    console.log({ page, limit, skip, categoryId, tags, lat, lon, radiusKm });
+//     console.log({ page, limit, skip, categoryId, tags, lat, lon, radiusKm });
 
-    const and = [];
+//     const and = [];
 
-    // ---------- CATEGORY FILTER ----------
-    if (categoryId) {
-      if (!looksLikeObjectId(categoryId)) {
-        console.log("Invalid categoryId:", categoryId);
-        return res
-          .status(400)
-          .json({ isSuccess: false, message: "Invalid categoryId" });
-      }
-      and.push({ category: categoryId });
-      console.log("Category filter applied:", categoryId);
-    }
+//     // ---------- CATEGORY FILTER ----------
+//     if (categoryId) {
+//       if (!looksLikeObjectId(categoryId)) {
+//         console.log("Invalid categoryId:", categoryId);
+//         return res
+//           .status(400)
+//           .json({ isSuccess: false, message: "Invalid categoryId" });
+//       }
+//       and.push({ category: categoryId });
+//       console.log("Category filter applied:", categoryId);
+//     }
 
-    // ---------- TAGS FILTER ----------
-    if (tags.length) {
-      const normalizedTags = tags.map((t) => String(t).trim()).filter(Boolean);
-      if (normalizedTags.length) {
-        and.push({ tags: { $in: normalizedTags } });
-        console.log("Tags filter applied:", normalizedTags);
-      }
-    }
+//     // ---------- TAGS FILTER ----------
+//     if (tags.length) {
+//       const normalizedTags = tags.map((t) => String(t).trim()).filter(Boolean);
+//       if (normalizedTags.length) {
+//         and.push({ tags: { $in: normalizedTags } });
+//         console.log("Tags filter applied:", normalizedTags);
+//       }
+//     }
 
-    // ---------- LOCATION FILTER ----------
-    if (
-      lat != null &&
-      lon != null &&
-      !Number.isNaN(lat) &&
-      !Number.isNaN(lon)
-    ) {
-      const box = bboxForLatLon(lat, lon, radiusKm);
-      console.log("Bounding box for location filter:", box);
-      and.push({ latitude: { $gte: box.minLat, $lte: box.maxLat } });
-      and.push({ longitude: { $gte: box.minLon, $lte: box.maxLon } });
-    }
+//     // ---------- LOCATION FILTER ----------
+//     if (
+//       lat != null &&
+//       lon != null &&
+//       !Number.isNaN(lat) &&
+//       !Number.isNaN(lon)
+//     ) {
+//       const box = bboxForLatLon(lat, lon, radiusKm);
+//       console.log("Bounding box for location filter:", box);
+//       and.push({ latitude: { $gte: box.minLat, $lte: box.maxLat } });
+//       and.push({ longitude: { $gte: box.minLon, $lte: box.maxLon } });
+//     }
 
-    const mongoQuery = and.length ? { $and: and } : {};
-    console.log("Final MongoDB query:", mongoQuery);
+//     const mongoQuery = and.length ? { $and: and } : {};
+//     console.log("Final MongoDB query:", mongoQuery);
 
-    // ---------- TOTAL COUNT ----------
-    const totalCount = await Service.countDocuments(mongoQuery);
-    console.log("Total services count matching query:", totalCount);
+//     // ---------- TOTAL COUNT ----------
+//     const totalCount = await Service.countDocuments(mongoQuery);
+//     console.log("Total services count matching query:", totalCount);
 
-    // ---------- FETCH SERVICES ----------
-    let services = await Service.find(mongoQuery)
-      .select("-__v")
-      .skip(skip)
-      .limit(limit)
-      .lean();
-    console.log(
-      "Fetched services before distance calculation:",
-      services.length
-    );
-    // ---------- NO SERVICES CHECK ----------
-    if (!services.length) {
-      console.log("No services found for this location/filter.");
-      return res.json({
-        isSuccess: true,
-        message: "No services available at your location",
-        data: { totalCount: 0, page, limit, services: [] },
-      });
-    }
+//     // ---------- FETCH SERVICES ----------
+//     let services = await Service.find(mongoQuery)
+//       .select("-__v")
+//       .skip(skip)
+//       .limit(limit)
+//       .lean();
+//     console.log(
+//       "Fetched services before distance calculation:",
+//       services.length
+//     );
+//     // ---------- NO SERVICES CHECK ----------
+//     if (!services.length) {
+//       console.log("No services found for this location/filter.");
+//       return res.json({
+//         isSuccess: true,
+//         message: "No services available at your location",
+//         data: { totalCount: 0, page, limit, services: [] },
+//       });
+//     }
 
-    // ---------- DISTANCE CALCULATION ----------
-    if (lat != null && lon != null) {
-      const toRad = (v) => (v * Math.PI) / 180;
-      services.forEach((s) => {
-        if (s.latitude != null && s.longitude != null) {
-          const lat1 = lat,
-            lon1 = lon;
-          const lat2 = Number(s.latitude),
-            lon2 = Number(s.longitude);
-          const R = 6371; // km
-          const dLat = toRad(lat2 - lat1);
-          const dLon = toRad(lon2 - lon1);
-          const a =
-            Math.sin(dLat / 2) ** 2 +
-            Math.cos(toRad(lat1)) *
-              Math.cos(toRad(lat2)) *
-              Math.sin(dLon / 2) ** 2;
-          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-          s.distance_km = Math.round(R * c * 100) / 100;
-        } else s.distance_km = null;
-      });
+//     // ---------- DISTANCE CALCULATION ----------
+//     if (lat != null && lon != null) {
+//       const toRad = (v) => (v * Math.PI) / 180;
+//       services.forEach((s) => {
+//         if (s.latitude != null && s.longitude != null) {
+//           const lat1 = lat,
+//             lon1 = lon;
+//           const lat2 = Number(s.latitude),
+//             lon2 = Number(s.longitude);
+//           const R = 6371; // km
+//           const dLat = toRad(lat2 - lat1);
+//           const dLon = toRad(lon2 - lon1);
+//           const a =
+//             Math.sin(dLat / 2) ** 2 +
+//             Math.cos(toRad(lat1)) *
+//               Math.cos(toRad(lat2)) *
+//               Math.sin(dLon / 2) ** 2;
+//           const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+//           s.distance_km = Math.round(R * c * 100) / 100;
+//         } else s.distance_km = null;
+//       });
 
-      // Sort by distance
-      services.sort(
-        (a, b) => (a.distance_km || 9999) - (b.distance_km || 9999)
-      );
-      console.log("Services sorted by distance.");
-    }
+//       // Sort by distance
+//       services.sort(
+//         (a, b) => (a.distance_km || 9999) - (b.distance_km || 9999)
+//       );
+//       console.log("Services sorted by distance.");
+//     }
 
-    console.log("Final services to return:", services.length);
+//     console.log("Final services to return:", services.length);
 
-    return res.json({
-      isSuccess: true,
-      message: "Services fetched successfully",
-      data: { totalCount, page, limit, services },
-    });
-  } catch (err) {
-    console.error("getServices error:", err);
-    return res
-      .status(500)
-      .json({ isSuccess: false, message: "Server error", error: err.message });
-  }
-};
+//     return res.json({
+//       isSuccess: true,
+//       message: "Services fetched successfully",
+//       data: { totalCount, page, limit, services },
+//     });
+//   } catch (err) {
+//     console.error("getServices error:", err);
+//     return res
+//       .status(500)
+//       .json({ isSuccess: false, message: "Server error", error: err.message });
+//   }
+// };
 
+// exports.getInterestedUsers = async (req, res) => {
+//   try {
+//     const {
+//       latitude = 0,
+//       longitude = 0,
+//       radius_km = 3,
+//       categoryId,
+//       tags = [],
+//       page = 1,
+//       limit = 10,
+//     } = req.body;
 
+//     const skip = (parseInt(page) - 1) * parseInt(limit);
 
-exports.getInterestedUsers = async (req, res) => {
-  try {
-    const {
-      latitude = 0,
-      longitude = 0,
-      radius_km = 3,
-      categoryId,
-      tags = [],
-      page = 1,
-      limit = 10,
-    } = req.body;
+//     // Base query
+//     const query = {};
 
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+//     // ---------- LOCATION FILTER ----------
+//     if (Number(latitude) !== 0 && Number(longitude) !== 0) {
+//       query["lastLocation.coords"] = {
+//         $geoWithin: {
+//           $centerSphere: [
+//             [parseFloat(longitude), parseFloat(latitude)],
+//             parseFloat(radius_km) / 6371, // radius in radians
+//           ],
+//         },
+//       };
+//     }
 
-    // Base query
-    const query = {};
+//     // ---------- INTEREST / CATEGORY FILTER ----------
+//     if (tags.length > 0 && categoryId) {
+//       query.interests = { $in: [...tags, categoryId] };
+//     } else if (tags.length > 0) {
+//       query.interests = { $in: tags };
+//     } else if (categoryId) {
+//       query.interests = { $in: [categoryId] };
+//     }
 
-    // ---------- LOCATION FILTER ----------
-    if (Number(latitude) !== 0 && Number(longitude) !== 0) {
-      query["lastLocation.coords"] = {
-        $geoWithin: {
-          $centerSphere: [
-            [parseFloat(longitude), parseFloat(latitude)],
-            parseFloat(radius_km) / 6371, // radius in radians
-          ],
-        },
-      };
-    }
+//     // ---------- FETCH USERS ----------
+//     const users = await User.find(query)
+//       .select("name email profile_image interests lastLocation")
+//       .skip(skip)
+//       .limit(parseInt(limit));
 
-    // ---------- INTEREST / CATEGORY FILTER ----------
-    if (tags.length > 0 && categoryId) {
-      query.interests = { $in: [...tags, categoryId] };
-    } else if (tags.length > 0) {
-      query.interests = { $in: tags };
-    } else if (categoryId) {
-      query.interests = { $in: [categoryId] };
-    }
+//     // ---------- TOTAL COUNT ----------
+//     const total = await User.countDocuments(query);
 
-    // ---------- FETCH USERS ----------
-    const users = await User.find(query)
-      .select("name email profile_image interests lastLocation")
-      .skip(skip)
-      .limit(parseInt(limit));
+//     // ---------- RESPONSE ----------
+//     if (users.length === 0) {
+//       return res.json({
+//         success: true,
+//         total: 0,
+//         page: parseInt(page),
+//         limit: parseInt(limit),
+//         message: "No users found matching this service and location.",
+//         users: [],
+//       });
+//     }
 
-    // ---------- TOTAL COUNT ----------
-    const total = await User.countDocuments(query);
-
-    // ---------- RESPONSE ----------
-    if (users.length === 0) {
-      return res.json({
-        success: true,
-        total: 0,
-        page: parseInt(page),
-        limit: parseInt(limit),
-        message: "No users found matching this service and location.",
-        users: [],
-      });
-    }
-
-    res.json({
-      success: true,
-      total,
-      page: parseInt(page),
-      limit: parseInt(limit),
-      users,
-    });
-  } catch (error) {
-    console.error("Error fetching interested users:", error);
-    res.status(500).json({
-      success: false,
-      message: "Internal Server Error",
-    });
-  }
-};
+//     res.json({
+//       success: true,
+//       total,
+//       page: parseInt(page),
+//       limit: parseInt(limit),
+//       users,
+//     });
+//   } catch (error) {
+//     console.error("Error fetching interested users:", error);
+//     res.status(500).json({
+//       success: false,
+//       message: "Internal Server Error",
+//     });
+//   }
+// };
 
 // ----------- Get All Services -------------
 exports.getAllServices = async (req, res) => {

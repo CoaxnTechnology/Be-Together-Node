@@ -376,17 +376,21 @@ exports.getInterestedUsers = async (req, res) => {
     const {
       latitude = 0,
       longitude = 0,
-      radius_km = 3,
+      radius_km = 10, // default 10 km
       categoryId,
       tags = [],
       page = 1,
       limit = 10,
+      userId, // <-- optional
     } = req.body;
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
-
-    // Base query
     const query = {};
+
+    // ---------- EXCLUDE LOGGED-IN USER ----------
+    if (userId) {
+      query._id = { $ne: userId };
+    }
 
     // ---------- LOCATION FILTER ----------
     if (Number(latitude) !== 0 && Number(longitude) !== 0) {
@@ -400,34 +404,70 @@ exports.getInterestedUsers = async (req, res) => {
       };
     }
 
-    // ---------- INTEREST / CATEGORY FILTER ----------
-    if (tags.length > 0 && categoryId) {
-      query.interests = { $in: [...tags, categoryId] };
-    } else if (tags.length > 0) {
-      query.interests = { $in: tags };
-    } else if (categoryId) {
-      query.interests = { $in: [categoryId] };
+    // ---------- INTEREST FILTER ----------
+    if (userId) {
+      // Logged-in user: match interests with service tags/category
+      if (tags.length > 0 && categoryId) {
+        query.interests = { $in: [...tags, categoryId] };
+      } else if (tags.length > 0) {
+        query.interests = { $in: tags };
+      } else if (categoryId) {
+        query.interests = { $in: [categoryId] };
+      }
+    } else {
+      // Guest user: only users who have at least one interest
+      query.interests = { $exists: true, $ne: [] };
     }
 
     // ---------- FETCH USERS ----------
-    const users = await User.find(query)
+    let users = await User.find(query)
       .select("name email profile_image interests lastLocation")
       .skip(skip)
-      .limit(parseInt(limit));
+      .limit(parseInt(limit))
+      .lean();
 
-    // ---------- TOTAL COUNT ----------
     const total = await User.countDocuments(query);
 
-    // ---------- RESPONSE ----------
     if (users.length === 0) {
       return res.json({
         success: true,
         total: 0,
         page: parseInt(page),
         limit: parseInt(limit),
-        message: "No users found matching this service and location.",
+        message: "No users found for this filter.",
         users: [],
       });
+    }
+
+    // ---------- DISTANCE CALCULATION ----------
+    if (Number(latitude) !== 0 && Number(longitude) !== 0) {
+      const toRad = (v) => (v * Math.PI) / 180;
+      users.forEach((u) => {
+        if (
+          u.lastLocation &&
+          u.lastLocation.coords &&
+          u.lastLocation.coords.coordinates
+        ) {
+          const [lon2, lat2] = u.lastLocation.coords.coordinates;
+          const lat1 = parseFloat(latitude);
+          const lon1 = parseFloat(longitude);
+          const R = 6371;
+          const dLat = toRad(lat2 - lat1);
+          const dLon = toRad(lon2 - lon1);
+          const a =
+            Math.sin(dLat / 2) ** 2 +
+            Math.cos(toRad(lat1)) *
+              Math.cos(toRad(lat2)) *
+              Math.sin(dLon / 2) ** 2;
+          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+          u.distance_km = Math.round(R * c * 100) / 100;
+        } else {
+          u.distance_km = null;
+        }
+      });
+
+      // Sort users by distance
+      users.sort((a, b) => (a.distance_km || 9999) - (b.distance_km || 9999));
     }
 
     res.json({
@@ -445,6 +485,7 @@ exports.getInterestedUsers = async (req, res) => {
     });
   }
 };
+
 
 // ----------- Get All Services -------------
 exports.getAllServices = async (req, res) => {

@@ -215,7 +215,8 @@ function dateRangeForDay(dateStr) {
   return { start, end };
 }
 
-
+//multiple category select 
+//if lat long 0,0 then visible all service 
 //---------------- GET SERVICES ----------------
 exports.getServices = async (req, res) => {
   try {
@@ -224,7 +225,15 @@ exports.getServices = async (req, res) => {
     console.log("Received query/body:", q);
 
     // ---------- QUERY PARAMS ----------
-    const categoryId = q.categoryId || null;
+    let categoryId = q.categoryId || null;
+    if (categoryId && typeof categoryId === "string") {
+      try {
+        categoryId = JSON.parse(categoryId);
+      } catch {
+        // keep string
+      }
+    }
+
     const tags = tryParse(q.tags) || (q.tags ? [q.tags] : []);
     const lat = q.latitude !== undefined ? Number(q.latitude) : null;
     const lon = q.longitude !== undefined ? Number(q.longitude) : null;
@@ -240,14 +249,24 @@ exports.getServices = async (req, res) => {
 
     // ---------- CATEGORY FILTER ----------
     if (categoryId) {
-      if (!looksLikeObjectId(categoryId)) {
-        console.log("Invalid categoryId:", categoryId);
-        return res
-          .status(400)
-          .json({ isSuccess: false, message: "Invalid categoryId" });
+      // Handle multiple categories
+      if (Array.isArray(categoryId)) {
+        const validIds = categoryId.filter((id) => looksLikeObjectId(id));
+        if (validIds.length) {
+          and.push({ category: { $in: validIds } });
+          console.log("Multiple categories filter applied:", validIds);
+        }
+      } else {
+        // Single category
+        if (!looksLikeObjectId(categoryId)) {
+          console.log("Invalid categoryId:", categoryId);
+          return res
+            .status(400)
+            .json({ isSuccess: false, message: "Invalid categoryId" });
+        }
+        and.push({ category: categoryId });
+        console.log("Single category filter applied:", categoryId);
       }
-      and.push({ category: categoryId });
-      console.log("Category filter applied:", categoryId);
     }
 
     // ---------- TAGS FILTER ----------
@@ -264,12 +283,15 @@ exports.getServices = async (req, res) => {
       lat != null &&
       lon != null &&
       !Number.isNaN(lat) &&
-      !Number.isNaN(lon)
+      !Number.isNaN(lon) &&
+      !(lat === 0 && lon === 0) // skip location filter if both zero
     ) {
       const box = bboxForLatLon(lat, lon, radiusKm);
       console.log("Bounding box for location filter:", box);
       and.push({ latitude: { $gte: box.minLat, $lte: box.maxLat } });
       and.push({ longitude: { $gte: box.minLon, $lte: box.maxLon } });
+    } else if (lat === 0 && lon === 0) {
+      console.log("Lat/Lon are zero → returning all services (no location filter).");
     }
 
     const mongoQuery = and.length ? { $and: and } : {};
@@ -289,18 +311,22 @@ exports.getServices = async (req, res) => {
       "Fetched services before distance calculation:",
       services.length
     );
-    // ---------- NO SERVICES CHECK ----------
+
     if (!services.length) {
-      console.log("No services found for this location/filter.");
+      console.log("No services found for this filter.");
       return res.json({
         isSuccess: true,
-        message: "No services available at your location",
+        message: "No services available",
         data: { totalCount: 0, page, limit, services: [] },
       });
     }
 
     // ---------- DISTANCE CALCULATION ----------
-    if (lat != null && lon != null) {
+    if (
+      lat != null &&
+      lon != null &&
+      !(lat === 0 && lon === 0) // only calculate if lat/lon not zero
+    ) {
       const toRad = (v) => (v * Math.PI) / 180;
       services.forEach((s) => {
         if (s.latitude != null && s.longitude != null) {
@@ -321,7 +347,6 @@ exports.getServices = async (req, res) => {
         } else s.distance_km = null;
       });
 
-      // Sort by distance
       services.sort(
         (a, b) => (a.distance_km || 9999) - (b.distance_km || 9999)
       );

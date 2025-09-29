@@ -508,80 +508,80 @@ exports.getServices = async (req, res) => {
   }
 };
 
-// exports.getInterestedUsers = async (req, res) => {
-//   try {
-//     const {
-//       latitude = 0,
-//       longitude = 0,
-//       radius_km = 3,
-//       categoryId,
-//       tags = [],
-//       page = 1,
-//       limit = 10,
-//     } = req.body;
+exports.getInterestedUsers = async (req, res) => {
+  try {
+    const {
+      latitude = 0,
+      longitude = 0,
+      radius_km = 3,
+      categoryId,
+      tags = [],
+      page = 1,
+      limit = 10,
+    } = req.body;
 
-//     const skip = (parseInt(page) - 1) * parseInt(limit);
+    const skip = (parseInt(page) - 1) * parseInt(limit);
 
-//     // Base query
-//     const query = {};
+    // Base query
+    const query = {};
 
-//     // ---------- LOCATION FILTER ----------
-//     if (Number(latitude) !== 0 && Number(longitude) !== 0) {
-//       query["lastLocation.coords"] = {
-//         $geoWithin: {
-//           $centerSphere: [
-//             [parseFloat(longitude), parseFloat(latitude)],
-//             parseFloat(radius_km) / 6371, // radius in radians
-//           ],
-//         },
-//       };
-//     }
+    // ---------- LOCATION FILTER ----------
+    if (Number(latitude) !== 0 && Number(longitude) !== 0) {
+      query["lastLocation.coords"] = {
+        $geoWithin: {
+          $centerSphere: [
+            [parseFloat(longitude), parseFloat(latitude)],
+            parseFloat(radius_km) / 6371, // radius in radians
+          ],
+        },
+      };
+    }
 
-//     // ---------- INTEREST / CATEGORY FILTER ----------
-//     if (tags.length > 0 && categoryId) {
-//       query.interests = { $in: [...tags, categoryId] };
-//     } else if (tags.length > 0) {
-//       query.interests = { $in: tags };
-//     } else if (categoryId) {
-//       query.interests = { $in: [categoryId] };
-//     }
+    // ---------- INTEREST / CATEGORY FILTER ----------
+    if (tags.length > 0 && categoryId) {
+      query.interests = { $in: [...tags, categoryId] };
+    } else if (tags.length > 0) {
+      query.interests = { $in: tags };
+    } else if (categoryId) {
+      query.interests = { $in: [categoryId] };
+    }
 
-//     // ---------- FETCH USERS ----------
-//     const users = await User.find(query)
-//       .select("name email profile_image interests lastLocation")
-//       .skip(skip)
-//       .limit(parseInt(limit));
+    // ---------- FETCH USERS ----------
+    const users = await User.find(query)
+      .select("name email profile_image interests lastLocation")
+      .skip(skip)
+      .limit(parseInt(limit));
 
-//     // ---------- TOTAL COUNT ----------
-//     const total = await User.countDocuments(query);
+    // ---------- TOTAL COUNT ----------
+    const total = await User.countDocuments(query);
 
-//     // ---------- RESPONSE ----------
-//     if (users.length === 0) {
-//       return res.json({
-//         success: true,
-//         total: 0,
-//         page: parseInt(page),
-//         limit: parseInt(limit),
-//         message: "No users found matching this service and location.",
-//         users: [],
-//       });
-//     }
+    // ---------- RESPONSE ----------
+    if (users.length === 0) {
+      return res.json({
+        success: true,
+        total: 0,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        message: "No users found matching this service and location.",
+        users: [],
+      });
+    }
 
-//     res.json({
-//       success: true,
-//       total,
-//       page: parseInt(page),
-//       limit: parseInt(limit),
-//       users,
-//     });
-//   } catch (error) {
-//     console.error("Error fetching interested users:", error);
-//     res.status(500).json({
-//       success: false,
-//       message: "Internal Server Error",
-//     });
-//   }
-// };
+    res.json({
+      success: true,
+      total,
+      page: parseInt(page),
+      limit: parseInt(limit),
+      users,
+    });
+  } catch (error) {
+    console.error("Error fetching interested users:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+    });
+  }
+};
 
 // ----------- Get All Services -------------
 exports.getAllServices = async (req, res) => {

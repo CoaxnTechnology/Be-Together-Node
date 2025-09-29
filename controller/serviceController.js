@@ -215,8 +215,8 @@ function dateRangeForDay(dateStr) {
   return { start, end };
 }
 
-//multiple category select 
-//if lat long 0,0 then visible all service 
+//multiple category select
+//if lat long 0,0 then visible all service
 //---------------- GET SERVICES ----------------
 exports.getServices = async (req, res) => {
   try {
@@ -291,7 +291,9 @@ exports.getServices = async (req, res) => {
       and.push({ latitude: { $gte: box.minLat, $lte: box.maxLat } });
       and.push({ longitude: { $gte: box.minLon, $lte: box.maxLon } });
     } else if (lat === 0 && lon === 0) {
-      console.log("Lat/Lon are zero → returning all services (no location filter).");
+      console.log(
+        "Lat/Lon are zero → returning all services (no location filter)."
+      );
     }
 
     const mongoQuery = and.length ? { $and: and } : {};
@@ -304,6 +306,7 @@ exports.getServices = async (req, res) => {
     // ---------- FETCH SERVICES ----------
     let services = await Service.find(mongoQuery)
       .select("-__v")
+      .populate({ path: "category", select: "name" })
       .skip(skip)
       .limit(limit)
       .lean();

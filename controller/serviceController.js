@@ -230,11 +230,11 @@ exports.getServices = async (req, res) => {
       try {
         categoryId = JSON.parse(categoryId);
       } catch {
-        // keep string
+        // keep as string
       }
     }
 
-    const tags = tryParse(q.tags) || (q.tags ? [q.tags] : []);
+    const tags = Array.isArray(q.tags) ? q.tags : q.tags ? [q.tags] : [];
     const lat = q.latitude !== undefined ? Number(q.latitude) : null;
     const lon = q.longitude !== undefined ? Number(q.longitude) : null;
     const radiusKm = q.radius_km !== undefined ? Number(q.radius_km) : 3;
@@ -249,20 +249,16 @@ exports.getServices = async (req, res) => {
 
     // ---------- CATEGORY FILTER ----------
     if (categoryId) {
-      // Handle multiple categories
       if (Array.isArray(categoryId)) {
-        const validIds = categoryId.filter((id) => looksLikeObjectId(id));
+        const validIds = categoryId.filter(id => looksLikeObjectId(id));
         if (validIds.length) {
           and.push({ category: { $in: validIds } });
           console.log("Multiple categories filter applied:", validIds);
         }
       } else {
-        // Single category
         if (!looksLikeObjectId(categoryId)) {
           console.log("Invalid categoryId:", categoryId);
-          return res
-            .status(400)
-            .json({ isSuccess: false, message: "Invalid categoryId" });
+          return res.status(400).json({ isSuccess: false, message: "Invalid categoryId" });
         }
         and.push({ category: categoryId });
         console.log("Single category filter applied:", categoryId);
@@ -271,7 +267,7 @@ exports.getServices = async (req, res) => {
 
     // ---------- TAGS FILTER ----------
     if (tags.length) {
-      const normalizedTags = tags.map((t) => String(t).trim()).filter(Boolean);
+      const normalizedTags = tags.map(t => String(t).trim()).filter(Boolean);
       if (normalizedTags.length) {
         and.push({ tags: { $in: normalizedTags } });
         console.log("Tags filter applied:", normalizedTags);
@@ -279,25 +275,17 @@ exports.getServices = async (req, res) => {
     }
 
     // ---------- LOCATION FILTER ----------
-    if (
-      lat != null &&
-      lon != null &&
-      !Number.isNaN(lat) &&
-      !Number.isNaN(lon) &&
-      !(lat === 0 && lon === 0) // skip location filter if both zero
-    ) {
+    if (lat != null && lon != null && !(lat === 0 && lon === 0)) {
       const box = bboxForLatLon(lat, lon, radiusKm);
       console.log("Bounding box for location filter:", box);
       and.push({ latitude: { $gte: box.minLat, $lte: box.maxLat } });
       and.push({ longitude: { $gte: box.minLon, $lte: box.maxLon } });
     } else if (lat === 0 && lon === 0) {
-      console.log(
-        "Lat/Lon are zero → returning all services (no location filter)."
-      );
+      console.log("Lat/Lon are zero → skipping location filter.");
     }
 
     const mongoQuery = and.length ? { $and: and } : {};
-    console.log("Final MongoDB query:", mongoQuery);
+    console.log("Final MongoDB query for services:", mongoQuery);
 
     // ---------- TOTAL COUNT ----------
     const totalCount = await Service.countDocuments(mongoQuery);
@@ -310,49 +298,25 @@ exports.getServices = async (req, res) => {
       .skip(skip)
       .limit(limit)
       .lean();
-    console.log(
-      "Fetched services before distance calculation:",
-      services.length
-    );
-
-    if (!services.length) {
-      console.log("No services found for this filter.");
-      return res.json({
-        isSuccess: true,
-        message: "No services available",
-        data: { totalCount: 0, page, limit, services: [] },
-      });
-    }
+    console.log("Fetched services before distance calculation:", services.length);
 
     // ---------- DISTANCE CALCULATION ----------
-    if (
-      lat != null &&
-      lon != null &&
-      !(lat === 0 && lon === 0) // only calculate if lat/lon not zero
-    ) {
-      const toRad = (v) => (v * Math.PI) / 180;
-      services.forEach((s) => {
+    if (lat != null && lon != null && !(lat === 0 && lon === 0)) {
+      const toRad = v => (v * Math.PI) / 180;
+      services.forEach(s => {
         if (s.latitude != null && s.longitude != null) {
-          const lat1 = lat,
-            lon1 = lon;
-          const lat2 = Number(s.latitude),
-            lon2 = Number(s.longitude);
-          const R = 6371; // km
+          const lat1 = lat, lon1 = lon;
+          const lat2 = Number(s.latitude), lon2 = Number(s.longitude);
+          const R = 6371; 
           const dLat = toRad(lat2 - lat1);
           const dLon = toRad(lon2 - lon1);
-          const a =
-            Math.sin(dLat / 2) ** 2 +
-            Math.cos(toRad(lat1)) *
-              Math.cos(toRad(lat2)) *
-              Math.sin(dLon / 2) ** 2;
-          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+          const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon/2)**2;
+          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
           s.distance_km = Math.round(R * c * 100) / 100;
         } else s.distance_km = null;
       });
 
-      services.sort(
-        (a, b) => (a.distance_km || 9999) - (b.distance_km || 9999)
-      );
+      services.sort((a,b) => (a.distance_km || 9999) - (b.distance_km || 9999));
       console.log("Services sorted by distance.");
     }
 
@@ -365,60 +329,40 @@ exports.getServices = async (req, res) => {
     });
   } catch (err) {
     console.error("getServices error:", err);
-    return res
-      .status(500)
-      .json({ isSuccess: false, message: "Server error", error: err.message });
+    return res.status(500).json({ isSuccess: false, message: "Server error", error: err.message });
   }
 };
 
+
 exports.getInterestedUsers = async (req, res) => {
   try {
-    const {
-      latitude = 0,
-      longitude = 0,
-      radius_km = 10,
-      categoryId,
-      page = 1,
-      limit = 10,
-      userId,
-      excludeSelf = false,
-    } = req.body;
-
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const { latitude=0, longitude=0, radius_km=10, categoryId, page=1, limit=10, userId, excludeSelf=false } = req.body;
+    const skip = (parseInt(page)-1)*parseInt(limit);
 
     console.log("===== getInterestedUsers called =====");
     console.log("Request body:", req.body);
 
-    // ---------- Step 1: Fetch all services of the category ----------
-    let services = [];
-    if (categoryId) {
-      services = await Service.find({ category: categoryId })
-        .select("tags")
-        .lean();
+    if (!categoryId) {
+      console.log("No categoryId provided → cannot fetch users.");
+      return res.status(400).json({ success:false, message:"categoryId is required" });
     }
+
+    // ---------- Step 1: Fetch all services of this category ----------
+    const services = await Service.find({ category: categoryId }).select("tags").lean();
+    console.log(`Fetched ${services.length} services for category ${categoryId}`);
 
     // ---------- Step 2: Merge all tags ----------
     let allTags = [];
-    services.forEach((s) => {
-      if (Array.isArray(s.tags)) allTags.push(...s.tags);
-    });
-
-    // Remove duplicates & normalize
-    const interestsFilter = [...new Set(allTags.map((t) => t.trim().toLowerCase()))];
-
-    console.log("All merged tags for category:", interestsFilter);
+    services.forEach(s => { if(Array.isArray(s.tags)) allTags.push(...s.tags) });
+    const interestsFilter = [...new Set(allTags.map(t=>t.trim().toLowerCase()))];
+    console.log("Merged tags for interests filter:", interestsFilter);
 
     // ---------- Step 3: Build user query ----------
     const query = {};
-    if (excludeSelf && userId) {
-      query._id = { $ne: userId };
-    }
+    if (excludeSelf && userId) { query._id = { $ne: userId }; console.log("Excluding self userId:", userId); }
+    if (interestsFilter.length) { query.interests = { $in: interestsFilter }; console.log("Applying interests filter"); }
 
-    if (interestsFilter.length) {
-      query.interests = { $in: interestsFilter };
-    }
-
-    // Location filter
+    // ---------- Step 4: Location filter ----------
     let calculateDistance = false;
     if (Number(latitude) !== 0 && Number(longitude) !== 0) {
       calculateDistance = true;
@@ -426,69 +370,56 @@ exports.getInterestedUsers = async (req, res) => {
         $geoWithin: {
           $centerSphere: [
             [parseFloat(longitude), parseFloat(latitude)],
-            parseFloat(radius_km) / 6371,
-          ],
-        },
+            parseFloat(radius_km)/6371
+          ]
+        }
       };
+      console.log(`Applying location filter: center=[${longitude},${latitude}], radius_km=${radius_km}`);
+    } else {
+      console.log("Skipping location filter (lat/lon = 0)");
     }
 
-    console.log("MongoDB user query:", query);
+    console.log("MongoDB user query:", JSON.stringify(query, null, 2));
 
-    // ---------- Step 4: Fetch users ----------
+    // ---------- Step 5: Fetch users ----------
     let users = await User.find(query)
       .select("name email profile_image interests lastLocation")
       .skip(skip)
       .limit(limit)
       .lean();
 
-    // ---------- Step 5: Distance calculation ----------
+    console.log(`Fetched ${users.length} users before distance calculation`);
+
+    // ---------- Step 6: Distance calculation ----------
     if (calculateDistance) {
-      const toRad = (v) => (v * Math.PI) / 180;
-      users.forEach((u) => {
-        if (
-          u.lastLocation &&
-          u.lastLocation.coords &&
-          u.lastLocation.coords.coordinates
-        ) {
+      const toRad = v => (v * Math.PI)/180;
+      users.forEach(u => {
+        if(u.lastLocation?.coords?.coordinates){
           const [lon2, lat2] = u.lastLocation.coords.coordinates;
-          const lat1 = parseFloat(latitude);
-          const lon1 = parseFloat(longitude);
+          const lat1 = parseFloat(latitude), lon1 = parseFloat(longitude);
           const R = 6371;
-
-          const dLat = toRad(lat2 - lat1);
-          const dLon = toRad(lon2 - lon1);
-
-          const a =
-            Math.sin(dLat / 2) ** 2 +
-            Math.cos(toRad(lat1)) *
-              Math.cos(toRad(lat2)) *
-              Math.sin(dLon / 2) ** 2;
-
-          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-          u.distance_km = Math.round(R * c * 100) / 100;
-        } else {
-          u.distance_km = null;
-        }
+          const dLat = toRad(lat2-lat1);
+          const dLon = toRad(lon2-lon1);
+          const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+          u.distance_km = Math.round(R*c*100)/100;
+        } else u.distance_km = null;
       });
-
-      users.sort((a, b) => (a.distance_km || 9999) - (b.distance_km || 9999));
+      users.sort((a,b)=>(a.distance_km||9999)-(b.distance_km||9999));
+      console.log("Users sorted by distance");
     }
 
-    // ---------- Step 6: Return ----------
     const total = await User.countDocuments(query);
 
-    res.json({
-      success: true,
-      total,
-      page: parseInt(page),
-      limit: parseInt(limit),
-      users,
-    });
+    console.log(`Total matching users: ${total}`);
+    res.json({ success:true, total, page:parseInt(page), limit:parseInt(limit), users });
+
   } catch (err) {
-    console.error("Error fetching interested users:", err);
-    res.status(500).json({ success: false, message: err.message });
+    console.error("getInterestedUsers error:", err);
+    res.status(500).json({ success:false, message:err.message });
   }
 };
+
 
 
 

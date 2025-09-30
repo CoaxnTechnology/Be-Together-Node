@@ -376,50 +376,52 @@ exports.getInterestedUsers = async (req, res) => {
     const {
       latitude = 0,
       longitude = 0,
-      radius_km = 10, // default 10 km
+      radius_km = 10,
       categoryId,
       tags = [],
       page = 1,
       limit = 10,
-      userId, // <-- optional
+      userId, // optional (logged-in user)
     } = req.body;
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
+
     const query = {};
 
-    // ---------- EXCLUDE LOGGED-IN USER ----------
+    // Exclude logged-in user
     if (userId) {
       query._id = { $ne: userId };
     }
 
-    // ---------- LOCATION FILTER ----------
+    // Location filter (nearby users)
     if (Number(latitude) !== 0 && Number(longitude) !== 0) {
       query["lastLocation.coords"] = {
         $geoWithin: {
           $centerSphere: [
             [parseFloat(longitude), parseFloat(latitude)],
-            parseFloat(radius_km) / 6371, // radius in radians
+            parseFloat(radius_km) / 6371,
           ],
         },
       };
     }
 
-    // ---------- INTEREST FILTER ----------
-    if (userId) {
-      // Logged-in user: match interests with service tags/category
-      if (tags.length > 0 && categoryId) {
-        query.interests = { $in: [...tags, categoryId] };
-      } else if (tags.length > 0) {
-        query.interests = { $in: tags };
-      } else if (categoryId) {
-        query.interests = { $in: [categoryId] };
-      }
+    // ✅ Interest filter: service tags + category se match
+    const interestsFilter = [];
+    if (tags.length > 0) {
+      interestsFilter.push(...tags);
+    }
+    if (categoryId) {
+      interestsFilter.push(categoryId);
+    }
+
+    if (interestsFilter.length > 0) {
+      query.interests = { $in: interestsFilter };
     } else {
-      // Guest user: only users who have at least one interest
+      // Agar service me tags/category nahi h, to at least interests wala user ho
       query.interests = { $exists: true, $ne: [] };
     }
 
-    // ---------- FETCH USERS ----------
+    // Fetch users
     let users = await User.find(query)
       .select("name email profile_image interests lastLocation")
       .skip(skip)
@@ -434,12 +436,12 @@ exports.getInterestedUsers = async (req, res) => {
         total: 0,
         page: parseInt(page),
         limit: parseInt(limit),
-        message: "No users found for this filter.",
+        message: "No users found for this service",
         users: [],
       });
     }
 
-    // ---------- DISTANCE CALCULATION ----------
+    // Distance calculation
     if (Number(latitude) !== 0 && Number(longitude) !== 0) {
       const toRad = (v) => (v * Math.PI) / 180;
       users.forEach((u) => {
@@ -466,7 +468,7 @@ exports.getInterestedUsers = async (req, res) => {
         }
       });
 
-      // Sort users by distance
+      // Sort nearest first
       users.sort((a, b) => (a.distance_km || 9999) - (b.distance_km || 9999));
     }
 

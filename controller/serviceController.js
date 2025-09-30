@@ -399,25 +399,21 @@ exports.getInterestedUsers = async (req, res) => {
       const service = await Service.findById(serviceId)
         .select("category tags")
         .lean();
-      if (!service) {
+      if (service) {
+        serviceCategory = service.category?.toString() || null;
+        serviceTags = service.tags || [];
+        console.log("Service context:", { serviceCategory, serviceTags });
+      } else {
         console.log("Service not found for id:", serviceId);
-        return res.status(404).json({
-          success: false,
-          message: "Service not found",
-        });
       }
-      serviceCategory = service.category?.toString() || null;
-      serviceTags = service.tags || [];
-      console.log("Service context:", { serviceCategory, serviceTags });
     } else {
-      // fallback: request body
       serviceCategory = categoryId ? categoryId.toString() : null;
       serviceTags = Array.isArray(tags) ? tags : tags ? [tags] : [];
       console.log("Fallback context:", { serviceCategory, serviceTags });
     }
 
     // ---------- Step 2: Build interests filter ----------
-    const interestsFilter = [
+    let interestsFilter = [
       ...(serviceCategory ? [serviceCategory] : []),
       ...serviceTags,
     ]
@@ -426,29 +422,24 @@ exports.getInterestedUsers = async (req, res) => {
 
     console.log("Normalized interests filter:", interestsFilter);
 
-    if (!interestsFilter.length) {
-      console.log("No interestsFilter → returning empty users array");
-      return res.json({
-        success: true,
-        total: 0,
-        page: parseInt(page),
-        limit: parseInt(limit),
-        message: "No service tags or category to filter users",
-        users: [],
-      });
-    }
-
     // ---------- Step 3: Build query ----------
-    const query = {
-      interests: { $in: interestsFilter },
-    };
+    const query = {};
 
     if (userId && excludeSelf) {
       query._id = { $ne: userId };
       console.log("Excluding self userId:", userId);
     }
 
-    // Location filter (nearest users)
+    if (interestsFilter.length) {
+      query.interests = { $in: interestsFilter };
+      console.log("Applying interests filter.");
+    } else {
+      console.log(
+        "No interestsFilter → will fallback to nearest users or all users"
+      );
+    }
+
+    // Location filter
     let calculateDistance = false;
     if (Number(latitude) !== 0 && Number(longitude) !== 0) {
       calculateDistance = true;
@@ -476,21 +467,36 @@ exports.getInterestedUsers = async (req, res) => {
       .limit(parseInt(limit))
       .lean();
 
+    // Fallback: if no users found and no interests filter → fetch all users
+    if (!users.length && !interestsFilter.length) {
+      console.log(
+        "No users found for interests → fallback: fetching all users with location filter only"
+      );
+
+      const fallbackQuery = {};
+      if (userId && excludeSelf) fallbackQuery._id = { $ne: userId };
+
+      if (calculateDistance) {
+        fallbackQuery["lastLocation.coords"] = {
+          $geoWithin: {
+            $centerSphere: [
+              [parseFloat(longitude), parseFloat(latitude)],
+              parseFloat(radius_km) / 6371,
+            ],
+          },
+        };
+      }
+
+      users = await User.find(fallbackQuery)
+        .select("name email profile_image interests lastLocation")
+        .skip(skip)
+        .limit(parseInt(limit))
+        .lean();
+    }
+
     const total = await User.countDocuments(query);
 
     console.log(`Users fetched: ${users.length} / Total: ${total}`);
-
-    if (!users.length) {
-      console.log("No users found matching query.");
-      return res.json({
-        success: true,
-        total: 0,
-        page: parseInt(page),
-        limit: parseInt(limit),
-        message: "No users found for this service/interests",
-        users: [],
-      });
-    }
 
     // ---------- Step 5: Distance calculation ----------
     if (calculateDistance) {

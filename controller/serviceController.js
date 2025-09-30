@@ -377,7 +377,7 @@ exports.getInterestedUsers = async (req, res) => {
       latitude = 0,
       longitude = 0,
       radius_km = 10,
-      serviceId,
+      serviceId, // <-- pass serviceId from frontend
       page = 1,
       limit = 10,
       userId, // optional (logged-in user)
@@ -385,23 +385,21 @@ exports.getInterestedUsers = async (req, res) => {
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    if (!serviceId) {
-      return res.status(400).json({
-        success: false,
-        message: "serviceId is required",
-      });
+    // ---------- Find service details ----------
+    let service = null;
+    if (serviceId) {
+      service = await Service.findById(serviceId)
+        .select("category tags")
+        .lean();
+      if (!service) {
+        return res.status(404).json({
+          success: false,
+          message: "Service not found",
+        });
+      }
     }
 
-    // 1. Service fetch karo
-    const service = await Service.findById(serviceId).select("category tags location_name latitude longitude");
-    if (!service) {
-      return res.status(404).json({
-        success: false,
-        message: "Service not found",
-      });
-    }
-
-    // 2. Base query
+    // ---------- Build query ----------
     const query = {};
 
     // Exclude logged-in user
@@ -409,7 +407,7 @@ exports.getInterestedUsers = async (req, res) => {
       query._id = { $ne: userId };
     }
 
-    // Location filter (nearest users)
+    // Location filter (nearby users)
     if (Number(latitude) !== 0 && Number(longitude) !== 0) {
       query["lastLocation.coords"] = {
         $geoWithin: {
@@ -421,23 +419,25 @@ exports.getInterestedUsers = async (req, res) => {
       };
     }
 
-    // ✅ Interest filter from service
+    // ---------- Interests Filter ----------
     const interestsFilter = [];
-    if (service.tags && service.tags.length > 0) {
-      interestsFilter.push(...service.tags);
-    }
-    if (service.category) {
-      interestsFilter.push(service.category.toString());
+    if (service) {
+      if (service.tags?.length) {
+        interestsFilter.push(...service.tags);
+      }
+      if (service.category) {
+        interestsFilter.push(service.category.toString());
+      }
     }
 
     if (interestsFilter.length > 0) {
       query.interests = { $in: interestsFilter };
     } else {
-      // agar service me hi kuch nahi h, to koi user nahi milega
-      query.interests = { $in: [] };
+      // Agar service me tags/category nahi h, to at least interests wala user ho
+      query.interests = { $exists: true, $ne: [] };
     }
 
-    // 3. Fetch users
+    // ---------- Fetch users ----------
     let users = await User.find(query)
       .select("name email profile_image interests lastLocation")
       .skip(skip)
@@ -446,7 +446,18 @@ exports.getInterestedUsers = async (req, res) => {
 
     const total = await User.countDocuments(query);
 
-    // 4. Distance calculation
+    if (users.length === 0) {
+      return res.json({
+        success: true,
+        total: 0,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        message: "No users found for this service",
+        users: [],
+      });
+    }
+
+    // ---------- Distance Calculation ----------
     if (Number(latitude) !== 0 && Number(longitude) !== 0) {
       const toRad = (v) => (v * Math.PI) / 180;
       users.forEach((u) => {
@@ -473,21 +484,15 @@ exports.getInterestedUsers = async (req, res) => {
         }
       });
 
-      // sort nearest first
+      // Sort nearest first
       users.sort((a, b) => (a.distance_km || 9999) - (b.distance_km || 9999));
     }
 
-    // 5. Response
     res.json({
       success: true,
       total,
       page: parseInt(page),
       limit: parseInt(limit),
-      service: {
-        id: service._id,
-        category: service.category,
-        tags: service.tags,
-      },
       users,
     });
   } catch (error) {
@@ -498,7 +503,6 @@ exports.getInterestedUsers = async (req, res) => {
     });
   }
 };
-
 
 
 // ----------- Get All Services -------------

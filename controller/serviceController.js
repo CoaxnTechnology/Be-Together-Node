@@ -25,6 +25,7 @@ function isValidDateISO(d) {
     !isNaN(new Date(d).getTime())
   );
 }
+// create service
 exports.createService = async (req, res) => {
   try {
     const userId = req.body.userId || (req.user && req.user.id);
@@ -51,6 +52,7 @@ exports.createService = async (req, res) => {
     const price = isFree ? 0 : Number(body.price || 0);
 
     const location = tryParse(body.location);
+    const city=body.city
     const service_type = body.service_type || "one_time";
     const date = body.date;
     const start_time = body.start_time;
@@ -112,6 +114,7 @@ exports.createService = async (req, res) => {
       location_name: location.name,
       latitude: Number(location.latitude),
       longitude: Number(location.longitude),
+      city: city,
       category: category._id,
       tags: validTags,
       max_participants,

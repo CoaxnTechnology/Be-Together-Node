@@ -377,9 +377,7 @@ exports.getInterestedUsers = async (req, res) => {
       latitude = 0,
       longitude = 0,
       radius_km = 10,
-      serviceId,
       categoryId,
-      tags = [],
       page = 1,
       limit = 10,
       userId,
@@ -391,52 +389,33 @@ exports.getInterestedUsers = async (req, res) => {
     console.log("===== getInterestedUsers called =====");
     console.log("Request body:", req.body);
 
-    // ---------- Step 1: Determine service context ----------
-    let serviceTags = [];
-    let serviceCategory = null;
-
-    if (serviceId) {
-      const service = await Service.findById(serviceId)
-        .select("category tags")
+    // ---------- Step 1: Fetch all services of the category ----------
+    let services = [];
+    if (categoryId) {
+      services = await Service.find({ category: categoryId })
+        .select("tags")
         .lean();
-      if (service) {
-        serviceCategory = service.category?.toString() || null;
-        serviceTags = service.tags || [];
-        console.log("Service context:", { serviceCategory, serviceTags });
-      } else {
-        console.log("Service not found for id:", serviceId);
-      }
-    } else {
-      serviceCategory = categoryId ? categoryId.toString() : null;
-      serviceTags = Array.isArray(tags) ? tags : tags ? [tags] : [];
-      console.log("Fallback context:", { serviceCategory, serviceTags });
     }
 
-    // ---------- Step 2: Build interests filter ----------
-    let interestsFilter = [
-      ...(serviceCategory ? [serviceCategory] : []),
-      ...serviceTags,
-    ]
-      .map((t) => String(t).trim().toLowerCase())
-      .filter(Boolean);
+    // ---------- Step 2: Merge all tags ----------
+    let allTags = [];
+    services.forEach((s) => {
+      if (Array.isArray(s.tags)) allTags.push(...s.tags);
+    });
 
-    console.log("Normalized interests filter:", interestsFilter);
+    // Remove duplicates & normalize
+    const interestsFilter = [...new Set(allTags.map((t) => t.trim().toLowerCase()))];
 
-    // ---------- Step 3: Build query ----------
+    console.log("All merged tags for category:", interestsFilter);
+
+    // ---------- Step 3: Build user query ----------
     const query = {};
-
-    if (userId && excludeSelf) {
+    if (excludeSelf && userId) {
       query._id = { $ne: userId };
-      console.log("Excluding self userId:", userId);
     }
 
     if (interestsFilter.length) {
       query.interests = { $in: interestsFilter };
-      console.log("Applying interests filter.");
-    } else {
-      console.log(
-        "No interestsFilter → will fallback to nearest users or all users"
-      );
     }
 
     // Location filter
@@ -451,52 +430,16 @@ exports.getInterestedUsers = async (req, res) => {
           ],
         },
       };
-      console.log(
-        `Applying location filter: center=[${longitude},${latitude}], radius_km=${radius_km}`
-      );
-    } else {
-      console.log("Skipping location filter (latitude or longitude = 0)");
     }
 
-    console.log("MongoDB query before fetch:", JSON.stringify(query, null, 2));
+    console.log("MongoDB user query:", query);
 
     // ---------- Step 4: Fetch users ----------
     let users = await User.find(query)
       .select("name email profile_image interests lastLocation")
       .skip(skip)
-      .limit(parseInt(limit))
+      .limit(limit)
       .lean();
-
-    // Fallback: if no users found and no interests filter → fetch all users
-    if (!users.length && !interestsFilter.length) {
-      console.log(
-        "No users found for interests → fallback: fetching all users with location filter only"
-      );
-
-      const fallbackQuery = {};
-      if (userId && excludeSelf) fallbackQuery._id = { $ne: userId };
-
-      if (calculateDistance) {
-        fallbackQuery["lastLocation.coords"] = {
-          $geoWithin: {
-            $centerSphere: [
-              [parseFloat(longitude), parseFloat(latitude)],
-              parseFloat(radius_km) / 6371,
-            ],
-          },
-        };
-      }
-
-      users = await User.find(fallbackQuery)
-        .select("name email profile_image interests lastLocation")
-        .skip(skip)
-        .limit(parseInt(limit))
-        .lean();
-    }
-
-    const total = await User.countDocuments(query);
-
-    console.log(`Users fetched: ${users.length} / Total: ${total}`);
 
     // ---------- Step 5: Distance calculation ----------
     if (calculateDistance) {
@@ -510,7 +453,7 @@ exports.getInterestedUsers = async (req, res) => {
           const [lon2, lat2] = u.lastLocation.coords.coordinates;
           const lat1 = parseFloat(latitude);
           const lon1 = parseFloat(longitude);
-          const R = 6371; // km
+          const R = 6371;
 
           const dLat = toRad(lat2 - lat1);
           const dLon = toRad(lon2 - lon1);
@@ -529,12 +472,11 @@ exports.getInterestedUsers = async (req, res) => {
       });
 
       users.sort((a, b) => (a.distance_km || 9999) - (b.distance_km || 9999));
-      console.log("Users sorted by distance.");
-    } else {
-      console.log("Distance calculation skipped.");
     }
 
     // ---------- Step 6: Return ----------
+    const total = await User.countDocuments(query);
+
     res.json({
       success: true,
       total,
@@ -542,16 +484,12 @@ exports.getInterestedUsers = async (req, res) => {
       limit: parseInt(limit),
       users,
     });
-    console.log("Response sent successfully.");
-  } catch (error) {
-    console.error("Error fetching interested users:", error);
-    res.status(500).json({
-      success: false,
-      message: "Internal Server Error",
-      error: error.message,
-    });
+  } catch (err) {
+    console.error("Error fetching interested users:", err);
+    res.status(500).json({ success: false, message: err.message });
   }
 };
+
 
 
 

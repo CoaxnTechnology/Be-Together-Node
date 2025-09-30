@@ -377,17 +377,17 @@ exports.getInterestedUsers = async (req, res) => {
       latitude = 0,
       longitude = 0,
       radius_km = 10,
-      serviceId,
-      categoryId,
-      tags = [],
+      serviceId,     // optional
+      categoryId,    // fallback if serviceId not provided
+      tags = [],     // fallback if serviceId not provided
       page = 1,
       limit = 10,
-      userId, // optional (logged-in user)
+      userId,        // optional (logged-in user)
     } = req.body;
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    // ---------- Find service details if serviceId provided ----------
+    // ---------- Step 1: Get service details if serviceId provided ----------
     let service = null;
     if (serviceId) {
       service = await Service.findById(serviceId)
@@ -401,7 +401,35 @@ exports.getInterestedUsers = async (req, res) => {
       }
     }
 
-    // ---------- Build query ----------
+    // ---------- Step 2: Build interests filter ----------
+    const interestsFilter = [];
+
+    if (service) {
+      if (service.tags?.length) interestsFilter.push(...service.tags);
+      if (service.category) interestsFilter.push(service.category.toString());
+    } else {
+      // Fallback from request body
+      if (Array.isArray(tags) && tags.length > 0) interestsFilter.push(...tags);
+      else if (tags) interestsFilter.push(tags);
+
+      if (categoryId) interestsFilter.push(categoryId.toString());
+    }
+
+    console.log("Interests filter:", interestsFilter);
+
+    if (interestsFilter.length === 0) {
+      // Agar service ke tags/category nahi hai aur request me bhi nahi hai
+      return res.json({
+        success: true,
+        total: 0,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        message: "No interests provided for filtering",
+        users: [],
+      });
+    }
+
+    // ---------- Step 3: Build Mongo query ----------
     const query = {};
 
     // Exclude logged-in user
@@ -409,7 +437,10 @@ exports.getInterestedUsers = async (req, res) => {
       query._id = { $ne: userId };
     }
 
-    // Location filter (nearby users)
+    // Interests match
+    query.interests = { $in: interestsFilter };
+
+    // Location filter (only if latitude/longitude not zero)
     if (Number(latitude) !== 0 && Number(longitude) !== 0) {
       query["lastLocation.coords"] = {
         $geoWithin: {
@@ -421,35 +452,9 @@ exports.getInterestedUsers = async (req, res) => {
       };
     }
 
-    // ---------- Interests Filter ----------
-    const interestsFilter = [];
+    console.log("MongoDB query:", query);
 
-    if (service) {
-      if (service.tags?.length) {
-        interestsFilter.push(...service.tags);
-      }
-      if (service.category) {
-        interestsFilter.push(service.category.toString());
-      }
-    } else {
-      // Fallback → use tags/categoryId from request
-      if (Array.isArray(tags) && tags.length > 0) {
-        interestsFilter.push(...tags);
-      } else if (tags) {
-        interestsFilter.push(tags);
-      }
-      if (categoryId) {
-        interestsFilter.push(categoryId);
-      }
-    }
-
-    if (interestsFilter.length > 0) {
-      query.interests = { $in: interestsFilter };
-    } else {
-      query.interests = { $exists: true, $ne: [] };
-    }
-
-    // ---------- Fetch users ----------
+    // ---------- Step 4: Fetch users ----------
     let users = await User.find(query)
       .select("name email profile_image interests lastLocation")
       .skip(skip)
@@ -464,12 +469,12 @@ exports.getInterestedUsers = async (req, res) => {
         total: 0,
         page: parseInt(page),
         limit: parseInt(limit),
-        message: "No users found for this service",
+        message: "No users found for this service/interests",
         users: [],
       });
     }
 
-    // ---------- Distance Calculation ----------
+    // ---------- Step 5: Distance calculation ----------
     if (Number(latitude) !== 0 && Number(longitude) !== 0) {
       const toRad = (v) => (v * Math.PI) / 180;
       users.forEach((u) => {
@@ -481,14 +486,17 @@ exports.getInterestedUsers = async (req, res) => {
           const [lon2, lat2] = u.lastLocation.coords.coordinates;
           const lat1 = parseFloat(latitude);
           const lon1 = parseFloat(longitude);
-          const R = 6371;
+          const R = 6371; // km
+
           const dLat = toRad(lat2 - lat1);
           const dLon = toRad(lon2 - lon1);
+
           const a =
             Math.sin(dLat / 2) ** 2 +
             Math.cos(toRad(lat1)) *
               Math.cos(toRad(lat2)) *
               Math.sin(dLon / 2) ** 2;
+
           const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
           u.distance_km = Math.round(R * c * 100) / 100;
         } else {
@@ -500,6 +508,7 @@ exports.getInterestedUsers = async (req, res) => {
       users.sort((a, b) => (a.distance_km || 9999) - (b.distance_km || 9999));
     }
 
+    // ---------- Step 6: Return response ----------
     res.json({
       success: true,
       total,
@@ -512,6 +521,7 @@ exports.getInterestedUsers = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Internal Server Error",
+      error: error.message,
     });
   }
 };

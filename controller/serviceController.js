@@ -336,33 +336,62 @@ exports.getServices = async (req, res) => {
 
 exports.getInterestedUsers = async (req, res) => {
   try {
-    const { latitude=0, longitude=0, radius_km=10, categoryId, page=1, limit=10, userId, excludeSelf=false } = req.body;
-    const skip = (parseInt(page)-1)*parseInt(limit);
+    const {
+      latitude = 0,
+      longitude = 0,
+      radius_km = 10,
+      categoryId,
+      tags = [],
+      page = 1,
+      limit = 10,
+      userId,
+      excludeSelf = false,
+    } = req.body;
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
 
     console.log("===== getInterestedUsers called =====");
     console.log("Request body:", req.body);
 
-    if (!categoryId) {
-      console.log("No categoryId provided → cannot fetch users.");
-      return res.status(400).json({ success:false, message:"categoryId is required" });
+    // ---------- Step 1: Build interests filter ----------
+    let interestsFilter = [];
+
+    if (categoryId) {
+      const services = await Service.find({ category: categoryId })
+        .select("tags")
+        .lean();
+      console.log(`Fetched ${services.length} services for category ${categoryId}`);
+
+      services.forEach(s => {
+        if (Array.isArray(s.tags)) interestsFilter.push(...s.tags);
+      });
     }
 
-    // ---------- Step 1: Fetch all services of this category ----------
-    const services = await Service.find({ category: categoryId }).select("tags").lean();
-    console.log(`Fetched ${services.length} services for category ${categoryId}`);
+    if (tags && tags.length) {
+      interestsFilter.push(...tags);
+      console.log("Additional tags from request:", tags);
+    }
 
-    // ---------- Step 2: Merge all tags ----------
-    let allTags = [];
-    services.forEach(s => { if(Array.isArray(s.tags)) allTags.push(...s.tags) });
-    const interestsFilter = [...new Set(allTags.map(t=>t.trim().toLowerCase()))];
-    console.log("Merged tags for interests filter:", interestsFilter);
+    // Remove duplicates & normalize
+    interestsFilter = [...new Set(interestsFilter.map(t => t.trim().toLowerCase()))];
+    console.log("Final interests filter:", interestsFilter);
 
-    // ---------- Step 3: Build user query ----------
+    // ---------- Step 2: Build user query ----------
     const query = {};
-    if (excludeSelf && userId) { query._id = { $ne: userId }; console.log("Excluding self userId:", userId); }
-    if (interestsFilter.length) { query.interests = { $in: interestsFilter }; console.log("Applying interests filter"); }
 
-    // ---------- Step 4: Location filter ----------
+    if (excludeSelf && userId) {
+      query._id = { $ne: userId };
+      console.log("Excluding self userId:", userId);
+    }
+
+    if (interestsFilter.length) {
+      query.interests = { $in: interestsFilter };
+      console.log("Applying interests filter");
+    } else {
+      console.log("No interests filter → will fetch all users within location");
+    }
+
+    // ---------- Step 3: Location filter ----------
     let calculateDistance = false;
     if (Number(latitude) !== 0 && Number(longitude) !== 0) {
       calculateDistance = true;
@@ -370,9 +399,9 @@ exports.getInterestedUsers = async (req, res) => {
         $geoWithin: {
           $centerSphere: [
             [parseFloat(longitude), parseFloat(latitude)],
-            parseFloat(radius_km)/6371
-          ]
-        }
+            parseFloat(radius_km) / 6371,
+          ],
+        },
       };
       console.log(`Applying location filter: center=[${longitude},${latitude}], radius_km=${radius_km}`);
     } else {
@@ -381,44 +410,57 @@ exports.getInterestedUsers = async (req, res) => {
 
     console.log("MongoDB user query:", JSON.stringify(query, null, 2));
 
-    // ---------- Step 5: Fetch users ----------
+    // ---------- Step 4: Fetch users ----------
     let users = await User.find(query)
       .select("name email profile_image interests lastLocation")
       .skip(skip)
-      .limit(limit)
+      .limit(parseInt(limit))
       .lean();
 
     console.log(`Fetched ${users.length} users before distance calculation`);
 
-    // ---------- Step 6: Distance calculation ----------
+    // ---------- Step 5: Distance calculation ----------
     if (calculateDistance) {
-      const toRad = v => (v * Math.PI)/180;
+      const toRad = v => (v * Math.PI) / 180;
       users.forEach(u => {
-        if(u.lastLocation?.coords?.coordinates){
+        if (u.lastLocation?.coords?.coordinates) {
           const [lon2, lat2] = u.lastLocation.coords.coordinates;
           const lat1 = parseFloat(latitude), lon1 = parseFloat(longitude);
           const R = 6371;
-          const dLat = toRad(lat2-lat1);
-          const dLon = toRad(lon2-lon1);
-          const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
-          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-          u.distance_km = Math.round(R*c*100)/100;
-        } else u.distance_km = null;
+          const dLat = toRad(lat2 - lat1);
+          const dLon = toRad(lon2 - lon1);
+          const a = Math.sin(dLat / 2) ** 2 +
+                    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+          u.distance_km = Math.round(R * c * 100) / 100;
+        } else {
+          u.distance_km = null;
+        }
       });
-      users.sort((a,b)=>(a.distance_km||9999)-(b.distance_km||9999));
+
+      users.sort((a, b) => (a.distance_km || 9999) - (b.distance_km || 9999));
       console.log("Users sorted by distance");
     }
 
+    // ---------- Step 6: Total count ----------
     const total = await User.countDocuments(query);
-
     console.log(`Total matching users: ${total}`);
-    res.json({ success:true, total, page:parseInt(page), limit:parseInt(limit), users });
+
+    // ---------- Step 7: Return response ----------
+    res.json({
+      success: true,
+      total,
+      page: parseInt(page),
+      limit: parseInt(limit),
+      users,
+    });
 
   } catch (err) {
     console.error("getInterestedUsers error:", err);
-    res.status(500).json({ success:false, message:err.message });
+    res.status(500).json({ success: false, message: err.message });
   }
 };
+
 
 
 

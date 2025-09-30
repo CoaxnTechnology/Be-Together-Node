@@ -377,8 +377,7 @@ exports.getInterestedUsers = async (req, res) => {
       latitude = 0,
       longitude = 0,
       radius_km = 10,
-      categoryId,
-      tags = [],
+      serviceId,
       page = 1,
       limit = 10,
       userId, // optional (logged-in user)
@@ -386,6 +385,23 @@ exports.getInterestedUsers = async (req, res) => {
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
+    if (!serviceId) {
+      return res.status(400).json({
+        success: false,
+        message: "serviceId is required",
+      });
+    }
+
+    // 1. Service fetch karo
+    const service = await Service.findById(serviceId).select("category tags location_name latitude longitude");
+    if (!service) {
+      return res.status(404).json({
+        success: false,
+        message: "Service not found",
+      });
+    }
+
+    // 2. Base query
     const query = {};
 
     // Exclude logged-in user
@@ -393,7 +409,7 @@ exports.getInterestedUsers = async (req, res) => {
       query._id = { $ne: userId };
     }
 
-    // Location filter (nearby users)
+    // Location filter (nearest users)
     if (Number(latitude) !== 0 && Number(longitude) !== 0) {
       query["lastLocation.coords"] = {
         $geoWithin: {
@@ -405,23 +421,23 @@ exports.getInterestedUsers = async (req, res) => {
       };
     }
 
-    // ✅ Interest filter: service tags + category se match
+    // ✅ Interest filter from service
     const interestsFilter = [];
-    if (tags.length > 0) {
-      interestsFilter.push(...tags);
+    if (service.tags && service.tags.length > 0) {
+      interestsFilter.push(...service.tags);
     }
-    if (categoryId) {
-      interestsFilter.push(categoryId);
+    if (service.category) {
+      interestsFilter.push(service.category.toString());
     }
 
     if (interestsFilter.length > 0) {
       query.interests = { $in: interestsFilter };
     } else {
-      // Agar service me tags/category nahi h, to at least interests wala user ho
-      query.interests = { $exists: true, $ne: [] };
+      // agar service me hi kuch nahi h, to koi user nahi milega
+      query.interests = { $in: [] };
     }
 
-    // Fetch users
+    // 3. Fetch users
     let users = await User.find(query)
       .select("name email profile_image interests lastLocation")
       .skip(skip)
@@ -430,18 +446,7 @@ exports.getInterestedUsers = async (req, res) => {
 
     const total = await User.countDocuments(query);
 
-    if (users.length === 0) {
-      return res.json({
-        success: true,
-        total: 0,
-        page: parseInt(page),
-        limit: parseInt(limit),
-        message: "No users found for this service",
-        users: [],
-      });
-    }
-
-    // Distance calculation
+    // 4. Distance calculation
     if (Number(latitude) !== 0 && Number(longitude) !== 0) {
       const toRad = (v) => (v * Math.PI) / 180;
       users.forEach((u) => {
@@ -468,15 +473,21 @@ exports.getInterestedUsers = async (req, res) => {
         }
       });
 
-      // Sort nearest first
+      // sort nearest first
       users.sort((a, b) => (a.distance_km || 9999) - (b.distance_km || 9999));
     }
 
+    // 5. Response
     res.json({
       success: true,
       total,
       page: parseInt(page),
       limit: parseInt(limit),
+      service: {
+        id: service._id,
+        category: service.category,
+        tags: service.tags,
+      },
       users,
     });
   } catch (error) {
@@ -487,6 +498,7 @@ exports.getInterestedUsers = async (req, res) => {
     });
   }
 };
+
 
 
 // ----------- Get All Services -------------

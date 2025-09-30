@@ -377,20 +377,23 @@ exports.getInterestedUsers = async (req, res) => {
       latitude = 0,
       longitude = 0,
       radius_km = 10,
-      serviceId,     // optional
-      categoryId,    // fallback if serviceId not provided
-      tags = [],     // fallback if serviceId not provided
+      serviceId,
+      categoryId,
+      tags = [],
       page = 1,
       limit = 10,
-      userId,        // optional (logged-in user)
+      userId,
+      excludeSelf = false,
     } = req.body;
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    // ---------- Step 1: Get service details if serviceId provided ----------
-    let service = null;
+    // ---------- Step 1: Determine service context ----------
+    let serviceTags = [];
+    let serviceCategory = null;
+
     if (serviceId) {
-      service = await Service.findById(serviceId)
+      const service = await Service.findById(serviceId)
         .select("category tags")
         .lean();
       if (!service) {
@@ -399,48 +402,42 @@ exports.getInterestedUsers = async (req, res) => {
           message: "Service not found",
         });
       }
+      serviceCategory = service.category?.toString();
+      serviceTags = service.tags || [];
+    } else {
+      // fallback: request body
+      serviceCategory = categoryId ? categoryId.toString() : null;
+      serviceTags = Array.isArray(tags) ? tags : tags ? [tags] : [];
     }
 
     // ---------- Step 2: Build interests filter ----------
     const interestsFilter = [];
-
-    if (service) {
-      if (service.tags?.length) interestsFilter.push(...service.tags);
-      if (service.category) interestsFilter.push(service.category.toString());
-    } else {
-      // Fallback from request body
-      if (Array.isArray(tags) && tags.length > 0) interestsFilter.push(...tags);
-      else if (tags) interestsFilter.push(tags);
-
-      if (categoryId) interestsFilter.push(categoryId.toString());
-    }
-
-    console.log("Interests filter:", interestsFilter);
+    if (serviceCategory) interestsFilter.push(serviceCategory);
+    if (serviceTags.length) interestsFilter.push(...serviceTags);
 
     if (interestsFilter.length === 0) {
-      // Agar service ke tags/category nahi hai aur request me bhi nahi hai
       return res.json({
         success: true,
         total: 0,
         page: parseInt(page),
         limit: parseInt(limit),
-        message: "No interests provided for filtering",
+        message: "No service tags or category to filter users",
         users: [],
       });
     }
 
-    // ---------- Step 3: Build Mongo query ----------
+    // ---------- Step 3: Build query ----------
     const query = {};
 
-    // Exclude logged-in user
-    if (userId) {
+    // Optional: exclude self
+    if (userId && excludeSelf) {
       query._id = { $ne: userId };
     }
 
-    // Interests match
+    // Strict: user interests must match **at least one** of service tags/category
     query.interests = { $in: interestsFilter };
 
-    // Location filter (only if latitude/longitude not zero)
+    // Location filter
     if (Number(latitude) !== 0 && Number(longitude) !== 0) {
       query["lastLocation.coords"] = {
         $geoWithin: {
@@ -452,7 +449,7 @@ exports.getInterestedUsers = async (req, res) => {
       };
     }
 
-    console.log("MongoDB query:", query);
+    console.log("MongoDB query:", query, "Interests filter:", interestsFilter);
 
     // ---------- Step 4: Fetch users ----------
     let users = await User.find(query)
@@ -463,7 +460,7 @@ exports.getInterestedUsers = async (req, res) => {
 
     const total = await User.countDocuments(query);
 
-    if (users.length === 0) {
+    if (!users.length) {
       return res.json({
         success: true,
         total: 0,
@@ -504,11 +501,10 @@ exports.getInterestedUsers = async (req, res) => {
         }
       });
 
-      // Sort nearest first
       users.sort((a, b) => (a.distance_km || 9999) - (b.distance_km || 9999));
     }
 
-    // ---------- Step 6: Return response ----------
+    // ---------- Step 6: Return ----------
     res.json({
       success: true,
       total,
@@ -525,6 +521,7 @@ exports.getInterestedUsers = async (req, res) => {
     });
   }
 };
+
 
 
 // ----------- Get All Services -------------

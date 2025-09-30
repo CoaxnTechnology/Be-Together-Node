@@ -388,6 +388,9 @@ exports.getInterestedUsers = async (req, res) => {
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
+    console.log("===== getInterestedUsers called =====");
+    console.log("Request body:", req.body);
+
     // ---------- Step 1: Determine service context ----------
     let serviceTags = [];
     let serviceCategory = null;
@@ -397,6 +400,7 @@ exports.getInterestedUsers = async (req, res) => {
         .select("category tags")
         .lean();
       if (!service) {
+        console.log("Service not found for id:", serviceId);
         return res.status(404).json({
           success: false,
           message: "Service not found",
@@ -404,10 +408,12 @@ exports.getInterestedUsers = async (req, res) => {
       }
       serviceCategory = service.category?.toString() || null;
       serviceTags = service.tags || [];
+      console.log("Service context:", { serviceCategory, serviceTags });
     } else {
       // fallback: request body
       serviceCategory = categoryId ? categoryId.toString() : null;
       serviceTags = Array.isArray(tags) ? tags : tags ? [tags] : [];
+      console.log("Fallback context:", { serviceCategory, serviceTags });
     }
 
     // ---------- Step 2: Build interests filter ----------
@@ -418,7 +424,10 @@ exports.getInterestedUsers = async (req, res) => {
       .map((t) => String(t).trim().toLowerCase())
       .filter(Boolean);
 
+    console.log("Normalized interests filter:", interestsFilter);
+
     if (!interestsFilter.length) {
+      console.log("No interestsFilter → returning empty users array");
       return res.json({
         success: true,
         total: 0,
@@ -432,11 +441,11 @@ exports.getInterestedUsers = async (req, res) => {
     // ---------- Step 3: Build query ----------
     const query = {
       interests: { $in: interestsFilter },
-      "lastLocation.coords": { $exists: true }, // ensure location exists
     };
 
     if (userId && excludeSelf) {
       query._id = { $ne: userId };
+      console.log("Excluding self userId:", userId);
     }
 
     // Location filter (nearest users)
@@ -451,10 +460,14 @@ exports.getInterestedUsers = async (req, res) => {
           ],
         },
       };
+      console.log(
+        `Applying location filter: center=[${longitude},${latitude}], radius_km=${radius_km}`
+      );
+    } else {
+      console.log("Skipping location filter (latitude or longitude = 0)");
     }
 
-    console.log("MongoDB query to fetch users:", JSON.stringify(query, null, 2));
-    console.log("Interests filter:", interestsFilter);
+    console.log("MongoDB query before fetch:", JSON.stringify(query, null, 2));
 
     // ---------- Step 4: Fetch users ----------
     let users = await User.find(query)
@@ -465,7 +478,10 @@ exports.getInterestedUsers = async (req, res) => {
 
     const total = await User.countDocuments(query);
 
+    console.log(`Users fetched: ${users.length} / Total: ${total}`);
+
     if (!users.length) {
+      console.log("No users found matching query.");
       return res.json({
         success: true,
         total: 0,
@@ -507,6 +523,9 @@ exports.getInterestedUsers = async (req, res) => {
       });
 
       users.sort((a, b) => (a.distance_km || 9999) - (b.distance_km || 9999));
+      console.log("Users sorted by distance.");
+    } else {
+      console.log("Distance calculation skipped.");
     }
 
     // ---------- Step 6: Return ----------
@@ -517,6 +536,7 @@ exports.getInterestedUsers = async (req, res) => {
       limit: parseInt(limit),
       users,
     });
+    console.log("Response sent successfully.");
   } catch (error) {
     console.error("Error fetching interested users:", error);
     res.status(500).json({

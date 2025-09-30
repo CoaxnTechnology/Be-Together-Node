@@ -402,7 +402,7 @@ exports.getInterestedUsers = async (req, res) => {
           message: "Service not found",
         });
       }
-      serviceCategory = service.category?.toString();
+      serviceCategory = service.category?.toString() || null;
       serviceTags = service.tags || [];
     } else {
       // fallback: request body
@@ -411,11 +411,14 @@ exports.getInterestedUsers = async (req, res) => {
     }
 
     // ---------- Step 2: Build interests filter ----------
-    const interestsFilter = [];
-    if (serviceCategory) interestsFilter.push(serviceCategory);
-    if (serviceTags.length) interestsFilter.push(...serviceTags);
+    const interestsFilter = [
+      ...(serviceCategory ? [serviceCategory] : []),
+      ...serviceTags,
+    ]
+      .map((t) => String(t).trim().toLowerCase())
+      .filter(Boolean);
 
-    if (interestsFilter.length === 0) {
+    if (!interestsFilter.length) {
       return res.json({
         success: true,
         total: 0,
@@ -427,18 +430,19 @@ exports.getInterestedUsers = async (req, res) => {
     }
 
     // ---------- Step 3: Build query ----------
-    const query = {};
+    const query = {
+      interests: { $in: interestsFilter },
+      "lastLocation.coords": { $exists: true }, // ensure location exists
+    };
 
-    // Optional: exclude self
     if (userId && excludeSelf) {
       query._id = { $ne: userId };
     }
 
-    // Strict: user interests must match **at least one** of service tags/category
-    query.interests = { $in: interestsFilter };
-
-    // Location filter
+    // Location filter (nearest users)
+    let calculateDistance = false;
     if (Number(latitude) !== 0 && Number(longitude) !== 0) {
+      calculateDistance = true;
       query["lastLocation.coords"] = {
         $geoWithin: {
           $centerSphere: [
@@ -449,7 +453,8 @@ exports.getInterestedUsers = async (req, res) => {
       };
     }
 
-    console.log("MongoDB query:", query, "Interests filter:", interestsFilter);
+    console.log("MongoDB query to fetch users:", JSON.stringify(query, null, 2));
+    console.log("Interests filter:", interestsFilter);
 
     // ---------- Step 4: Fetch users ----------
     let users = await User.find(query)
@@ -472,7 +477,7 @@ exports.getInterestedUsers = async (req, res) => {
     }
 
     // ---------- Step 5: Distance calculation ----------
-    if (Number(latitude) !== 0 && Number(longitude) !== 0) {
+    if (calculateDistance) {
       const toRad = (v) => (v * Math.PI) / 180;
       users.forEach((u) => {
         if (
@@ -521,6 +526,7 @@ exports.getInterestedUsers = async (req, res) => {
     });
   }
 };
+
 
 
 

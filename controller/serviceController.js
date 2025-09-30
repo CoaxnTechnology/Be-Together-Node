@@ -114,7 +114,7 @@ exports.createService = async (req, res) => {
       location_name: location.name,
       latitude: Number(location.latitude),
       longitude: Number(location.longitude),
-      city: city,
+      city:city,
       category: category._id,
       tags: validTags,
       max_participants,

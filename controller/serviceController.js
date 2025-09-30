@@ -377,7 +377,9 @@ exports.getInterestedUsers = async (req, res) => {
       latitude = 0,
       longitude = 0,
       radius_km = 10,
-      serviceId, // <-- pass serviceId from frontend
+      serviceId,
+      categoryId,
+      tags = [],
       page = 1,
       limit = 10,
       userId, // optional (logged-in user)
@@ -385,7 +387,7 @@ exports.getInterestedUsers = async (req, res) => {
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    // ---------- Find service details ----------
+    // ---------- Find service details if serviceId provided ----------
     let service = null;
     if (serviceId) {
       service = await Service.findById(serviceId)
@@ -421,6 +423,7 @@ exports.getInterestedUsers = async (req, res) => {
 
     // ---------- Interests Filter ----------
     const interestsFilter = [];
+
     if (service) {
       if (service.tags?.length) {
         interestsFilter.push(...service.tags);
@@ -428,12 +431,21 @@ exports.getInterestedUsers = async (req, res) => {
       if (service.category) {
         interestsFilter.push(service.category.toString());
       }
+    } else {
+      // Fallback → use tags/categoryId from request
+      if (Array.isArray(tags) && tags.length > 0) {
+        interestsFilter.push(...tags);
+      } else if (tags) {
+        interestsFilter.push(tags);
+      }
+      if (categoryId) {
+        interestsFilter.push(categoryId);
+      }
     }
 
     if (interestsFilter.length > 0) {
       query.interests = { $in: interestsFilter };
     } else {
-      // Agar service me tags/category nahi h, to at least interests wala user ho
       query.interests = { $exists: true, $ne: [] };
     }
 

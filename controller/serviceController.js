@@ -35,160 +35,160 @@ function formatTimeToAMPM(timeStr) {
 }
 
 // Create service API
-// exports.createService = async (req, res) => {
-//   try {
-//     console.log("===== createService called =====");
-//     const userId = req.body.userId || (req.user && req.user.id);
-//     if (!userId)
-//       return res.status(400).json({ isSuccess: false, message: "userId is required" });
+exports.createService = async (req, res) => {
+  try {
+    console.log("===== createService called =====");
+    const userId = req.body.userId || (req.user && req.user.id);
+    if (!userId)
+      return res.status(400).json({ isSuccess: false, message: "userId is required" });
 
-//     const user = await User.findById(userId);
-//     if (!user)
-//       return res.status(404).json({ isSuccess: false, message: "User not found" });
-//     if (!user.is_active)
-//       return res.status(403).json({ isSuccess: false, message: "User is not active" });
+    const user = await User.findById(userId);
+    if (!user)
+      return res.status(404).json({ isSuccess: false, message: "User not found" });
+    if (!user.is_active)
+      return res.status(403).json({ isSuccess: false, message: "User is not active" });
 
-//     const body = req.body;
-//     const title = body.title && String(body.title).trim();
-//     const description = body.description || "";
-//     const language = body.language || body.Language || "English";
-//     const isFree = body.isFree === true || body.isFree === "true";
-//     const price = isFree ? 0 : Number(body.price || 0);
+    const body = req.body;
+    const title = body.title && String(body.title).trim();
+    const description = body.description || "";
+    const language = body.language || body.Language || "English";
+    const isFree = body.isFree === true || body.isFree === "true";
+    const price = isFree ? 0 : Number(body.price || 0);
 
-//     const location = tryParse(body.location);
-//     const city = body.city;
-//     const service_type = body.service_type || "one_time";
-//     const date = body.date;
-//     const start_time = body.start_time;
-//     const end_time = body.end_time;
-//     const max_participants = Number(body.max_participants || 1);
-//     const categoryId = body.categoryId;
-//     const selectedTags = tryParse(body.selectedTags) || [];
+    const location = tryParse(body.location);
+    const city = body.city;
+    const service_type = body.service_type || "one_time";
+    const date = body.date;
+    const start_time = body.start_time;
+    const end_time = body.end_time;
+    const max_participants = Number(body.max_participants || 1);
+    const categoryId = body.categoryId;
+    const selectedTags = tryParse(body.selectedTags) || [];
 
-//     // ---- Validation ----
-//     if (!title)
-//       return res.status(400).json({ isSuccess: false, message: "Title is required" });
+    // ---- Validation ----
+    if (!title)
+      return res.status(400).json({ isSuccess: false, message: "Title is required" });
 
-//     if (!location || !location.name || location.latitude == null || location.longitude == null) {
-//       return res.status(400).json({
-//         isSuccess: false,
-//         message: "Location (name, latitude, longitude) is required",
-//       });
-//     }
+    if (!location || !location.name || location.latitude == null || location.longitude == null) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Location (name, latitude, longitude) is required",
+      });
+    }
 
-//     if (!categoryId)
-//       return res.status(400).json({ isSuccess: false, message: "categoryId is required" });
+    if (!categoryId)
+      return res.status(400).json({ isSuccess: false, message: "categoryId is required" });
 
-//     const category = await Category.findById(categoryId);
-//     if (!category)
-//       return res.status(404).json({ isSuccess: false, message: "Category not found" });
+    const category = await Category.findById(categoryId);
+    if (!category)
+      return res.status(404).json({ isSuccess: false, message: "Category not found" });
 
-//     if (!Array.isArray(selectedTags) || !selectedTags.length) {
-//       return res.status(400).json({
-//         isSuccess: false,
-//         message: "selectedTags must be a non-empty array",
-//       });
-//     }
+    if (!Array.isArray(selectedTags) || !selectedTags.length) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "selectedTags must be a non-empty array",
+      });
+    }
 
-//     const validTags = category.tags.filter((tag) =>
-//       selectedTags.map((t) => t.toLowerCase()).includes(tag.toLowerCase())
-//     );
-//     if (!validTags.length)
-//       return res.status(400).json({
-//         isSuccess: false,
-//         message: "No valid tags selected from this category",
-//       });
+    const validTags = category.tags.filter((tag) =>
+      selectedTags.map((t) => t.toLowerCase()).includes(tag.toLowerCase())
+    );
+    if (!validTags.length)
+      return res.status(400).json({
+        isSuccess: false,
+        message: "No valid tags selected from this category",
+      });
 
-//     // Build payload
-//     const servicePayload = {
-//       title,
-//       description,
-//       Language: language,
-//       isFree,
-//       price,
-//       location_name: location.name,
-//       latitude: Number(location.latitude),
-//       longitude: Number(location.longitude),
-//       city,
-//       category: category._id,
-//       tags: validTags,
-//       max_participants,
-//       service_type,
-//       owner: user._id,
-//     };
+    // Build payload
+    const servicePayload = {
+      title,
+      description,
+      Language: language,
+      isFree,
+      price,
+      location_name: location.name,
+      latitude: Number(location.latitude),
+      longitude: Number(location.longitude),
+      city,
+      category: category._id,
+      tags: validTags,
+      max_participants,
+      service_type,
+      owner: user._id,
+    };
 
-//     // One-time service
-//     if (service_type === "one_time") {
-//       const formattedStart = formatTimeToAMPM(start_time);
-//       const formattedEnd = formatTimeToAMPM(end_time);
+    // One-time service
+    if (service_type === "one_time") {
+      const formattedStart = formatTimeToAMPM(start_time);
+      const formattedEnd = formatTimeToAMPM(end_time);
 
-//       if (!formattedStart || !formattedEnd) {
-//         return res.status(400).json({
-//           isSuccess: false,
-//           message: "Invalid start_time or end_time (must be HH:mm or hh:mm AM/PM)",
-//         });
-//       }
+      if (!formattedStart || !formattedEnd) {
+        return res.status(400).json({
+          isSuccess: false,
+          message: "Invalid start_time or end_time (must be HH:mm or hh:mm AM/PM)",
+        });
+      }
 
-//       if (!isValidDateISO(date)) {
-//         return res.status(400).json({
-//           isSuccess: false,
-//           message: "Valid date (YYYY-MM-DD) required for one_time",
-//         });
-//       }
+      if (!isValidDateISO(date)) {
+        return res.status(400).json({
+          isSuccess: false,
+          message: "Valid date (YYYY-MM-DD) required for one_time",
+        });
+      }
 
-//       servicePayload.date = date; // store as string "YYYY-MM-DD"
-//       servicePayload.start_time = formattedStart;
-//       servicePayload.end_time = formattedEnd;
-//     }
+      servicePayload.date = date; // store as string "YYYY-MM-DD"
+      servicePayload.start_time = formattedStart;
+      servicePayload.end_time = formattedEnd;
+    }
 
-//     // Recurring service
-//     if (service_type === "recurring") {
-//       const recurring_schedule = tryParse(body.recurring_schedule) || [];
-//       if (!Array.isArray(recurring_schedule) || recurring_schedule.length === 0) {
-//         return res.status(400).json({
-//           isSuccess: false,
-//           message: "Recurring schedule is required for recurring services",
-//         });
-//       }
+    // Recurring service
+    if (service_type === "recurring") {
+      const recurring_schedule = tryParse(body.recurring_schedule) || [];
+      if (!Array.isArray(recurring_schedule) || recurring_schedule.length === 0) {
+        return res.status(400).json({
+          isSuccess: false,
+          message: "Recurring schedule is required for recurring services",
+        });
+      }
 
-//       servicePayload.recurring_schedule = recurring_schedule.map((item) => {
-//         const formattedStart = formatTimeToAMPM(item.start_time);
-//         const formattedEnd = formatTimeToAMPM(item.end_time);
+      servicePayload.recurring_schedule = recurring_schedule.map((item) => {
+        const formattedStart = formatTimeToAMPM(item.start_time);
+        const formattedEnd = formatTimeToAMPM(item.end_time);
 
-//         if (!item.day || !isValidDateISO(item.date) || !formattedStart || !formattedEnd) {
-//           throw new Error(
-//             "Each recurring schedule item must include day, date, start_time, end_time in HH:mm or hh:mm AM/PM format"
-//           );
-//         }
+        if (!item.day || !isValidDateISO(item.date) || !formattedStart || !formattedEnd) {
+          throw new Error(
+            "Each recurring schedule item must include day, date, start_time, end_time in HH:mm or hh:mm AM/PM format"
+          );
+        }
 
-//         return {
-//           day: item.day,
-//           date: item.date, // store as string "YYYY-MM-DD"
-//           start_time: formattedStart,
-//           end_time: formattedEnd,
-//         };
-//       });
-//     }
+        return {
+          day: item.day,
+          date: item.date, // store as string "YYYY-MM-DD"
+          start_time: formattedStart,
+          end_time: formattedEnd,
+        };
+      });
+    }
 
-//     // Save service
-//     const createdService = new Service(servicePayload);
-//     await createdService.save();
+    // Save service
+    const createdService = new Service(servicePayload);
+    await createdService.save();
 
-//     // Link service to user
-//     user.services.push(createdService._id);
-//     await user.save();
+    // Link service to user
+    user.services.push(createdService._id);
+    await user.save();
 
-//     console.log("Service created successfully:", createdService._id);
-//     return res.json({
-//       isSuccess: true,
-//       message: "Service created successfully",
-//       data: createdService,
-//     });
-//   } catch (err) {
-//     console.error("createService error:", err);
-//     return res.status(500).json({ isSuccess: false, message: "Server error", error: err.message });
-//   }
-// };
+    console.log("Service created successfully:", createdService._id);
+    return res.json({
+      isSuccess: true,
+      message: "Service created successfully",
+      data: createdService,
+    });
+  } catch (err) {
+    console.error("createService error:", err);
+    return res.status(500).json({ isSuccess: false, message: "Server error", error: err.message });
+  }
+};
 
 function looksLikeObjectId(id) {
   return mongoose.Types.ObjectId.isValid(id);

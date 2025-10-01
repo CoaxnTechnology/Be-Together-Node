@@ -297,6 +297,7 @@ exports.getServices = async (req, res) => {
     let services = await Service.find(mongoQuery)
       .select("-__v")
       .populate({ path: "category", select: "name" })
+      .populate({ path: "owner", select: "name email profile_image" })
       .skip(skip)
       .limit(limit)
       .lean();

@@ -34,19 +34,25 @@ function formatTimeToAMPM(timeStr) {
   if (!m.isValid()) return null;
   return m.format("hh:mm A");
 }
-
+//Create the service Api
 exports.createService = async (req, res) => {
   try {
     console.log("===== createService called =====");
     const userId = req.body.userId || (req.user && req.user.id);
     if (!userId)
-      return res.status(400).json({ isSuccess: false, message: "userId is required" });
+      return res
+        .status(400)
+        .json({ isSuccess: false, message: "userId is required" });
 
     const user = await User.findById(userId);
     if (!user)
-      return res.status(404).json({ isSuccess: false, message: "User not found" });
+      return res
+        .status(404)
+        .json({ isSuccess: false, message: "User not found" });
     if (!user.is_active)
-      return res.status(403).json({ isSuccess: false, message: "User is not active" });
+      return res
+        .status(403)
+        .json({ isSuccess: false, message: "User is not active" });
 
     const body = req.body;
     const title = body.title && String(body.title).trim();
@@ -67,9 +73,16 @@ exports.createService = async (req, res) => {
 
     // ---- Validation ----
     if (!title)
-      return res.status(400).json({ isSuccess: false, message: "Title is required" });
+      return res
+        .status(400)
+        .json({ isSuccess: false, message: "Title is required" });
 
-    if (!location || !location.name || location.latitude == null || location.longitude == null) {
+    if (
+      !location ||
+      !location.name ||
+      location.latitude == null ||
+      location.longitude == null
+    ) {
       return res.status(400).json({
         isSuccess: false,
         message: "Location (name, latitude, longitude) is required",
@@ -77,11 +90,15 @@ exports.createService = async (req, res) => {
     }
 
     if (!categoryId)
-      return res.status(400).json({ isSuccess: false, message: "categoryId is required" });
+      return res
+        .status(400)
+        .json({ isSuccess: false, message: "categoryId is required" });
 
     const category = await Category.findById(categoryId);
     if (!category)
-      return res.status(404).json({ isSuccess: false, message: "Category not found" });
+      return res
+        .status(404)
+        .json({ isSuccess: false, message: "Category not found" });
 
     if (!Array.isArray(selectedTags) || !selectedTags.length) {
       return res.status(400).json({
@@ -90,8 +107,8 @@ exports.createService = async (req, res) => {
       });
     }
 
-    const validTags = category.tags.filter(tag =>
-      selectedTags.map(t => t.toLowerCase()).includes(tag.toLowerCase())
+    const validTags = category.tags.filter((tag) =>
+      selectedTags.map((t) => t.toLowerCase()).includes(tag.toLowerCase())
     );
     if (!validTags.length)
       return res.status(400).json({
@@ -125,7 +142,8 @@ exports.createService = async (req, res) => {
       if (!formattedStart || !formattedEnd) {
         return res.status(400).json({
           isSuccess: false,
-          message: "Invalid start_time or end_time (must be HH:mm or hh:mm AM/PM)",
+          message:
+            "Invalid start_time or end_time (must be HH:mm or hh:mm AM/PM)",
         });
       }
 
@@ -144,14 +162,17 @@ exports.createService = async (req, res) => {
     // Recurring service
     if (service_type === "recurring") {
       const recurring_schedule = tryParse(body.recurring_schedule) || [];
-      if (!Array.isArray(recurring_schedule) || recurring_schedule.length === 0) {
+      if (
+        !Array.isArray(recurring_schedule) ||
+        recurring_schedule.length === 0
+      ) {
         return res.status(400).json({
           isSuccess: false,
           message: "Recurring schedule is required for recurring services",
         });
       }
 
-      servicePayload.recurring_schedule = recurring_schedule.map(item => {
+      servicePayload.recurring_schedule = recurring_schedule.map((item) => {
         const formattedStart = formatTimeToAMPM(item.start_time);
         const formattedEnd = formatTimeToAMPM(item.end_time);
 
@@ -191,10 +212,11 @@ exports.createService = async (req, res) => {
     });
   } catch (err) {
     console.error("createService error:", err);
-    return res.status(500).json({ isSuccess: false, message: "Server error", error: err.message });
+    return res
+      .status(500)
+      .json({ isSuccess: false, message: "Server error", error: err.message });
   }
 };
-
 
 function looksLikeObjectId(id) {
   return mongoose.Types.ObjectId.isValid(id);
@@ -256,7 +278,7 @@ exports.getServices = async (req, res) => {
     // ---------- CATEGORY FILTER ----------
     if (categoryId) {
       if (Array.isArray(categoryId)) {
-        const validIds = categoryId.filter(id => looksLikeObjectId(id));
+        const validIds = categoryId.filter((id) => looksLikeObjectId(id));
         if (validIds.length) {
           and.push({ category: { $in: validIds } });
           console.log("Multiple categories filter applied:", validIds);
@@ -264,7 +286,9 @@ exports.getServices = async (req, res) => {
       } else {
         if (!looksLikeObjectId(categoryId)) {
           console.log("Invalid categoryId:", categoryId);
-          return res.status(400).json({ isSuccess: false, message: "Invalid categoryId" });
+          return res
+            .status(400)
+            .json({ isSuccess: false, message: "Invalid categoryId" });
         }
         and.push({ category: categoryId });
         console.log("Single category filter applied:", categoryId);
@@ -273,7 +297,7 @@ exports.getServices = async (req, res) => {
 
     // ---------- TAGS FILTER ----------
     if (tags.length) {
-      const normalizedTags = tags.map(t => String(t).trim()).filter(Boolean);
+      const normalizedTags = tags.map((t) => String(t).trim()).filter(Boolean);
       if (normalizedTags.length) {
         and.push({ tags: { $in: normalizedTags } });
         console.log("Tags filter applied:", normalizedTags);
@@ -304,25 +328,36 @@ exports.getServices = async (req, res) => {
       .skip(skip)
       .limit(limit)
       .lean();
-    console.log("Fetched services before distance calculation:", services.length);
+    console.log(
+      "Fetched services before distance calculation:",
+      services.length
+    );
 
     // ---------- DISTANCE CALCULATION ----------
     if (lat != null && lon != null && !(lat === 0 && lon === 0)) {
-      const toRad = v => (v * Math.PI) / 180;
-      services.forEach(s => {
+      const toRad = (v) => (v * Math.PI) / 180;
+      services.forEach((s) => {
         if (s.latitude != null && s.longitude != null) {
-          const lat1 = lat, lon1 = lon;
-          const lat2 = Number(s.latitude), lon2 = Number(s.longitude);
-          const R = 6371; 
+          const lat1 = lat,
+            lon1 = lon;
+          const lat2 = Number(s.latitude),
+            lon2 = Number(s.longitude);
+          const R = 6371;
           const dLat = toRad(lat2 - lat1);
           const dLon = toRad(lon2 - lon1);
-          const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon/2)**2;
-          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+          const a =
+            Math.sin(dLat / 2) ** 2 +
+            Math.cos(toRad(lat1)) *
+              Math.cos(toRad(lat2)) *
+              Math.sin(dLon / 2) ** 2;
+          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
           s.distance_km = Math.round(R * c * 100) / 100;
         } else s.distance_km = null;
       });
 
-      services.sort((a,b) => (a.distance_km || 9999) - (b.distance_km || 9999));
+      services.sort(
+        (a, b) => (a.distance_km || 9999) - (b.distance_km || 9999)
+      );
       console.log("Services sorted by distance.");
     }
 
@@ -335,10 +370,11 @@ exports.getServices = async (req, res) => {
     });
   } catch (err) {
     console.error("getServices error:", err);
-    return res.status(500).json({ isSuccess: false, message: "Server error", error: err.message });
+    return res
+      .status(500)
+      .json({ isSuccess: false, message: "Server error", error: err.message });
   }
 };
-
 
 exports.getInterestedUsers = async (req, res) => {
   try {
@@ -366,9 +402,11 @@ exports.getInterestedUsers = async (req, res) => {
       const services = await Service.find({ category: categoryId })
         .select("tags")
         .lean();
-      console.log(`Fetched ${services.length} services for category ${categoryId}`);
+      console.log(
+        `Fetched ${services.length} services for category ${categoryId}`
+      );
 
-      services.forEach(s => {
+      services.forEach((s) => {
         if (Array.isArray(s.tags)) interestsFilter.push(...s.tags);
       });
     }
@@ -379,7 +417,9 @@ exports.getInterestedUsers = async (req, res) => {
     }
 
     // Remove duplicates & normalize
-    interestsFilter = [...new Set(interestsFilter.map(t => t.trim().toLowerCase()))];
+    interestsFilter = [
+      ...new Set(interestsFilter.map((t) => t.trim().toLowerCase())),
+    ];
     console.log("Final interests filter:", interestsFilter);
 
     // ---------- Step 2: Build user query ----------
@@ -409,7 +449,9 @@ exports.getInterestedUsers = async (req, res) => {
           ],
         },
       };
-      console.log(`Applying location filter: center=[${longitude},${latitude}], radius_km=${radius_km}`);
+      console.log(
+        `Applying location filter: center=[${longitude},${latitude}], radius_km=${radius_km}`
+      );
     } else {
       console.log("Skipping location filter (lat/lon = 0)");
     }
@@ -427,16 +469,20 @@ exports.getInterestedUsers = async (req, res) => {
 
     // ---------- Step 5: Distance calculation ----------
     if (calculateDistance) {
-      const toRad = v => (v * Math.PI) / 180;
-      users.forEach(u => {
+      const toRad = (v) => (v * Math.PI) / 180;
+      users.forEach((u) => {
         if (u.lastLocation?.coords?.coordinates) {
           const [lon2, lat2] = u.lastLocation.coords.coordinates;
-          const lat1 = parseFloat(latitude), lon1 = parseFloat(longitude);
+          const lat1 = parseFloat(latitude),
+            lon1 = parseFloat(longitude);
           const R = 6371;
           const dLat = toRad(lat2 - lat1);
           const dLon = toRad(lon2 - lon1);
-          const a = Math.sin(dLat / 2) ** 2 +
-                    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+          const a =
+            Math.sin(dLat / 2) ** 2 +
+            Math.cos(toRad(lat1)) *
+              Math.cos(toRad(lat2)) *
+              Math.sin(dLon / 2) ** 2;
           const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
           u.distance_km = Math.round(R * c * 100) / 100;
         } else {
@@ -460,18 +506,11 @@ exports.getInterestedUsers = async (req, res) => {
       limit: parseInt(limit),
       users,
     });
-
   } catch (err) {
     console.error("getInterestedUsers error:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 };
-
-
-
-
-
-
 
 // ----------- Get All Services -------------
 exports.getAllServices = async (req, res) => {

@@ -32,7 +32,7 @@ const serviceSchema = new mongoose.Schema({
   },
 
   // one_time service
-  date: { type: Date, default: null },
+  date: { type: String, default: null },
   start_time: { type: String, default: null },
   end_time: { type: String, default: null },
 

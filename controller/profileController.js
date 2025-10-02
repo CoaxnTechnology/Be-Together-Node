@@ -378,6 +378,11 @@ exports.getUserProfileByEmail = async (req, res) => {
       path: "services",
       model: "Service",
       select: "-__v -updated_at", // hide unneeded fields, keep all useful ones
+       populate: {
+        path: "category",   // 👈 populate category inside service
+        model: "Category",
+        select: "name",     // 👈 only fetch category name
+      },
     });
 
     if (!user) {

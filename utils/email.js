@@ -31,7 +31,8 @@ async function sendOtpEmail(to, otp) {
 // ---------------- RESET PASSWORD EMAIL ----------------
 async function sendResetEmail(to, token) {
   const FRONTEND_RESET_URL =
-    process.env.FRONTEND_RESET_URL || "https://your-frontend.com/reset-password";
+    process.env.FRONTEND_RESET_URL ||
+    "https://your-frontend.com/reset-password";
 
   const templatePath = path.join(__dirname, "../templates/email_reset.html");
   let html = fs.readFileSync(templatePath, "utf-8");

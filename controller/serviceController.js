@@ -20,10 +20,7 @@ function isValidTime(t) {
 }
 
 function isValidDateISO(d) {
-  return (
-    typeof d === "string" &&
-    /^\d{4}-\d{2}-\d{2}$/.test(d)
-  );
+  return typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d);
 }
 
 // Helper to format time to AM/PM
@@ -40,13 +37,19 @@ exports.createService = async (req, res) => {
     console.log("===== createService called =====");
     const userId = req.body.userId || (req.user && req.user.id);
     if (!userId)
-      return res.status(400).json({ isSuccess: false, message: "userId is required" });
+      return res
+        .status(400)
+        .json({ isSuccess: false, message: "userId is required" });
 
     const user = await User.findById(userId);
     if (!user)
-      return res.status(404).json({ isSuccess: false, message: "User not found" });
+      return res
+        .status(404)
+        .json({ isSuccess: false, message: "User not found" });
     if (!user.is_active)
-      return res.status(403).json({ isSuccess: false, message: "User is not active" });
+      return res
+        .status(403)
+        .json({ isSuccess: false, message: "User is not active" });
 
     const body = req.body;
     const title = body.title && String(body.title).trim();
@@ -67,9 +70,16 @@ exports.createService = async (req, res) => {
 
     // ---- Validation ----
     if (!title)
-      return res.status(400).json({ isSuccess: false, message: "Title is required" });
+      return res
+        .status(400)
+        .json({ isSuccess: false, message: "Title is required" });
 
-    if (!location || !location.name || location.latitude == null || location.longitude == null) {
+    if (
+      !location ||
+      !location.name ||
+      location.latitude == null ||
+      location.longitude == null
+    ) {
       return res.status(400).json({
         isSuccess: false,
         message: "Location (name, latitude, longitude) is required",
@@ -77,11 +87,15 @@ exports.createService = async (req, res) => {
     }
 
     if (!categoryId)
-      return res.status(400).json({ isSuccess: false, message: "categoryId is required" });
+      return res
+        .status(400)
+        .json({ isSuccess: false, message: "categoryId is required" });
 
     const category = await Category.findById(categoryId);
     if (!category)
-      return res.status(404).json({ isSuccess: false, message: "Category not found" });
+      return res
+        .status(404)
+        .json({ isSuccess: false, message: "Category not found" });
 
     if (!Array.isArray(selectedTags) || !selectedTags.length) {
       return res.status(400).json({
@@ -125,7 +139,8 @@ exports.createService = async (req, res) => {
       if (!formattedStart || !formattedEnd) {
         return res.status(400).json({
           isSuccess: false,
-          message: "Invalid start_time or end_time (must be HH:mm or hh:mm AM/PM)",
+          message:
+            "Invalid start_time or end_time (must be HH:mm or hh:mm AM/PM)",
         });
       }
 
@@ -144,7 +159,10 @@ exports.createService = async (req, res) => {
     // Recurring service
     if (service_type === "recurring") {
       const recurring_schedule = tryParse(body.recurring_schedule) || [];
-      if (!Array.isArray(recurring_schedule) || recurring_schedule.length === 0) {
+      if (
+        !Array.isArray(recurring_schedule) ||
+        recurring_schedule.length === 0
+      ) {
         return res.status(400).json({
           isSuccess: false,
           message: "Recurring schedule is required for recurring services",
@@ -155,7 +173,12 @@ exports.createService = async (req, res) => {
         const formattedStart = formatTimeToAMPM(item.start_time);
         const formattedEnd = formatTimeToAMPM(item.end_time);
 
-        if (!item.day || !isValidDateISO(item.date) || !formattedStart || !formattedEnd) {
+        if (
+          !item.day ||
+          !isValidDateISO(item.date) ||
+          !formattedStart ||
+          !formattedEnd
+        ) {
           throw new Error(
             "Each recurring schedule item must include day, date, start_time, end_time in HH:mm or hh:mm AM/PM format"
           );
@@ -186,7 +209,9 @@ exports.createService = async (req, res) => {
     });
   } catch (err) {
     console.error("createService error:", err);
-    return res.status(500).json({ isSuccess: false, message: "Server error", error: err.message });
+    return res
+      .status(500)
+      .json({ isSuccess: false, message: "Server error", error: err.message });
   }
 };
 
@@ -284,6 +309,11 @@ exports.getServices = async (req, res) => {
       and.push({ longitude: { $gte: box.minLon, $lte: box.maxLon } });
     } else if (lat === 0 && lon === 0) {
       console.log("Lat/Lon are zero → skipping location filter.");
+    }
+    // ---------- EXCLUDE OWN SERVICES ----------
+    if (req.user && req.user._id) {
+      and.push({ owner: { $ne: req.user._id } });
+      console.log("Excluding services owned by user:", req.user._id);
     }
 
     const mongoQuery = and.length ? { $and: and } : {};

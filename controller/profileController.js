@@ -413,21 +413,21 @@ exports.getUserProfileByEmail = async (req, res) => {
     });
   }
 };
-exports.getProfileByEmail = async (req, res) => {
+exports.getProfileById = async (req, res) => {
   try {
-    const { email } = req.body;
+    const { userId } = req.body;
 
-    if (!email) {
+    if (!userId) {
       return res
         .status(400)
-        .json({ isSuccess: false, message: "email is required" });
+        .json({ isSuccess: false, message: "userId is required" });
     }
 
-    // ✅ Find user and populate full service details
-    const user = await User.findOne({ email }).populate({
+    // ✅ Find user by ID and populate services
+    const user = await User.findById(userId).populate({
       path: "services",
       model: "Service",
-      select: "-__v -updated_at", // hide unneeded fields, keep all useful ones
+      select: "-__v -updated_at",
     });
 
     if (!user) {
@@ -447,15 +447,15 @@ exports.getProfileByEmail = async (req, res) => {
         bio: user.bio || "",
         city: user.city || "",
         languages: user.languages || [],
-        interests: user.interests || [], // plain strings
+        interests: user.interests || [],
         offeredTags: user.offeredTags || [],
 
-        servicesCount: user.services.length, // ✅ total services count
-        services: user.services || [], // ✅ full service details
+        servicesCount: user.services.length,
+        services: user.services || [],
       },
     });
   } catch (err) {
-    console.error("getUserProfileByEmail error:", err);
+    console.error("getUserProfileById error:", err);
     res.status(500).json({
       isSuccess: false,
       message: "Server error",

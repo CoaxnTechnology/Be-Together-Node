@@ -8,6 +8,7 @@ const {
   getUserProfileByEmail,
   editProfile,
   getProfileByEmail,
+  getProfileById,
 } = require("../controller/profileController");
 
 const router = express.Router();
@@ -26,6 +27,6 @@ router.put(
   upload.single("profile_image"),
   editProfile
 );
-router.post("/user/profile", getProfileByEmail);
+router.post("/user/profile", getProfileById);
 
 module.exports = router;

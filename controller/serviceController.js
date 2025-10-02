@@ -310,19 +310,15 @@ exports.getServices = async (req, res) => {
     } else if (lat === 0 && lon === 0) {
       console.log("Lat/Lon are zero → skipping location filter.");
     }
-    // ---------- PRICE FILTER ----------
+// ---------- FREE / PAID FILTER ----------
 if (q.isFree === true || q.isFree === "true") {
+  // Free services only
   and.push({ isFree: true });
   console.log("Filtering only free services");
-} else {
-  let priceFilter = {};
-  if (q.minPrice !== undefined) priceFilter.$gte = Number(q.minPrice);
-  if (q.maxPrice !== undefined) priceFilter.$lte = Number(q.maxPrice);
-
-  if (Object.keys(priceFilter).length) {
-    and.push({ price: priceFilter });
-    console.log("Price filter applied:", priceFilter);
-  }
+} else if (q.isFree === false || q.isFree === "false") {
+  // Paid services only
+  and.push({ isFree: false });
+  console.log("Filtering only paid services");
 }
      // ---------- EXCLUDE OWN SERVICES ----------
     let excludeOwnerId = null;

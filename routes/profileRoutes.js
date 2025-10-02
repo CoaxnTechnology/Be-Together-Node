@@ -27,6 +27,6 @@ router.put(
   upload.single("profile_image"),
   editProfile
 );
-router.post("/user/profile", getProfileById);
+router.post("/profile", getProfileById);
 
 module.exports = router;

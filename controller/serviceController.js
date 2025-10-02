@@ -2,7 +2,7 @@ const moment = require("moment");
 const User = require("../model/User");
 const Category = require("../model/Category");
 const Service = require("../model/Service");
-
+const mongoose = require("mongoose");
 // Helper to parse JSON safely
 function tryParse(val) {
   if (val === undefined || val === null) return val;
@@ -310,11 +310,24 @@ exports.getServices = async (req, res) => {
     } else if (lat === 0 && lon === 0) {
       console.log("Lat/Lon are zero → skipping location filter.");
     }
-    // ---------- EXCLUDE OWN SERVICES ----------
+     // ---------- EXCLUDE OWN SERVICES ----------
+    let excludeOwnerId = null;
+
+    // Case 1: Agar auth middleware laga ho
     if (req.user && req.user._id) {
-      and.push({ owner: { $ne: req.user._id } });
-      console.log("Excluding services owned by user:", req.user._id);
+      excludeOwnerId = req.user._id.toString();
     }
+
+    // Case 2: Agar frontend ne explicitly bheja
+    if (q.excludeOwnerId) {
+      excludeOwnerId = q.excludeOwnerId;
+    }
+
+    if (excludeOwnerId && looksLikeObjectId(excludeOwnerId)) {
+      and.push({ owner: { $ne: excludeOwnerId } });
+      console.log("Excluding services owned by:", excludeOwnerId);
+    }
+
 
     const mongoQuery = and.length ? { $and: and } : {};
     console.log("Final MongoDB query for services:", mongoQuery);

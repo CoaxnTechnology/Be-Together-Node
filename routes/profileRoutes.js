@@ -7,6 +7,7 @@ const authMiddleware = require("../Middleware/authMiddleware");
 const {
   getUserProfileByEmail,
   editProfile,
+  getProfileByEmail,
 } = require("../controller/profileController");
 
 const router = express.Router();
@@ -25,7 +26,6 @@ router.put(
   upload.single("profile_image"),
   editProfile
 );
-router.post("/user/profile",  getUserProfileByEmail);
-
+router.post("/user/profile", getProfileByEmail);
 
 module.exports = router;

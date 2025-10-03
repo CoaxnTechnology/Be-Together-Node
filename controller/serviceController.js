@@ -584,6 +584,7 @@ exports.getAllServices = async (req, res) => {
 exports.updateService = async (req, res) => {
   try {
     console.log("===== updateService (PUT) called =====");
+
     const { serviceId, userId, ...body } = req.body;
 
     if (!serviceId) {
@@ -605,37 +606,32 @@ exports.updateService = async (req, res) => {
       return res.status(403).json({ isSuccess: false, message: "Not authorized to edit this service" });
     }
 
-    // 🔧 Build full update payload (replace existing)
+    // Parse and validate
     const location = tryParse(body.location);
     if (!location || !location.name || location.latitude == null || location.longitude == null) {
-      return res.status(400).json({
-        isSuccess: false,
-        message: "Location (name, latitude, longitude) is required"
-      });
+      return res.status(400).json({ isSuccess: false, message: "Location (name, latitude, longitude) is required" });
     }
 
     const category = await Category.findById(body.categoryId);
-    if (!category) {
-      return res.status(404).json({ isSuccess: false, message: "Category not found" });
-    }
+    if (!category) return res.status(404).json({ isSuccess: false, message: "Category not found" });
 
     const selectedTags = tryParse(body.selectedTags) || [];
     const validTags = category.tags.filter(tag =>
       selectedTags.map(t => t.toLowerCase()).includes(tag.toLowerCase())
     );
     if (!validTags.length) {
-      return res.status(400).json({
-        isSuccess: false,
-        message: "No valid tags selected from this category"
-      });
+      return res.status(400).json({ isSuccess: false, message: "No valid tags selected from this category" });
     }
 
     const isFree = body.isFree === true || body.isFree === "true";
     const price = isFree ? 0 : Number(body.price || 0);
 
+    const service_type = body.service_type || "one_time";
+
+    // Build update payload
     const updatePayload = {
       title: String(body.title).trim(),
-      description: body.description,
+      description: body.description || "",
       Language: body.language || body.Language || "English",
       isFree,
       price,
@@ -646,37 +642,39 @@ exports.updateService = async (req, res) => {
       category: category._id,
       tags: validTags,
       max_participants: Number(body.max_participants || 1),
-      service_type: body.service_type || "one_time"
+      service_type
     };
 
-    // One-time service
-    if (updatePayload.service_type === "one_time") {
+    const mongoUpdate = { $set: updatePayload };
+
+    // Handle one-time service
+    if (service_type === "one_time") {
       if (!isValidDateISO(body.date)) {
         return res.status(400).json({ isSuccess: false, message: "Valid date (YYYY-MM-DD) required for one_time" });
       }
+
       const formattedStart = formatTimeToAMPM(body.start_time);
       const formattedEnd = formatTimeToAMPM(body.end_time);
       if (!formattedStart || !formattedEnd) {
-        return res.status(400).json({
-          isSuccess: false,
-          message: "Invalid start_time or end_time format"
-        });
+        return res.status(400).json({ isSuccess: false, message: "Invalid start_time or end_time format" });
       }
-      updatePayload.date = body.date;
-      updatePayload.start_time = formattedStart;
-      updatePayload.end_time = formattedEnd;
+
+      mongoUpdate.$set.date = body.date;
+      mongoUpdate.$set.start_time = formattedStart;
+      mongoUpdate.$set.end_time = formattedEnd;
+
+      // Remove recurring schedule if it exists
+      mongoUpdate.$unset = { recurring_schedule: "" };
     }
 
-    // Recurring service
-    if (updatePayload.service_type === "recurring") {
+    // Handle recurring service
+    if (service_type === "recurring") {
       const recurring_schedule = tryParse(body.recurring_schedule) || [];
       if (!Array.isArray(recurring_schedule) || recurring_schedule.length === 0) {
-        return res.status(400).json({
-          isSuccess: false,
-          message: "Recurring schedule is required for recurring services"
-        });
+        return res.status(400).json({ isSuccess: false, message: "Recurring schedule is required for recurring services" });
       }
-      updatePayload.recurring_schedule = recurring_schedule.map(item => {
+
+      mongoUpdate.$set.recurring_schedule = recurring_schedule.map(item => {
         const formattedStart = formatTimeToAMPM(item.start_time);
         const formattedEnd = formatTimeToAMPM(item.end_time);
         if (!item.day || !isValidDateISO(item.date) || !formattedStart || !formattedEnd) {
@@ -689,12 +687,15 @@ exports.updateService = async (req, res) => {
           end_time: formattedEnd
         };
       });
+
+      // Remove one-time fields if they exist
+      mongoUpdate.$unset = { date: "", start_time: "", end_time: "" };
     }
 
-    // ✅ Replace service
+    // Update service
     const updatedService = await Service.findByIdAndUpdate(
       serviceId,
-      { $set: updatePayload },
+      mongoUpdate,
       { new: true }
     );
 
@@ -706,10 +707,7 @@ exports.updateService = async (req, res) => {
 
   } catch (err) {
     console.error("updateService error:", err);
-    return res.status(500).json({
-      isSuccess: false,
-      message: "Server error",
-      error: err.message
-    });
+    return res.status(500).json({ isSuccess: false, message: "Server error", error: err.message });
   }
 };
+

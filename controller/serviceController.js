@@ -584,15 +584,12 @@ exports.getAllServices = async (req, res) => {
 exports.updateService = async (req, res) => {
   try {
     console.log("===== updateService (PUT) called =====");
+    console.log("Request body:", req.body);
 
     const { serviceId, userId, ...body } = req.body;
 
-    if (!serviceId) {
-      return res.status(400).json({ isSuccess: false, message: "serviceId is required in body" });
-    }
-    if (!userId) {
-      return res.status(400).json({ isSuccess: false, message: "userId is required in body" });
-    }
+    if (!serviceId) return res.status(400).json({ isSuccess: false, message: "serviceId is required in body" });
+    if (!userId) return res.status(400).json({ isSuccess: false, message: "userId is required in body" });
 
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ isSuccess: false, message: "User not found" });
@@ -606,18 +603,21 @@ exports.updateService = async (req, res) => {
       return res.status(403).json({ isSuccess: false, message: "Not authorized to edit this service" });
     }
 
-    // Parse and validate
+    // Parse and validate location
     const location = tryParse(body.location);
     if (!location || !location.name || location.latitude == null || location.longitude == null) {
       return res.status(400).json({ isSuccess: false, message: "Location (name, latitude, longitude) is required" });
     }
 
+    // Validate category
+    if (!body.categoryId) return res.status(400).json({ isSuccess: false, message: "categoryId is required" });
     const category = await Category.findById(body.categoryId);
     if (!category) return res.status(404).json({ isSuccess: false, message: "Category not found" });
 
+    // Validate tags
     const selectedTags = tryParse(body.selectedTags) || [];
     const validTags = category.tags.filter(tag =>
-      selectedTags.map(t => t.toLowerCase()).includes(tag.toLowerCase())
+      selectedTags.map(t => String(t).toLowerCase()).includes(tag.toLowerCase())
     );
     if (!validTags.length) {
       return res.status(400).json({ isSuccess: false, message: "No valid tags selected from this category" });
@@ -625,12 +625,11 @@ exports.updateService = async (req, res) => {
 
     const isFree = body.isFree === true || body.isFree === "true";
     const price = isFree ? 0 : Number(body.price || 0);
-
     const service_type = body.service_type || "one_time";
 
-    // Build update payload
+    // Base update payload
     const updatePayload = {
-      title: String(body.title).trim(),
+      title: String(body.title || "").trim(),
       description: body.description || "",
       Language: body.language || body.Language || "English",
       isFree,
@@ -645,9 +644,9 @@ exports.updateService = async (req, res) => {
       service_type
     };
 
-    const mongoUpdate = { $set: updatePayload };
+    const mongoUpdate = { $set: updatePayload, $unset: {} };
 
-    // Handle one-time service
+    // Handle one_time service
     if (service_type === "one_time") {
       if (!isValidDateISO(body.date)) {
         return res.status(400).json({ isSuccess: false, message: "Valid date (YYYY-MM-DD) required for one_time" });
@@ -663,8 +662,8 @@ exports.updateService = async (req, res) => {
       mongoUpdate.$set.start_time = formattedStart;
       mongoUpdate.$set.end_time = formattedEnd;
 
-      // Remove recurring schedule if it exists
-      mongoUpdate.$unset = { recurring_schedule: "" };
+      // Remove recurring schedule
+      mongoUpdate.$unset.recurring_schedule = "";
     }
 
     // Handle recurring service
@@ -674,30 +673,34 @@ exports.updateService = async (req, res) => {
         return res.status(400).json({ isSuccess: false, message: "Recurring schedule is required for recurring services" });
       }
 
-      mongoUpdate.$set.recurring_schedule = recurring_schedule.map(item => {
+      const formattedSchedule = [];
+      for (const item of recurring_schedule) {
         const formattedStart = formatTimeToAMPM(item.start_time);
         const formattedEnd = formatTimeToAMPM(item.end_time);
         if (!item.day || !isValidDateISO(item.date) || !formattedStart || !formattedEnd) {
-          throw new Error("Each recurring schedule item must include day, date, start_time, end_time");
+          return res.status(400).json({
+            isSuccess: false,
+            message: "Each recurring schedule item must include valid day, date, start_time, and end_time"
+          });
         }
-        return {
+        formattedSchedule.push({
           day: item.day,
           date: item.date,
           start_time: formattedStart,
           end_time: formattedEnd
-        };
-      });
+        });
+      }
 
-      // Remove one-time fields if they exist
-      mongoUpdate.$unset = { date: "", start_time: "", end_time: "" };
+      mongoUpdate.$set.recurring_schedule = formattedSchedule;
+
+      // Remove one_time fields
+      mongoUpdate.$unset.date = "";
+      mongoUpdate.$unset.start_time = "";
+      mongoUpdate.$unset.end_time = "";
     }
 
     // Update service
-    const updatedService = await Service.findByIdAndUpdate(
-      serviceId,
-      mongoUpdate,
-      { new: true }
-    );
+    const updatedService = await Service.findByIdAndUpdate(serviceId, mongoUpdate, { new: true });
 
     return res.json({
       isSuccess: true,

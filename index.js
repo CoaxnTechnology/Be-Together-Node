@@ -38,7 +38,7 @@ app.use("/api/service", serviceRoutes);
 app.use("/api/onbording", userTags);
  app.use("/api/user", locationRoutes);
 app.use("/api",ReviewRoutes)
-app.use("/api/notifications", notificationRoutes);
+//app.use("/api/notifications", notificationRoutes);
 // Connect to MongoDB (live Atlas)
 mongoose
   .connect(process.env.MONGO_URI, {

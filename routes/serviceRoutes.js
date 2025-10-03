@@ -7,5 +7,5 @@ router.post("/create", auth, serviceController.createService);
 router.post("/get", serviceController.getServices);
 router.post("/user/search", serviceController.getInterestedUsers);
 router.get("/getall", serviceController.getAllServices);
-router.put("/services/update", auth, serviceController.updateService);
+router.put("/update", auth, serviceController.updateService);
 module.exports = router;

@@ -1,10 +1,13 @@
 // models/User.js
 const mongoose = require("mongoose");
-const PointSchema = new mongoose.Schema({
-  type: { type: String, enum: ['Point'], default: 'Point' },
-  // GeoJSON order: [longitude, latitude]
-  coordinates: { type: [Number], default: [0, 0] }
-}, { _id: false });
+const PointSchema = new mongoose.Schema(
+  {
+    type: { type: String, enum: ["Point"], default: "Point" },
+    // GeoJSON order: [longitude, latitude]
+    coordinates: { type: [Number], default: [0, 0] },
+  },
+  { _id: false }
+);
 
 const userSchema = new mongoose.Schema(
   {
@@ -41,9 +44,10 @@ const userSchema = new mongoose.Schema(
 
     access_token: { type: String, default: null },
     session_id: { type: String, default: null },
+    fcmToken: { type: [String], default: [] },
 
     // Inline availability definition — no separate schemas
-    
+
     // Relationships / simple arrays
     languages: { type: [String], default: [] },
 
@@ -87,7 +91,12 @@ userSchema.pre("save", function (next) {
   this.updated_at = Date.now();
   next();
 });
+userSchema.methods.addFcmToken = function(token) {
+  if (token && !this.fcmTokens.includes(token)) {
+    this.fcmTokens.push(token);
+  }
+};
 // ✅ Add geospatial index here
-userSchema.index({ 'lastLocation.coords': '2dsphere' });
+userSchema.index({ "lastLocation.coords": "2dsphere" });
 
 module.exports = mongoose.model("User", userSchema);

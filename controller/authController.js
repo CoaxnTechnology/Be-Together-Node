@@ -4,7 +4,7 @@ const mongoose = require("mongoose");
 const User = require("../model/User");
 const { createAccessToken } = require("../utils/jwt");
 const { generateOTP } = require("../utils/otp");
-const { sendOtpEmail,sendResetEmail } = require("../utils/email");
+const { sendOtpEmail, sendResetEmail } = require("../utils/email");
 const { getFullImageUrl } = require("../utils/image");
 const { randomUUID } = require("crypto");
 const crypto = require("crypto");
@@ -58,6 +58,7 @@ exports.register = async (req, res) => {
       register_type,
       provider_id,
       provider_uid,
+      fcmToken,
     } = req.body;
     // DEBUG: add at very top of exports.register (dev only)
     console.log("--- REGISTER HIT ---");
@@ -107,6 +108,7 @@ exports.register = async (req, res) => {
       // if provider info provided, update it
       if (provider_id) existing.provider_id = provider_id;
       if (provider_uid) existing.provider_uid = provider_uid;
+      if (fcmToken) existing.addFcmToken(fcmToken);
       await existing.save();
 
       return res.status(200).json({
@@ -123,6 +125,7 @@ exports.register = async (req, res) => {
           profile_image: getFullImageUrl(existing.profile_image),
           register_type: existing.register_type,
           otp_verified: existing.otp_verified,
+          fcmToken: existing.fcmToken,
         },
       });
     }
@@ -199,8 +202,11 @@ exports.register = async (req, res) => {
       profile_image: profileImageUrl,
       provider_id: provider_id || null,
       provider_uid: provider_uid || null,
+      fcmToken: fcmToken || null,
     });
-
+    if (fcmToken) {
+      newUser.addFcmToken(fcmToken); // use method
+    }
     await newUser.save();
 
     if (register_type === "manual") {
@@ -238,6 +244,7 @@ exports.register = async (req, res) => {
           profile_image: getFullImageUrl(newUser.profile_image),
           register_type: newUser.register_type,
           otp_verified: newUser.otp_verified,
+          fcmToken: newUser.fcmToken,
         },
       });
     }
@@ -356,7 +363,8 @@ exports.verifyOtpRegister = async (req, res) => {
 // ---------------- LOGIN ----------------
 exports.login = async (req, res) => {
   try {
-    const { email, password, login_type, provider_id, provider_uid } = req.body;
+    const { email, password, login_type, provider_id, provider_uid, fcmToken } =
+      req.body;
     if (!email)
       return res
         .status(400)
@@ -387,6 +395,7 @@ exports.login = async (req, res) => {
       user.otp_code = otp;
       user.otp_expiry = expiry;
       user.otp_verified = false;
+      if (fcmToken) user.addFcmToken(fcmToken);
       await user.save();
 
       try {
@@ -399,6 +408,7 @@ exports.login = async (req, res) => {
         IsSucces: true,
         message: "OTP sent for login. Please verify.",
         require_otp: true,
+        fcmToken: user.fcmToken,
       });
     }
 
@@ -420,6 +430,7 @@ exports.login = async (req, res) => {
       user.otp_verified = true;
       if (provider_id) user.provider_id = provider_id;
       if (provider_uid) user.provider_uid = provider_uid;
+      if (fcmToken) user.addFcmToken(fcmToken);
       await user.save();
 
       return res.json({
@@ -436,6 +447,7 @@ exports.login = async (req, res) => {
           profile_image: getFullImageUrl(user.profile_image),
           register_type: user.register_type,
           otp_verified: user.otp_verified,
+          fcmToken: user.fcmToken,
         },
       });
     }
@@ -585,7 +597,10 @@ exports.resendOtp = async (req, res) => {
     const { otp, expiry } = generateOTP();
 
     // Optional bookkeeping: version for OTP attempts (useful for logs or analytics)
-    if (typeof user.otp_attempt_version === "undefined" || user.otp_attempt_version === null) {
+    if (
+      typeof user.otp_attempt_version === "undefined" ||
+      user.otp_attempt_version === null
+    ) {
       user.otp_attempt_version = 1;
     } else {
       user.otp_attempt_version = Number(user.otp_attempt_version) + 1;
@@ -631,31 +646,44 @@ exports.forgotOrResetPassword = async (req, res) => {
   try {
     const { email, token, new_password } = req.body;
     if (!email) {
-      return res.status(400).json({ IsSucces: false, message: "Email required" });
+      return res
+        .status(400)
+        .json({ IsSucces: false, message: "Email required" });
     }
 
     const lowerEmail = String(email).toLowerCase();
     const user = await User.findOne({ email: lowerEmail });
     if (!user) {
       // Keep same behavior as your other endpoints (404). You can also return generic response for security.
-      return res.status(404).json({ IsSucces: false, message: "User not found" });
+      return res
+        .status(404)
+        .json({ IsSucces: false, message: "User not found" });
     }
 
     // Mode 1: request reset (no token & no new_password provided)
     if (!token && !new_password) {
       // Optionally block google_auth accounts from password reset
       if (user.register_type === "google_auth" || user.is_google_auth) {
-        return res.status(400).json({ IsSucces: false, message: "Password reset not allowed for Google accounts" });
+        return res
+          .status(400)
+          .json({
+            IsSucces: false,
+            message: "Password reset not allowed for Google accounts",
+          });
       }
 
       // Optional cooldown for abuse prevention
       const COOLDOWN_SECONDS = 60;
       if (user.lastResetRequestAt) {
-        const elapsedSec = Math.floor((Date.now() - new Date(user.lastResetRequestAt).getTime()) / 1000);
+        const elapsedSec = Math.floor(
+          (Date.now() - new Date(user.lastResetRequestAt).getTime()) / 1000
+        );
         if (elapsedSec < COOLDOWN_SECONDS) {
           return res.status(429).json({
             IsSucces: false,
-            message: `Please wait ${COOLDOWN_SECONDS - elapsedSec} seconds before requesting again.`,
+            message: `Please wait ${
+              COOLDOWN_SECONDS - elapsedSec
+            } seconds before requesting again.`,
           });
         }
       }
@@ -679,32 +707,54 @@ exports.forgotOrResetPassword = async (req, res) => {
         // Still respond success to avoid leaking info
       }
 
-      return res.json({ IsSucces: true, message: "If the email is registered, a reset link has been sent." });
+      return res.json({
+        IsSucces: true,
+        message: "If the email is registered, a reset link has been sent.",
+      });
     }
 
     // Mode 2: perform reset (token + new_password provided)
     if (!token || !new_password) {
-      return res.status(400).json({ IsSucces: false, message: "Token and new_password required to reset password." });
+      return res
+        .status(400)
+        .json({
+          IsSucces: false,
+          message: "Token and new_password required to reset password.",
+        });
     }
 
     // check there's an active reset
     if (!user.reset_password_token || !user.reset_password_expiry) {
-      return res.status(400).json({ IsSucces: false, message: "No active reset request found" });
+      return res
+        .status(400)
+        .json({ IsSucces: false, message: "No active reset request found" });
     }
 
     if (user.reset_password_used) {
-      return res.status(400).json({ IsSucces: false, message: "This reset link has already been used" });
+      return res
+        .status(400)
+        .json({
+          IsSucces: false,
+          message: "This reset link has already been used",
+        });
     }
 
     // check expiry
     if (Date.now() > new Date(user.reset_password_expiry).getTime()) {
-      return res.status(400).json({ IsSucces: false, message: "Reset link expired" });
+      return res
+        .status(400)
+        .json({ IsSucces: false, message: "Reset link expired" });
     }
 
     // validate token
-    const hashedToken = crypto.createHash("sha256").update(String(token)).digest("hex");
+    const hashedToken = crypto
+      .createHash("sha256")
+      .update(String(token))
+      .digest("hex");
     if (hashedToken !== user.reset_password_token) {
-      return res.status(400).json({ IsSucces: false, message: "Invalid reset token" });
+      return res
+        .status(400)
+        .json({ IsSucces: false, message: "Invalid reset token" });
     }
 
     // all good -> update password
@@ -719,7 +769,10 @@ exports.forgotOrResetPassword = async (req, res) => {
 
     await user.save();
 
-    return res.json({ IsSucces: true, message: "Password updated successfully" });
+    return res.json({
+      IsSucces: true,
+      message: "Password updated successfully",
+    });
   } catch (err) {
     console.error("❌ forgotOrResetPassword Error:", err);
     return res.status(500).json({ IsSucces: false, message: "Server error" });

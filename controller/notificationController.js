@@ -45,7 +45,12 @@ function buildUserInterestUpdateMessage(user, mutualInterests) {
     )}. Tap to view their profile.`,
   };
 }
-
+function buildServiceViewMessage(viewer, service) {
+  return {
+    title: `👀 ${viewer.name} viewed your service!`,
+    body: `${viewer.name} checked out "${service.title}"`,
+  };
+}
 // Common notification handler for services
 async function notifyUsersForService(service, scenarioType) {
   try {
@@ -150,9 +155,49 @@ async function notifyNearbyUsersOnInterestUpdate(user) {
     console.error("❌ Interest update notification error:", err.message);
   }
 }
+const notifiedViewMap = {}; // separate map for views to rate-limit
+async function notifyOnServiceView(serviceId, viewerId) {
+  try {
+    const service = await Service.findById(serviceId).populate("owner");
+    if (!service || !service.owner) return;
+
+    const owner = service.owner;
+
+    if (!owner.notifyOnProfileView) return; // owner toggle
+
+    const viewer = await User.findById(viewerId);
+    if (!viewer) return;
+
+    const key = `${serviceId}-${viewerId}-${owner._id}`;
+    if (notifiedViewMap[key]) return;
+    notifiedViewMap[key] = true;
+    setTimeout(() => delete notifiedViewMap[key], 1000 * 60 * 5); // 5 min cooldown
+
+    if (!owner.fcmToken) return;
+
+    const message = buildServiceViewMessage(viewer, service);
+
+    const payload = {
+      tokens: [owner.fcmToken],
+      notification: { title: message.title, body: message.body },
+      data: {
+        type: "ServiceView",
+        pageType: "UserProfilePage",
+        serviceId: service._id.toString(),
+        viewerId: viewer._id.toString(),
+      },
+    };
+
+    await admin.messaging().sendMulticast(payload);
+    console.log(`✅ Notified ${owner.name} that ${viewer.name} viewed "${service.title}"`);
+  } catch (err) {
+    console.error("❌ Service view notification error:", err.message);
+  }
+}
 
 // Exports
 exports.notifyOnNewService = (service) =>
   notifyUsersForService(service, "new");
 exports.notifyOnUpdate = (service) => notifyUsersForService(service, "update");
 exports.notifyOnUserInterestUpdate = notifyNearbyUsersOnInterestUpdate;
+exports.notifyOnServiceView = notifyOnServiceView;

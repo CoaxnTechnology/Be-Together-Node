@@ -318,25 +318,6 @@ exports.getServices = async (req, res) => {
       }
     }
 
-    // ---------- LOCATION FILTER ----------
-    if (lat != null && lon != null && !(lat === 0 && lon === 0)) {
-      const box = bboxForLatLon(lat, lon, radiusKm);
-      and.push({ latitude: { $gte: box.minLat, $lte: box.maxLat } });
-      and.push({ longitude: { $gte: box.minLon, $lte: box.maxLon } });
-      console.log("Location filter applied with bounding box:", box);
-    } else if (lat === 0 && lon === 0) {
-      console.log("Lat/Lon are zero → skipping location filter.");
-    }
-
-    // ---------- FREE / PAID FILTER ----------
-    if (q.isFree === true || q.isFree === "true") {
-      and.push({ isFree: true });
-      console.log("Filtering only free services");
-    } else if (q.isFree === false || q.isFree === "false") {
-      and.push({ isFree: false });
-      console.log("Filtering only paid services");
-    }
-
     // ---------- EXCLUDE OWN SERVICES ----------
     let excludeOwnerId = null;
     if (req.user && req.user._id) excludeOwnerId = req.user._id.toString();
@@ -362,35 +343,34 @@ exports.getServices = async (req, res) => {
       .skip(skip)
       .limit(limit)
       .lean();
-    console.log(
-      "Fetched services before distance calculation:",
-      services.length
-    );
+    console.log("Fetched services before distance calculation:", services.length);
 
     // ---------- DISTANCE CALCULATION ----------
     if (lat != null && lon != null && !(lat === 0 && lon === 0)) {
       const toRad = (v) => (v * Math.PI) / 180;
+
       services.forEach((s) => {
-        if (s.latitude != null && s.longitude != null) {
-          const lat1 = lat,
-            lon1 = lon;
-          const lat2 = Number(s.latitude),
-            lon2 = Number(s.longitude);
-          const R = 6371;
-          const dLat = toRad(lat2 - lat1);
-          const dLon = toRad(lon2 - lon1);
+        const sLat = s.latitude != null ? Number(s.latitude) : null;
+        const sLon = s.longitude != null ? Number(s.longitude) : null;
+
+        if (sLat != null && sLon != null && !isNaN(sLat) && !isNaN(sLon)) {
+          const dLat = toRad(sLat - lat);
+          const dLon = toRad(sLon - lon);
+          const R = 6371; // km
           const a =
             Math.sin(dLat / 2) ** 2 +
-            Math.cos(toRad(lat1)) *
-              Math.cos(toRad(lat2)) *
-              Math.sin(dLon / 2) ** 2;
+            Math.cos(toRad(lat)) * Math.cos(toRad(sLat)) * Math.sin(dLon / 2) ** 2;
           const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
           s.distance_km = Math.round(R * c * 100) / 100;
-        } else s.distance_km = null;
+        } else {
+          s.distance_km = null;
+        }
       });
 
       services.sort(
-        (a, b) => (a.distance_km || 9999) - (b.distance_km || 9999)
+        (a, b) =>
+          (a.distance_km != null ? a.distance_km : 9999) -
+          (b.distance_km != null ? b.distance_km : 9999)
       );
       console.log("Services sorted by distance.");
     }
@@ -409,6 +389,7 @@ exports.getServices = async (req, res) => {
       .json({ isSuccess: false, message: "Server error", error: err.message });
   }
 };
+
 
 exports.getInterestedUsers = async (req, res) => {
   try {

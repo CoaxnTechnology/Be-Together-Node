@@ -318,6 +318,25 @@ exports.getServices = async (req, res) => {
       }
     }
 
+    // ---------- LOCATION FILTER ----------
+    if (lat != null && lon != null && !(lat === 0 && lon === 0)) {
+      const box = bboxForLatLon(lat, lon, radiusKm);
+      and.push({ latitude: { $gte: box.minLat, $lte: box.maxLat } });
+      and.push({ longitude: { $gte: box.minLon, $lte: box.maxLon } });
+      console.log("Location filter applied with bounding box:", box);
+    } else if (lat === 0 && lon === 0) {
+      console.log("Lat/Lon are zero → skipping location filter.");
+    }
+
+    // ---------- FREE / PAID FILTER ----------
+    if (q.isFree === true || q.isFree === "true") {
+      and.push({ isFree: true });
+      console.log("Filtering only free services");
+    } else if (q.isFree === false || q.isFree === "false") {
+      and.push({ isFree: false });
+      console.log("Filtering only paid services");
+    }
+
     // ---------- EXCLUDE OWN SERVICES ----------
     let excludeOwnerId = null;
     if (req.user && req.user._id) excludeOwnerId = req.user._id.toString();
@@ -343,7 +362,10 @@ exports.getServices = async (req, res) => {
       .skip(skip)
       .limit(limit)
       .lean();
-    console.log("Fetched services before distance calculation:", services.length);
+    console.log(
+      "Fetched services before distance calculation:",
+      services.length
+    );
 
     // ---------- DISTANCE CALCULATION ----------
     if (lat != null && lon != null && !(lat === 0 && lon === 0)) {
@@ -356,10 +378,12 @@ exports.getServices = async (req, res) => {
         if (sLat != null && sLon != null && !isNaN(sLat) && !isNaN(sLon)) {
           const dLat = toRad(sLat - lat);
           const dLon = toRad(sLon - lon);
-          const R = 6371; // km
+          const R = 6371; // radius in km
           const a =
             Math.sin(dLat / 2) ** 2 +
-            Math.cos(toRad(lat)) * Math.cos(toRad(sLat)) * Math.sin(dLon / 2) ** 2;
+            Math.cos(toRad(lat)) *
+              Math.cos(toRad(sLat)) *
+              Math.sin(dLon / 2) ** 2;
           const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
           s.distance_km = Math.round(R * c * 100) / 100;
         } else {
@@ -389,6 +413,7 @@ exports.getServices = async (req, res) => {
       .json({ isSuccess: false, message: "Server error", error: err.message });
   }
 };
+
 
 
 exports.getInterestedUsers = async (req, res) => {

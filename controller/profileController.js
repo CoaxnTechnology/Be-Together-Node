@@ -4,7 +4,7 @@ const Category = require("../model/Category");
 const { getFullImageUrl } = require("../utils/image");
 const streamifier = require("streamifier");
 const cloudinary = require("cloudinary").v2;
-
+const notificationController = require("./notificationController");
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
@@ -333,6 +333,18 @@ exports.editProfile = async (req, res) => {
     }
 
     await user.save();
+    // Only trigger if interests were updated
+    if (
+      rawInterests !== undefined &&
+      Array.isArray(user.interests) &&
+      user.interests.length
+    ) {
+      notificationController
+        .notifyOnUserInterestUpdate(user)
+        .catch((err) =>
+          console.error("Interest notification failed:", err.message)
+        );
+    }
 
     return res.json({
       isSuccess: true,
@@ -378,10 +390,10 @@ exports.getUserProfileByEmail = async (req, res) => {
       path: "services",
       model: "Service",
       select: "-__v -updated_at", // hide unneeded fields, keep all useful ones
-       populate: {
-        path: "category",   // 👈 populate category inside service
+      populate: {
+        path: "category", // 👈 populate category inside service
         model: "Category",
-        select: "name",     // 👈 only fetch category name
+        select: "name", // 👈 only fetch category name
       },
     });
 
@@ -433,10 +445,10 @@ exports.getProfileById = async (req, res) => {
       path: "services",
       model: "Service",
       select: "-__v -updated_at",
-       populate: {
-        path: "category",   // 👈 populate category inside service
+      populate: {
+        path: "category", // 👈 populate category inside service
         model: "Category",
-        select: "name",     // 👈 only fetch category name
+        select: "name", // 👈 only fetch category name
       },
     });
 

@@ -3,6 +3,7 @@ const User = require("../model/User");
 const Category = require("../model/Category");
 const Service = require("../model/Service");
 const mongoose = require("mongoose");
+const notificationController = require("./notificationController");
 // Helper to parse JSON safely
 function tryParse(val) {
   if (val === undefined || val === null) return val;
@@ -202,6 +203,7 @@ exports.createService = async (req, res) => {
     await user.save();
 
     console.log("Service created successfully:", createdService._id);
+    notificationController.notifyOnNewService(createdService);
     return res.json({
       isSuccess: true,
       message: "Service created successfully",
@@ -614,12 +616,10 @@ exports.updateService = async (req, res) => {
 
     // Ownership check
     if (String(service.owner) !== String(user._id)) {
-      return res
-        .status(403)
-        .json({
-          isSuccess: false,
-          message: "Not authorized to edit this service",
-        });
+      return res.status(403).json({
+        isSuccess: false,
+        message: "Not authorized to edit this service",
+      });
     }
 
     // Parse and validate location
@@ -756,7 +756,7 @@ exports.updateService = async (req, res) => {
       mongoUpdate,
       { new: true }
     );
-
+    notificationController.notifyOnUpdate(updatedService);
     return res.json({
       isSuccess: true,
       message: "Service updated successfully",

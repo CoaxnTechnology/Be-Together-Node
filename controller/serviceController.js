@@ -262,15 +262,20 @@ exports.getServices = async (req, res) => {
     }
 
     const tags = Array.isArray(q.tags) ? q.tags : q.tags ? [q.tags] : [];
-    const lat = q.latitude !== undefined ? Number(q.latitude) : null;
-    const lon = q.longitude !== undefined ? Number(q.longitude) : null;
+
+    // 👇 NEW: split current location vs filter location
+    const currentLat = q.currentLat !== undefined ? Number(q.currentLat) : null;
+    const currentLon = q.currentLon !== undefined ? Number(q.currentLon) : null;
+    const filterLat = q.filterLat !== undefined ? Number(q.filterLat) : null;
+    const filterLon = q.filterLon !== undefined ? Number(q.filterLon) : null;
+
     const radiusKm = q.radius_km !== undefined ? Number(q.radius_km) : 3;
 
     const page = Math.max(1, Number(q.page || 1));
     const limit = Math.min(100, Number(q.limit || 20));
     const skip = (page - 1) * limit;
 
-    console.log({ page, limit, skip, categoryId, tags, lat, lon, radiusKm });
+    console.log({ page, limit, skip, categoryId, tags, currentLat, currentLon, filterLat, filterLon, radiusKm });
 
     const and = [];
 
@@ -303,34 +308,34 @@ exports.getServices = async (req, res) => {
       }
     }
 
-    // ---------- LOCATION FILTER ----------
-    if (lat != null && lon != null && !(lat === 0 && lon === 0)) {
-      const box = bboxForLatLon(lat, lon, radiusKm);
-      console.log("Bounding box for location filter:", box);
+    // ---------- LOCATION FILTER (use filterLat/filterLon if provided) ----------
+    let searchLat = filterLat;
+    let searchLon = filterLon;
+
+    if (searchLat != null && searchLon != null && !(searchLat === 0 && searchLon === 0)) {
+      const box = bboxForLatLon(searchLat, searchLon, radiusKm);
+      console.log("Bounding box for filter location:", box);
       and.push({ latitude: { $gte: box.minLat, $lte: box.maxLat } });
       and.push({ longitude: { $gte: box.minLon, $lte: box.maxLon } });
-    } else if (lat === 0 && lon === 0) {
-      console.log("Lat/Lon are zero → skipping location filter.");
+    } else if (searchLat === 0 && searchLon === 0) {
+      console.log("Filter lat/lon are zero → skipping location filter.");
     }
+
     // ---------- FREE / PAID FILTER ----------
     if (q.isFree === true || q.isFree === "true") {
-      // Free services only
       and.push({ isFree: true });
       console.log("Filtering only free services");
     } else if (q.isFree === false || q.isFree === "false") {
-      // Paid services only
       and.push({ isFree: false });
       console.log("Filtering only paid services");
     }
+
     // ---------- EXCLUDE OWN SERVICES ----------
     let excludeOwnerId = null;
 
-    // Case 1: Agar auth middleware laga ho
     if (req.user && req.user._id) {
       excludeOwnerId = req.user._id.toString();
     }
-
-    // Case 2: Agar frontend ne explicitly bheja
     if (q.excludeOwnerId) {
       excludeOwnerId = q.excludeOwnerId;
     }
@@ -355,18 +360,16 @@ exports.getServices = async (req, res) => {
       .skip(skip)
       .limit(limit)
       .lean();
-    console.log(
-      "Fetched services before distance calculation:",
-      services.length
-    );
+    console.log("Fetched services before distance calculation:", services.length);
 
     // ---------- DISTANCE CALCULATION ----------
-    if (lat != null && lon != null && !(lat === 0 && lon === 0)) {
+    // ✅ Always calculate distance from current location (user ka actual location)
+    if (currentLat != null && currentLon != null && !(currentLat === 0 && currentLon === 0)) {
       const toRad = (v) => (v * Math.PI) / 180;
       services.forEach((s) => {
         if (s.latitude != null && s.longitude != null) {
-          const lat1 = lat,
-            lon1 = lon;
+          const lat1 = currentLat,
+            lon1 = currentLon;
           const lat2 = Number(s.latitude),
             lon2 = Number(s.longitude);
           const R = 6371;
@@ -382,9 +385,7 @@ exports.getServices = async (req, res) => {
         } else s.distance_km = null;
       });
 
-      services.sort(
-        (a, b) => (a.distance_km || 9999) - (b.distance_km || 9999)
-      );
+      services.sort((a, b) => (a.distance_km || 9999) - (b.distance_km || 9999));
       console.log("Services sorted by distance.");
     }
 
@@ -402,6 +403,7 @@ exports.getServices = async (req, res) => {
       .json({ isSuccess: false, message: "Server error", error: err.message });
   }
 };
+
 
 exports.getInterestedUsers = async (req, res) => {
   try {
@@ -426,9 +428,13 @@ exports.getInterestedUsers = async (req, res) => {
     let interestsFilter = [];
 
     if (categoryId) {
-      const category = await Category.findById(categoryId).select("name tags").lean();
+      const category = await Category.findById(categoryId)
+        .select("name tags")
+        .lean();
       if (!category) {
-        return res.status(404).json({ success: false, message: "Category not found" });
+        return res
+          .status(404)
+          .json({ success: false, message: "Category not found" });
       }
 
       console.log("Selected category:", category.name);
@@ -801,3 +807,4 @@ exports.getservicbyId = async (req, res) => {
     });
   }
 };
+//eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY4ZTBmYmExYWFlODU0MGEyNzBhYjI5OCIsInNlc3Npb25faWQiOiIxODgxOGIxZC0xOWY0LTRiYmUtYjk2Ni1kMzQ3ZTk3N2ZiYzAiLCJpYXQiOjE3NTk1NzUwNjEsImV4cCI6MTc2MDE3OTg2MX0.dvpPW2uWLXNkSQu5JLZ9XRRHf3_jZk0hd4DeoGgvObg

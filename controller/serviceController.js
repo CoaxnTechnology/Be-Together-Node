@@ -294,47 +294,27 @@ exports.getServices = async (req, res) => {
     if (categoryId) {
       if (Array.isArray(categoryId)) {
         const validIds = categoryId.filter((id) => looksLikeObjectId(id));
-        if (validIds.length) {
-          and.push({ category: { $in: validIds } });
-          console.log("Multiple categories filter applied:", validIds);
-        }
+        if (validIds.length) and.push({ category: { $in: validIds } });
       } else {
-        if (!looksLikeObjectId(categoryId)) {
+        if (!looksLikeObjectId(categoryId))
           return res
             .status(400)
             .json({ isSuccess: false, message: "Invalid categoryId" });
-        }
         and.push({ category: categoryId });
-        console.log("Single category filter applied:", categoryId);
       }
     }
 
     // ---------- TAGS FILTER ----------
     if (tags.length) {
       const normalizedTags = tags.map((t) => String(t).trim()).filter(Boolean);
-      if (normalizedTags.length) {
-        and.push({ tags: { $in: normalizedTags } });
-        console.log("Tags filter applied:", normalizedTags);
-      }
-    }
-
-    // ---------- LOCATION FILTER ----------
-    if (lat != null && lon != null && !(lat === 0 && lon === 0)) {
-      const box = bboxForLatLon(lat, lon, radiusKm);
-      and.push({ latitude: { $gte: box.minLat, $lte: box.maxLat } });
-      and.push({ longitude: { $gte: box.minLon, $lte: box.maxLon } });
-      console.log("Location filter applied with bounding box:", box);
-    } else if (lat === 0 && lon === 0) {
-      console.log("Lat/Lon are zero → skipping location filter.");
+      if (normalizedTags.length) and.push({ tags: { $in: normalizedTags } });
     }
 
     // ---------- FREE / PAID FILTER ----------
     if (q.isFree === true || q.isFree === "true") {
       and.push({ isFree: true });
-      console.log("Filtering only free services");
     } else if (q.isFree === false || q.isFree === "false") {
       and.push({ isFree: false });
-      console.log("Filtering only paid services");
     }
 
     // ---------- EXCLUDE OWN SERVICES ----------
@@ -344,62 +324,80 @@ exports.getServices = async (req, res) => {
 
     if (excludeOwnerId && looksLikeObjectId(excludeOwnerId)) {
       and.push({ owner: { $ne: excludeOwnerId } });
-      console.log("Excluding services owned by:", excludeOwnerId);
     }
 
     const mongoQuery = and.length ? { $and: and } : {};
-    console.log("Final MongoDB query for services:", mongoQuery);
+    console.log("Final MongoDB query:", mongoQuery);
 
-    // ---------- TOTAL COUNT ----------
-    const totalCount = await Service.countDocuments(mongoQuery);
-    console.log("Total services count matching query:", totalCount);
+    let services = [];
+    let totalCount = 0;
 
-    // ---------- FETCH SERVICES ----------
-    let services = await Service.find(mongoQuery)
-      .select("-__v")
-      .populate({ path: "category", select: "name" })
-      .populate({ path: "owner", select: "name email profile_image" })
-      .skip(skip)
-      .limit(limit)
-      .lean();
-    console.log(
-      "Fetched services before distance calculation:",
-      services.length
-    );
-
-    // ---------- DISTANCE CALCULATION ----------
     if (lat != null && lon != null && !(lat === 0 && lon === 0)) {
-      const toRad = (v) => (v * Math.PI) / 180;
+      // ---------- GEO-NEAR QUERY ----------
+      const geoQuery = [
+        {
+          $geoNear: {
+            near: { type: "Point", coordinates: [lon, lat] },
+            distanceField: "distance_m",
+            spherical: true,
+            maxDistance: radiusKm * 1000, // meters
+            query: mongoQuery,
+          },
+        },
+        { $skip: skip },
+        { $limit: limit },
+        {
+          $lookup: {
+            from: "categories",
+            localField: "category",
+            foreignField: "_id",
+            as: "category",
+          },
+        },
+        { $unwind: { path: "$category", preserveNullAndEmptyArrays: true } },
+        {
+          $lookup: {
+            from: "users",
+            localField: "owner",
+            foreignField: "_id",
+            as: "owner",
+          },
+        },
+        { $unwind: { path: "$owner", preserveNullAndEmptyArrays: true } },
+        { $addFields: { distance_km: { $divide: ["$distance_m", 1000] } } },
+        { $project: { distance_m: 0, __v: 0 } },
+      ];
 
-      services.forEach((s) => {
-        const sLat = s.latitude != null ? Number(s.latitude) : null;
-        const sLon = s.longitude != null ? Number(s.longitude) : null;
+      services = await Service.aggregate(geoQuery);
 
-        if (sLat != null && sLon != null && !isNaN(sLat) && !isNaN(sLon)) {
-          const dLat = toRad(sLat - lat);
-          const dLon = toRad(sLon - lon);
-          const R = 6371; // radius in km
-          const a =
-            Math.sin(dLat / 2) ** 2 +
-            Math.cos(toRad(lat)) *
-              Math.cos(toRad(sLat)) *
-              Math.sin(dLon / 2) ** 2;
-          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-          s.distance_km = Math.round(R * c * 100) / 100;
-        } else {
-          s.distance_km = null;
-        }
-      });
+      // Total count ignoring pagination
+      const countQuery = [
+        {
+          $geoNear: {
+            near: { type: "Point", coordinates: [lon, lat] },
+            distanceField: "distance_m",
+            spherical: true,
+            maxDistance: radiusKm * 1000,
+            query: mongoQuery,
+          },
+        },
+        { $count: "total" },
+      ];
 
-      services.sort(
-        (a, b) =>
-          (a.distance_km != null ? a.distance_km : 9999) -
-          (b.distance_km != null ? b.distance_km : 9999)
-      );
-      console.log("Services sorted by distance.");
+      const countResult = await Service.aggregate(countQuery);
+      totalCount = countResult.length ? countResult[0].total : 0;
+    } else {
+      // ---------- NO LOCATION ----------
+      totalCount = await Service.countDocuments(mongoQuery);
+      services = await Service.find(mongoQuery)
+        .select("-__v")
+        .populate({ path: "category", select: "name" })
+        .populate({ path: "owner", select: "name email profile_image" })
+        .skip(skip)
+        .limit(limit)
+        .lean();
+      services.forEach((s) => (s.distance_km = null));
     }
-
-    console.log("Final services to return:", services.length);
 
     return res.json({
       isSuccess: true,
@@ -413,6 +411,7 @@ exports.getServices = async (req, res) => {
       .json({ isSuccess: false, message: "Server error", error: err.message });
   }
 };
+
 
 
 

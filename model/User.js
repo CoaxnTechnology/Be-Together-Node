@@ -91,9 +91,15 @@ userSchema.pre("save", function (next) {
   this.updated_at = Date.now();
   next();
 });
-userSchema.methods.addFcmToken = function(token) {
-  if (token && !this.fcmTokens.includes(token)) {
-    this.fcmTokens.push(token);
+userSchema.methods.addFcmToken = async function (token) {
+  if (!token || typeof token !== "string") return;
+
+  // Ensure fcmToken is always an array
+  this.fcmToken = Array.isArray(this.fcmToken) ? this.fcmToken : [];
+
+  if (!this.fcmToken.includes(token)) {
+    this.fcmToken.push(token);
+    await this.save();
   }
 };
 // ✅ Add geospatial index here

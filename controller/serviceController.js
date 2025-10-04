@@ -245,6 +245,19 @@ function dateRangeForDay(dateStr) {
 //multiple category select
 //if lat long 0,0 then visible all service
 //---------------- GET SERVICES ----------------
+function bboxForLatLon(lat, lon, radiusKm = 3) {
+  const R = 6371; // km
+  const deltaLat = (radiusKm / R) * (180 / Math.PI);
+  const deltaLon =
+    ((radiusKm / R) * (180 / Math.PI)) / Math.cos((lat * Math.PI) / 180);
+  return {
+    minLat: lat - deltaLat,
+    maxLat: lat + deltaLat,
+    minLon: lon - deltaLon,
+    maxLon: lon + deltaLon,
+  };
+}
+
 exports.getServices = async (req, res) => {
   try {
     console.log("===== getServices called =====");
@@ -263,9 +276,11 @@ exports.getServices = async (req, res) => {
 
     const tags = Array.isArray(q.tags) ? q.tags : q.tags ? [q.tags] : [];
 
-    // 👇 NEW: split current location vs filter location
-    const currentLat = q.currentLat !== undefined ? Number(q.currentLat) : null;
-    const currentLon = q.currentLon !== undefined ? Number(q.currentLon) : null;
+    // User current location
+    const lat = q.latitude !== undefined ? Number(q.latitude) : null;
+    const lon = q.longitude !== undefined ? Number(q.longitude) : null;
+
+    // Filter location (jaise Adalaj area)
     const filterLat = q.filterLat !== undefined ? Number(q.filterLat) : null;
     const filterLon = q.filterLon !== undefined ? Number(q.filterLon) : null;
 
@@ -275,7 +290,7 @@ exports.getServices = async (req, res) => {
     const limit = Math.min(100, Number(q.limit || 20));
     const skip = (page - 1) * limit;
 
-    console.log({ page, limit, skip, categoryId, tags, currentLat, currentLon, filterLat, filterLon, radiusKm });
+    console.log({ page, limit, skip, categoryId, tags, lat, lon, filterLat, filterLon, radiusKm });
 
     const and = [];
 
@@ -289,10 +304,7 @@ exports.getServices = async (req, res) => {
         }
       } else {
         if (!looksLikeObjectId(categoryId)) {
-          console.log("Invalid categoryId:", categoryId);
-          return res
-            .status(400)
-            .json({ isSuccess: false, message: "Invalid categoryId" });
+          return res.status(400).json({ isSuccess: false, message: "Invalid categoryId" });
         }
         and.push({ category: categoryId });
         console.log("Single category filter applied:", categoryId);
@@ -308,17 +320,18 @@ exports.getServices = async (req, res) => {
       }
     }
 
-    // ---------- LOCATION FILTER (use filterLat/filterLon if provided) ----------
-    let searchLat = filterLat;
-    let searchLon = filterLon;
+    // ---------- LOCATION FILTER ----------
+    // Priority: filterLat/filterLon > lat/lon
+    let searchLat = filterLat ?? lat;
+    let searchLon = filterLon ?? lon;
 
     if (searchLat != null && searchLon != null && !(searchLat === 0 && searchLon === 0)) {
       const box = bboxForLatLon(searchLat, searchLon, radiusKm);
-      console.log("Bounding box for filter location:", box);
       and.push({ latitude: { $gte: box.minLat, $lte: box.maxLat } });
       and.push({ longitude: { $gte: box.minLon, $lte: box.maxLon } });
-    } else if (searchLat === 0 && searchLon === 0) {
-      console.log("Filter lat/lon are zero → skipping location filter.");
+      console.log("Location filter applied with bounding box:", box);
+    } else {
+      console.log("Skipping location filter because no valid coordinates.");
     }
 
     // ---------- FREE / PAID FILTER ----------
@@ -332,13 +345,8 @@ exports.getServices = async (req, res) => {
 
     // ---------- EXCLUDE OWN SERVICES ----------
     let excludeOwnerId = null;
-
-    if (req.user && req.user._id) {
-      excludeOwnerId = req.user._id.toString();
-    }
-    if (q.excludeOwnerId) {
-      excludeOwnerId = q.excludeOwnerId;
-    }
+    if (req.user && req.user._id) excludeOwnerId = req.user._id.toString();
+    if (q.excludeOwnerId) excludeOwnerId = q.excludeOwnerId;
 
     if (excludeOwnerId && looksLikeObjectId(excludeOwnerId)) {
       and.push({ owner: { $ne: excludeOwnerId } });
@@ -363,13 +371,12 @@ exports.getServices = async (req, res) => {
     console.log("Fetched services before distance calculation:", services.length);
 
     // ---------- DISTANCE CALCULATION ----------
-    // ✅ Always calculate distance from current location (user ka actual location)
-    if (currentLat != null && currentLon != null && !(currentLat === 0 && currentLon === 0)) {
+    if (searchLat != null && searchLon != null && !(searchLat === 0 && searchLon === 0)) {
       const toRad = (v) => (v * Math.PI) / 180;
       services.forEach((s) => {
         if (s.latitude != null && s.longitude != null) {
-          const lat1 = currentLat,
-            lon1 = currentLon;
+          const lat1 = searchLat,
+            lon1 = searchLon;
           const lat2 = Number(s.latitude),
             lon2 = Number(s.longitude);
           const R = 6371;
@@ -404,7 +411,6 @@ exports.getServices = async (req, res) => {
   }
 };
 
-
 exports.getInterestedUsers = async (req, res) => {
   try {
     const {
@@ -428,13 +434,9 @@ exports.getInterestedUsers = async (req, res) => {
     let interestsFilter = [];
 
     if (categoryId) {
-      const category = await Category.findById(categoryId)
-        .select("name tags")
-        .lean();
+      const category = await Category.findById(categoryId).select("name tags").lean();
       if (!category) {
-        return res
-          .status(404)
-          .json({ success: false, message: "Category not found" });
+        return res.status(404).json({ success: false, message: "Category not found" });
       }
 
       console.log("Selected category:", category.name);
@@ -549,6 +551,7 @@ exports.getInterestedUsers = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
+
 
 // ----------- Get All Services -------------
 exports.getAllServices = async (req, res) => {

@@ -658,11 +658,10 @@ exports.updateService = async (req, res) => {
         return res.status(400).json({ isSuccess: false, message: "Invalid start_time or end_time format" });
       }
 
-      mongoUpdate.$set.date = body.date;
-      mongoUpdate.$set.start_time = formattedStart;
-      mongoUpdate.$set.end_time = formattedEnd;
+      mongoUpdate.$set.date = String(body.date);      // ✅ String (schema expects String)
+      mongoUpdate.$set.start_time = formattedStart;   // ✅ String
+      mongoUpdate.$set.end_time = formattedEnd;       // ✅ String
 
-      // Remove recurring schedule
       mongoUpdate.$unset.recurring_schedule = "";
     }
 
@@ -680,20 +679,19 @@ exports.updateService = async (req, res) => {
         if (!item.day || !isValidDateISO(item.date) || !formattedStart || !formattedEnd) {
           return res.status(400).json({
             isSuccess: false,
-            message: "Each recurring schedule item must include valid day, date, start_time, and end_time"
+            message: "Each recurring schedule item must include valid day, date (YYYY-MM-DD), start_time, and end_time"
           });
         }
         formattedSchedule.push({
-          day: item.day,
-          date: item.date,
-          start_time: formattedStart,
-          end_time: formattedEnd
+          day: item.day,                    // ✅ String
+          start_time: formattedStart,       // ✅ String
+          end_time: formattedEnd,           // ✅ String
+          date: new Date(item.date)         // ✅ Date (schema requires Date type)
         });
       }
 
       mongoUpdate.$set.recurring_schedule = formattedSchedule;
 
-      // Remove one_time fields
       mongoUpdate.$unset.date = "";
       mongoUpdate.$unset.start_time = "";
       mongoUpdate.$unset.end_time = "";
@@ -713,4 +711,5 @@ exports.updateService = async (req, res) => {
     return res.status(500).json({ isSuccess: false, message: "Server error", error: err.message });
   }
 };
+
 

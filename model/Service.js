@@ -43,7 +43,7 @@ const serviceSchema = new mongoose.Schema({
         day: { type: String, required: true }, // e.g. "Monday"
         start_time: { type: String, required: true }, // "09:00"
         end_time: { type: String, required: true }, // "11:00"
-        date: { type: Date, required: true }, // computed first date >= start_date
+        date: { type: String, required: true }, // computed first date >= start_date
       },
     ],
     default: [],

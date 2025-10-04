@@ -26,7 +26,7 @@ app.use(
 );
 
 // Route to serve terms_and_conditions.html
-app.get("api/terms", (req, res) => {
+app.get("/api/terms", (req, res) => {
   res.sendFile(path.join(__dirname, "templates", "terms_and_conditions.html"));
 });
 

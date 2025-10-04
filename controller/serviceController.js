@@ -426,27 +426,31 @@ exports.getInterestedUsers = async (req, res) => {
     let interestsFilter = [];
 
     if (categoryId) {
-      const services = await Service.find({ category: categoryId })
-        .select("tags")
-        .lean();
-      console.log(
-        `Fetched ${services.length} services for category ${categoryId}`
-      );
+      const category = await Category.findById(categoryId).select("name tags").lean();
+      if (!category) {
+        return res.status(404).json({ success: false, message: "Category not found" });
+      }
 
-      services.forEach((s) => {
-        if (Array.isArray(s.tags)) interestsFilter.push(...s.tags);
-      });
+      console.log("Selected category:", category.name);
+
+      // ✅ Category name ko bhi filter me daal do
+      if (category.name) {
+        interestsFilter.push(category.name.toLowerCase());
+      }
+
+      // ✅ Category ke tags bhi allow karo
+      if (Array.isArray(category.tags)) {
+        interestsFilter.push(...category.tags.map((t) => t.toLowerCase()));
+      }
     }
 
     if (tags && tags.length) {
-      interestsFilter.push(...tags);
+      interestsFilter.push(...tags.map((t) => t.toLowerCase()));
       console.log("Additional tags from request:", tags);
     }
 
-    // Remove duplicates & normalize
-    interestsFilter = [
-      ...new Set(interestsFilter.map((t) => t.trim().toLowerCase())),
-    ];
+    // ✅ Remove duplicates
+    interestsFilter = [...new Set(interestsFilter)];
     console.log("Final interests filter:", interestsFilter);
 
     // ---------- Step 2: Build user query ----------
@@ -458,8 +462,9 @@ exports.getInterestedUsers = async (req, res) => {
     }
 
     if (interestsFilter.length) {
+      // ✅ User ke interests (array of strings) me category name ya tags hona chahiye
       query.interests = { $in: interestsFilter };
-      console.log("Applying interests filter");
+      console.log("Applying interests filter:", interestsFilter);
     } else {
       console.log("No interests filter → will fetch all users within location");
     }
@@ -764,6 +769,31 @@ exports.updateService = async (req, res) => {
     });
   } catch (err) {
     console.error("updateService error:", err);
+    return res.status(500).json({
+      isSuccess: false,
+      message: "Server error",
+      error: err.message,
+    });
+  }
+};
+//--------------------------Get Service ByID---------------------------------
+exports.getservicbyId = async (req, res) => {
+  try {
+    const serviceId = req.body.serviceId;
+    const service = await Service.findById(serviceId);
+    if (!service) {
+      return res.status(404).json({
+        isSuccess: false,
+        message: "Service not found",
+      });
+    }
+    return res.json({
+      isSuccess: true,
+      message: "Service found successfully",
+      data: service,
+    });
+  } catch (err) {
+    console.error("getservicebyId error:", err);
     return res.status(500).json({
       isSuccess: false,
       message: "Server error",

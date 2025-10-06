@@ -615,7 +615,7 @@ exports.getAllServices = async (req, res) => {
 //--------------------update service-----------------
 exports.updateService = async (req, res) => {
   try {
-    console.log("===== updateService (PUT) called =====");
+    console.log("===== updateService (PATCH) called =====");
     console.log("Request body:", req.body);
 
     const { serviceId, userId, ...body } = req.body;
@@ -623,17 +623,18 @@ exports.updateService = async (req, res) => {
     if (!serviceId)
       return res
         .status(400)
-        .json({ isSuccess: false, message: "serviceId is required in body" });
+        .json({ isSuccess: false, message: "serviceId is required" });
     if (!userId)
       return res
         .status(400)
-        .json({ isSuccess: false, message: "userId is required in body" });
+        .json({ isSuccess: false, message: "userId is required" });
 
     const user = await User.findById(userId);
     if (!user)
       return res
         .status(404)
         .json({ isSuccess: false, message: "User not found" });
+
     if (!user.is_active)
       return res
         .status(403)
@@ -645,7 +646,6 @@ exports.updateService = async (req, res) => {
         .status(404)
         .json({ isSuccess: false, message: "Service not found" });
 
-    // Ownership check
     if (String(service.owner) !== String(user._id)) {
       return res.status(403).json({
         isSuccess: false,
@@ -653,138 +653,90 @@ exports.updateService = async (req, res) => {
       });
     }
 
-    // Parse and validate location
-    const location = tryParse(body.location);
-    if (
-      !location ||
-      !location.name ||
-      location.latitude == null ||
-      location.longitude == null
-    ) {
-      return res.status(400).json({
-        isSuccess: false,
-        message: "Location (name, latitude, longitude) is required",
-      });
-    }
+    // ✅ Build update payload dynamically
+    const updatePayload = {};
 
-    // Validate category
-    if (!body.categoryId)
-      return res
-        .status(400)
-        .json({ isSuccess: false, message: "categoryId is required" });
-    const category = await Category.findById(body.categoryId);
-    if (!category)
-      return res
-        .status(404)
-        .json({ isSuccess: false, message: "Category not found" });
+    // Title
+    if (body.title) updatePayload.title = String(body.title).trim();
 
-    // Validate tags
-    const selectedTags = tryParse(body.selectedTags) || [];
-    const validTags = category.tags.filter((tag) =>
-      selectedTags
-        .map((t) => String(t).toLowerCase())
-        .includes(tag.toLowerCase())
-    );
-    if (!validTags.length)
-      return res.status(400).json({
-        isSuccess: false,
-        message: "No valid tags selected from this category",
-      });
+    // Description
+    if (body.description) updatePayload.description = body.description;
 
-    const isFree = body.isFree === true || body.isFree === "true";
-    const price = isFree ? 0 : Number(body.price || 0);
-    const service_type = body.service_type || "one_time";
+    // Price & Free
+    if (body.isFree !== undefined)
+      updatePayload.isFree = body.isFree === true || body.isFree === "true";
+    if (body.price !== undefined)
+      updatePayload.price = Number(body.price || 0);
 
-    // Base update payload
-    const updatePayload = {
-      title: String(body.title || "").trim(),
-      description: body.description || "",
-      Language: body.language || body.Language || "English",
-      isFree,
-      price,
-      location_name: location.name,
-      location: {
-        type: "Point",
-        coordinates: [Number(location.longitude), Number(location.latitude)],
-      },
-      city: body.city,
-      category: category._id,
-      tags: validTags,
-      max_participants: Number(body.max_participants || 1),
-      service_type,
-    };
+    // Language
+    if (body.language || body.Language)
+      updatePayload.Language = body.language || body.Language;
 
-    const mongoUpdate = { $set: updatePayload, $unset: {} };
-
-    // --- One-time service ---
-    if (service_type === "one_time") {
-      if (!isValidDateISO(body.date)) {
-        return res.status(400).json({
-          isSuccess: false,
-          message: "Valid date (YYYY-MM-DD) required for one_time",
-        });
-      }
-      if (!isValidTime(body.start_time) || !isValidTime(body.end_time)) {
-        return res.status(400).json({
-          isSuccess: false,
-          message: "start_time and end_time must be in hh:mm AM/PM format",
-        });
-      }
-
-      mongoUpdate.$set.date = String(body.date);
-      mongoUpdate.$set.start_time = body.start_time.trim().toUpperCase();
-      mongoUpdate.$set.end_time = body.end_time.trim().toUpperCase();
-
-      mongoUpdate.$unset.recurring_schedule = "";
-    }
-
-    // --- Recurring service ---
-    if (service_type === "recurring") {
-      const recurring_schedule = tryParse(body.recurring_schedule) || [];
+    // Location
+    if (body.location) {
+      const location = tryParse(body.location);
       if (
-        !Array.isArray(recurring_schedule) ||
-        recurring_schedule.length === 0
+        location &&
+        location.latitude != null &&
+        location.longitude != null &&
+        location.name
       ) {
-        return res.status(400).json({
-          isSuccess: false,
-          message: "Recurring schedule is required for recurring services",
-        });
+        updatePayload.location_name = location.name;
+        updatePayload.location = {
+          type: "Point",
+          coordinates: [Number(location.longitude), Number(location.latitude)],
+        };
+      } else {
+        return res
+          .status(400)
+          .json({ isSuccess: false, message: "Invalid location format" });
       }
-
-      const formattedSchedule = [];
-      for (const item of recurring_schedule) {
-        if (
-          !item.day ||
-          !isValidDateISO(item.date) ||
-          !isValidTime(item.start_time) ||
-          !isValidTime(item.end_time)
-        ) {
-          return res.status(400).json({
-            isSuccess: false,
-            message:
-              "Each recurring schedule item must include day, date (YYYY-MM-DD), start_time, end_time in hh:mm AM/PM",
-          });
-        }
-        formattedSchedule.push({
-          day: item.day,
-          date: String(item.date),
-          start_time: item.start_time.trim().toUpperCase(),
-          end_time: item.end_time.trim().toUpperCase(),
-        });
-      }
-
-      mongoUpdate.$set.recurring_schedule = formattedSchedule;
-      mongoUpdate.$unset.date = "";
-      mongoUpdate.$unset.start_time = "";
-      mongoUpdate.$unset.end_time = "";
     }
 
-    // --- Save update ---
+    // City
+    if (body.city) updatePayload.city = body.city;
+
+    // Category (optional now)
+    if (body.categoryId) {
+      const category = await Category.findById(body.categoryId);
+      if (!category)
+        return res
+          .status(404)
+          .json({ isSuccess: false, message: "Category not found" });
+      updatePayload.category = category._id;
+
+      // Tags (only if category provided)
+      const selectedTags = tryParse(body.selectedTags) || [];
+      const validTags = category.tags.filter((tag) =>
+        selectedTags
+          .map((t) => String(t).toLowerCase())
+          .includes(tag.toLowerCase())
+      );
+      if (validTags.length) updatePayload.tags = validTags;
+    }
+
+    // Service type
+    if (body.service_type)
+      updatePayload.service_type = body.service_type || "one_time";
+
+    // Date/time or recurring schedule (only if sent)
+    if (body.date) updatePayload.date = String(body.date);
+    if (body.start_time) updatePayload.start_time = body.start_time.trim().toUpperCase();
+    if (body.end_time) updatePayload.end_time = body.end_time.trim().toUpperCase();
+    if (body.recurring_schedule)
+      updatePayload.recurring_schedule = tryParse(body.recurring_schedule) || [];
+
+    // Max participants
+    if (body.max_participants)
+      updatePayload.max_participants = Number(body.max_participants);
+
+    // ✅ Finally update
     const updatedService = await Service.findByIdAndUpdate(
       serviceId,
-      mongoUpdate,
+      { $set: updatePayload },
       { new: true }
     );
+
     notificationController.notifyOnUpdate(updatedService);
 
     return res.json({
@@ -799,6 +751,7 @@ exports.updateService = async (req, res) => {
       .json({ isSuccess: false, message: "Server error", error: err.message });
   }
 };
+
 
 //--------------------------Get Service ByID---------------------------------
 exports.getservicbyId = async (req, res) => {

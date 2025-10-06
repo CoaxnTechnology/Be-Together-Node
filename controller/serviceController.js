@@ -291,7 +291,6 @@ exports.getServices = async (req, res) => {
         const validIds = categoryId.filter((id) => looksLikeObjectId(id));
         if (validIds.length) {
           and.push({ category: { $in: validIds } });
-          console.log("Multiple categories filter applied:", validIds);
         }
       } else {
         if (!looksLikeObjectId(categoryId)) {
@@ -300,7 +299,6 @@ exports.getServices = async (req, res) => {
             .json({ isSuccess: false, message: "Invalid categoryId" });
         }
         and.push({ category: categoryId });
-        console.log("Single category filter applied:", categoryId);
       }
     }
 
@@ -309,44 +307,7 @@ exports.getServices = async (req, res) => {
       const normalizedTags = tags.map((t) => String(t).trim()).filter(Boolean);
       if (normalizedTags.length) {
         and.push({ tags: { $in: normalizedTags } });
-        console.log("Tags filter applied:", normalizedTags);
       }
-    }
-
-    // ---------- USER LAST LOCATION (for distance calculation) ----------
-    let userLat = null;
-    let userLon = null;
-
-    if (req.user && req.user.lastLocation && req.user.lastLocation.coords) {
-      const coords = req.user.lastLocation.coords.coordinates;
-      if (Array.isArray(coords) && coords.length === 2) {
-        userLon = coords[0]; // lastLocation stored as [longitude, latitude]
-        userLat = coords[1];
-        console.log("Using user's last saved location for distance:", { userLat, userLon });
-      }
-    }
-
-    // ---------- LOCATION FILTER (for query) ----------
-    let filterLat = null;
-    let filterLon = null;
-
-    if (q.latitude != null && q.longitude != null) {
-      filterLat = Number(q.latitude);
-      filterLon = Number(q.longitude);
-
-      const box = bboxForLatLon(filterLat, filterLon, radiusKm);
-      and.push({ latitude: { $gte: box.minLat, $lte: box.maxLat } });
-      and.push({ longitude: { $gte: box.minLon, $lte: box.maxLon } });
-      console.log("Filtering services near input location:", { filterLat, filterLon, box });
-    }
-
-    // ---------- FREE / PAID FILTER ----------
-    if (q.isFree === true || q.isFree === "true") {
-      and.push({ isFree: true });
-      console.log("Filtering only free services");
-    } else if (q.isFree === false || q.isFree === "false") {
-      and.push({ isFree: false });
-      console.log("Filtering only paid services");
     }
 
     // ---------- EXCLUDE OWN SERVICES ----------
@@ -355,13 +316,18 @@ exports.getServices = async (req, res) => {
     if (q.excludeOwnerId) excludeOwnerId = q.excludeOwnerId;
     if (excludeOwnerId && looksLikeObjectId(excludeOwnerId)) {
       and.push({ owner: { $ne: excludeOwnerId } });
-      console.log("Excluding services owned by:", excludeOwnerId);
+    }
+
+    // ---------- FREE / PAID FILTER ----------
+    if (q.isFree === true || q.isFree === "true") {
+      and.push({ isFree: true });
+    } else if (q.isFree === false || q.isFree === "false") {
+      and.push({ isFree: false });
     }
 
     const mongoQuery = and.length ? { $and: and } : {};
     console.log("Final MongoDB query:", mongoQuery);
 
-    // ---------- FETCH SERVICES ----------
     const totalCount = await Service.countDocuments(mongoQuery);
     let services = await Service.find(mongoQuery)
       .select("-__v")
@@ -373,21 +339,41 @@ exports.getServices = async (req, res) => {
 
     console.log("Fetched services:", services.length);
 
-    // ---------- DISTANCE CALCULATION (from user's lastLocation) ----------
+    // ---------- DISTANCE CALCULATION ----------
     const toRad = (value) => (value * Math.PI) / 180;
     const R = 6371; // Earth radius in km
 
-    if (userLat != null && userLon != null) {
+    // Use user's lastLocation if available, otherwise use query lat/lon
+    let refLat = null;
+    let refLon = null;
+
+    if (req.user && req.user.lastLocation && req.user.lastLocation.coords) {
+      const coords = req.user.lastLocation.coords.coordinates;
+      if (Array.isArray(coords) && coords.length === 2) {
+        refLon = coords[0];
+        refLat = coords[1];
+        console.log("Using user's lastLocation for distance:", { refLat, refLon });
+      }
+    }
+
+    // If no user lastLocation, use query latitude/longitude
+    if ((refLat === null || refLon === null) && q.latitude && q.longitude) {
+      refLat = Number(q.latitude);
+      refLon = Number(q.longitude);
+      console.log("Using query latitude/longitude for distance:", { refLat, refLon });
+    }
+
+    if (refLat !== null && refLon !== null) {
       services.forEach((service) => {
         if (
           typeof service.latitude === "number" &&
           typeof service.longitude === "number"
         ) {
-          const dLat = toRad(service.latitude - userLat);
-          const dLon = toRad(service.longitude - userLon);
+          const dLat = toRad(service.latitude - refLat);
+          const dLon = toRad(service.longitude - refLon);
           const a =
             Math.sin(dLat / 2) ** 2 +
-            Math.cos(toRad(userLat)) *
+            Math.cos(toRad(refLat)) *
               Math.cos(toRad(service.latitude)) *
               Math.sin(dLon / 2) ** 2;
           const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
@@ -397,13 +383,12 @@ exports.getServices = async (req, res) => {
         }
       });
 
-      // Sort services by distance from user's last location
+      // Sort by distance
       services.sort(
         (a, b) =>
           (a.distance_km != null ? a.distance_km : 9999) -
           (b.distance_km != null ? b.distance_km : 9999)
       );
-      console.log("Services sorted by distance from user's last location.");
     }
 
     return res.json({
@@ -418,6 +403,7 @@ exports.getServices = async (req, res) => {
       .json({ isSuccess: false, message: "Server error", error: err.message });
   }
 };
+
 
 
 

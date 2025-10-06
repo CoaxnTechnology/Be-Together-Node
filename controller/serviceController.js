@@ -277,16 +277,32 @@ exports.getServices = async (req, res) => {
 
     const tags = Array.isArray(q.tags) ? q.tags : q.tags ? [q.tags] : [];
 
-    // User current location
-    const lat = q.latitude !== undefined ? Number(q.latitude) : null;
-    const lon = q.longitude !== undefined ? Number(q.longitude) : null;
+    // ✅ separate user location (for distance) and filter location (for service search)
+    const userLat = q.user_latitude ? Number(q.user_latitude) : null; // your current location
+    const userLon = q.user_longitude ? Number(q.user_longitude) : null;
+
+    const filterLat =
+      q.filter_latitude !== undefined ? Number(q.filter_latitude) : null; // filter location (like Adalaj)
+    const filterLon =
+      q.filter_longitude !== undefined ? Number(q.filter_longitude) : null;
     const radiusKm = q.radius_km !== undefined ? Number(q.radius_km) : 3;
 
     const page = Math.max(1, Number(q.page || 1));
     const limit = Math.min(100, Number(q.limit || 20));
     const skip = (page - 1) * limit;
 
-    console.log({ page, limit, skip, categoryId, tags, lat, lon, radiusKm });
+    console.log({
+      page,
+      limit,
+      skip,
+      categoryId,
+      tags,
+      userLat,
+      userLon,
+      filterLat,
+      filterLon,
+      radiusKm,
+    });
 
     const and = [];
 
@@ -318,14 +334,18 @@ exports.getServices = async (req, res) => {
       }
     }
 
-    // ---------- LOCATION FILTER ----------
-    if (lat != null && lon != null && !(lat === 0 && lon === 0)) {
-      const box = bboxForLatLon(lat, lon, radiusKm);
+    // ---------- LOCATION FILTER (use filterLat/filterLon) ----------
+    if (
+      filterLat != null &&
+      filterLon != null &&
+      !(filterLat === 0 && filterLon === 0)
+    ) {
+      const box = bboxForLatLon(filterLat, filterLon, radiusKm);
       and.push({ latitude: { $gte: box.minLat, $lte: box.maxLat } });
       and.push({ longitude: { $gte: box.minLon, $lte: box.maxLon } });
-      console.log("Location filter applied with bounding box:", box);
-    } else if (lat === 0 && lon === 0) {
-      console.log("Lat/Lon are zero → skipping location filter.");
+      console.log("Filter location applied:", box);
+    } else if (filterLat === 0 && filterLon === 0) {
+      console.log("Filter Lat/Lon are zero → skipping location filter.");
     }
 
     // ---------- FREE / PAID FILTER ----------
@@ -352,7 +372,6 @@ exports.getServices = async (req, res) => {
 
     // ---------- TOTAL COUNT ----------
     const totalCount = await Service.countDocuments(mongoQuery);
-    console.log("Total services count matching query:", totalCount);
 
     // ---------- FETCH SERVICES ----------
     let services = await Service.find(mongoQuery)
@@ -362,26 +381,22 @@ exports.getServices = async (req, res) => {
       .skip(skip)
       .limit(limit)
       .lean();
-    console.log(
-      "Fetched services before distance calculation:",
-      services.length
-    );
 
-    // ---------- DISTANCE CALCULATION ----------
-    if (lat != null && lon != null && !(lat === 0 && lon === 0)) {
+    // ---------- DISTANCE CALCULATION (use userLat/userLon) ----------
+    if (userLat != null && userLon != null && !(userLat === 0 && userLon === 0)) {
       const toRad = (v) => (v * Math.PI) / 180;
+      const R = 6371; // km
 
       services.forEach((s) => {
         const sLat = s.latitude != null ? Number(s.latitude) : null;
         const sLon = s.longitude != null ? Number(s.longitude) : null;
 
         if (sLat != null && sLon != null && !isNaN(sLat) && !isNaN(sLon)) {
-          const dLat = toRad(sLat - lat);
-          const dLon = toRad(sLon - lon);
-          const R = 6371; // radius in km
+          const dLat = toRad(sLat - userLat);
+          const dLon = toRad(sLon - userLon);
           const a =
             Math.sin(dLat / 2) ** 2 +
-            Math.cos(toRad(lat)) *
+            Math.cos(toRad(userLat)) *
               Math.cos(toRad(sLat)) *
               Math.sin(dLon / 2) ** 2;
           const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
@@ -396,10 +411,7 @@ exports.getServices = async (req, res) => {
           (a.distance_km != null ? a.distance_km : 9999) -
           (b.distance_km != null ? b.distance_km : 9999)
       );
-      console.log("Services sorted by distance.");
     }
-
-    console.log("Final services to return:", services.length);
 
     return res.json({
       isSuccess: true,
@@ -413,6 +425,7 @@ exports.getServices = async (req, res) => {
       .json({ isSuccess: false, message: "Server error", error: err.message });
   }
 };
+
 
 
 

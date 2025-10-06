@@ -794,7 +794,7 @@ exports.updateService = async (req, res) => {
 //--------------------------Get Service ByID---------------------------------
 exports.getservicbyId = async (req, res) => {
   try {
-    const serviceId = req.body.serviceId;
+    const { serviceId } = req.body; // ✅ Now taking serviceId from POST body
 
     if (!serviceId) {
       return res.status(400).json({
@@ -817,17 +817,19 @@ exports.getservicbyId = async (req, res) => {
         message: "Service not found",
       });
     }
-    // fetch name and profile_image
+
+    // ✅ Populate owner (name, profile_image)
     await service.populate("owner", "name profile_image");
-    //fetch category name
+
+    // ✅ Populate category (name)
     await service.populate("category", "name");
 
-    // Fetch reviews for this service
+    // ✅ Fetch reviews
     const reviews = await Review.find({ service: serviceId })
-      .populate("user", "name profile_image") // only name and profile_image
+      .populate("user", "name profile_image")
       .sort({ created_at: -1 });
 
-    // Calculate average rating
+    // ✅ Calculate average rating
     let avgRating = 0;
     if (reviews.length > 0) {
       const total = reviews.reduce((sum, r) => sum + r.rating, 0);
@@ -853,4 +855,4 @@ exports.getservicbyId = async (req, res) => {
     });
   }
 };
-//eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY4ZTBmYmExYWFlODU0MGEyNzBhYjI5OCIsInNlc3Npb25faWQiOiIxODgxOGIxZC0xOWY0LTRiYmUtYjk2Ni1kMzQ3ZTk3N2ZiYzAiLCJpYXQiOjE3NTk1NzUwNjEsImV4cCI6MTc2MDE3OTg2MX0.dvpPW2uWLXNkSQu5JLZ9XRRHf3_jZk0hd4DeoGgvObg
+

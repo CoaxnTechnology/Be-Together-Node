@@ -36,6 +36,7 @@ function formatTimeToAMPM(timeStr) {
 exports.createService = async (req, res) => {
   try {
     console.log("===== createService called =====");
+
     const userId = req.body.userId || (req.user && req.user.id);
     if (!userId)
       return res
@@ -87,6 +88,11 @@ exports.createService = async (req, res) => {
       });
     }
 
+    if (!city)
+      return res
+        .status(400)
+        .json({ isSuccess: false, message: "City is required" });
+
     if (!categoryId)
       return res
         .status(400)
@@ -99,34 +105,38 @@ exports.createService = async (req, res) => {
         .json({ isSuccess: false, message: "Category not found" });
 
     if (!Array.isArray(selectedTags) || !selectedTags.length) {
-      return res.status(400).json({
-        isSuccess: false,
-        message: "selectedTags must be a non-empty array",
-      });
+      return res
+        .status(400)
+        .json({
+          isSuccess: false,
+          message: "selectedTags must be a non-empty array",
+        });
     }
 
     const validTags = category.tags.filter((tag) =>
       selectedTags.map((t) => t.toLowerCase()).includes(tag.toLowerCase())
     );
     if (!validTags.length)
-      return res.status(400).json({
-        isSuccess: false,
-        message: "No valid tags selected from this category",
-      });
+      return res
+        .status(400)
+        .json({
+          isSuccess: false,
+          message: "No valid tags selected from this category",
+        });
 
-    // Build payload
+    // ---- Build payload ----
     const servicePayload = {
       title,
       description,
       Language: language,
       isFree,
       price,
+      location_name: location.name, // ✅ save location name
+      city, // ✅ save city
       location: {
         type: "Point",
         coordinates: [Number(location.longitude), Number(location.latitude)],
       },
-
-      city,
       category: category._id,
       tags: validTags,
       max_participants,
@@ -148,13 +158,15 @@ exports.createService = async (req, res) => {
       }
 
       if (!isValidDateISO(date)) {
-        return res.status(400).json({
-          isSuccess: false,
-          message: "Valid date (YYYY-MM-DD) required for one_time",
-        });
+        return res
+          .status(400)
+          .json({
+            isSuccess: false,
+            message: "Valid date (YYYY-MM-DD) required for one_time",
+          });
       }
 
-      servicePayload.date = date; // store as string "YYYY-MM-DD"
+      servicePayload.date = date;
       servicePayload.start_time = formattedStart;
       servicePayload.end_time = formattedEnd;
     }
@@ -162,14 +174,13 @@ exports.createService = async (req, res) => {
     // Recurring service
     if (service_type === "recurring") {
       const recurring_schedule = tryParse(body.recurring_schedule) || [];
-      if (
-        !Array.isArray(recurring_schedule) ||
-        recurring_schedule.length === 0
-      ) {
-        return res.status(400).json({
-          isSuccess: false,
-          message: "Recurring schedule is required for recurring services",
-        });
+      if (!Array.isArray(recurring_schedule) || !recurring_schedule.length) {
+        return res
+          .status(400)
+          .json({
+            isSuccess: false,
+            message: "Recurring schedule is required for recurring services",
+          });
       }
 
       servicePayload.recurring_schedule = recurring_schedule.map((item) => {
@@ -189,14 +200,14 @@ exports.createService = async (req, res) => {
 
         return {
           day: item.day,
-          date: item.date, // store as string "YYYY-MM-DD"
+          date: item.date,
           start_time: formattedStart,
           end_time: formattedEnd,
         };
       });
     }
 
-    // Save service
+    // ---- Save service ----
     const createdService = new Service(servicePayload);
     await createdService.save();
 
@@ -206,6 +217,7 @@ exports.createService = async (req, res) => {
 
     console.log("Service created successfully:", createdService._id);
     notificationController.notifyOnNewService(createdService);
+
     return res.json({
       isSuccess: true,
       message: "Service created successfully",
@@ -260,14 +272,16 @@ function bboxForLatLon(lat, lon, radiusKm = 3) {
     maxLon: lon + deltaLon,
   };
 }
-
+//------------------Get Service------------------
 exports.getServices = async (req, res) => {
   try {
     const q = { ...req.query, ...req.body };
 
     let categoryId = q.categoryId || null;
     if (categoryId && typeof categoryId === "string") {
-      try { categoryId = JSON.parse(categoryId); } catch {}
+      try {
+        categoryId = JSON.parse(categoryId);
+      } catch {}
     }
 
     const tags = Array.isArray(q.tags) ? q.tags : q.tags ? [q.tags] : [];
@@ -300,7 +314,11 @@ exports.getServices = async (req, res) => {
     let refLon = null;
     if (req.user?.lastLocation?.coords?.coordinates) {
       const coords = req.user.lastLocation.coords.coordinates;
-      if (Array.isArray(coords) && coords.length === 2 && !(coords[0] === 0 && coords[1] === 0)) {
+      if (
+        Array.isArray(coords) &&
+        coords.length === 2 &&
+        !(coords[0] === 0 && coords[1] === 0)
+      ) {
         refLon = coords[0];
         refLat = coords[1];
       }
@@ -328,12 +346,47 @@ exports.getServices = async (req, res) => {
     // Match other filters
     pipeline.push({ $match: match });
 
-    // Lookup category and owner
+    // Lookup category
     pipeline.push(
-      { $lookup: { from: "categories", localField: "category", foreignField: "_id", as: "category" } },
-      { $unwind: "$category" },
-      { $lookup: { from: "users", localField: "owner", foreignField: "_id", as: "owner" } },
-      { $unwind: "$owner" }
+      {
+        $lookup: {
+          from: "categories",
+          localField: "category",
+          foreignField: "_id",
+          as: "category",
+        },
+      },
+      { $unwind: "$category" }
+    );
+
+    // Lookup owner but only return _id and profile_image
+    // Lookup owner but only return _id and profile_image
+    // Lookup owner but only keep _id and profile_image
+    pipeline.push(
+      {
+        $lookup: {
+          from: "users",
+          localField: "owner",
+          foreignField: "_id",
+          as: "owner",
+        },
+      },
+      { $unwind: "$owner" },
+      {
+        $replaceRoot: {
+          newRoot: {
+            $mergeObjects: [
+              "$$ROOT",
+              {
+                owner: {
+                  _id: "$owner._id",
+                  profile_image: "$owner.profile_image",
+                },
+              },
+            ],
+          },
+        },
+      }
     );
 
     // Pagination
@@ -342,8 +395,13 @@ exports.getServices = async (req, res) => {
     const services = await Service.aggregate(pipeline);
 
     // Total count (without skip/limit)
-    const totalCountPipeline = pipeline.filter(stage => !stage.$skip && !stage.$limit);
-    const totalCountResult = await Service.aggregate([...totalCountPipeline, { $count: "total" }]);
+    const totalCountPipeline = pipeline.filter(
+      (stage) => !stage.$skip && !stage.$limit
+    );
+    const totalCountResult = await Service.aggregate([
+      ...totalCountPipeline,
+      { $count: "total" },
+    ]);
     const totalCount = totalCountResult[0] ? totalCountResult[0].total : 0;
 
     return res.json({
@@ -351,14 +409,13 @@ exports.getServices = async (req, res) => {
       message: "Services fetched successfully",
       data: { totalCount, page, limit, services },
     });
-
   } catch (err) {
     console.error("getServices error:", err);
-    return res.status(500).json({ isSuccess: false, message: "Server error", error: err.message });
+    return res
+      .status(500)
+      .json({ isSuccess: false, message: "Server error", error: err.message });
   }
 };
-
-
 
 exports.getInterestedUsers = async (req, res) => {
   try {
@@ -556,45 +613,81 @@ exports.updateService = async (req, res) => {
     const { serviceId, userId, ...body } = req.body;
 
     if (!serviceId)
-      return res.status(400).json({ isSuccess: false, message: "serviceId is required in body" });
+      return res
+        .status(400)
+        .json({ isSuccess: false, message: "serviceId is required in body" });
     if (!userId)
-      return res.status(400).json({ isSuccess: false, message: "userId is required in body" });
+      return res
+        .status(400)
+        .json({ isSuccess: false, message: "userId is required in body" });
 
     const user = await User.findById(userId);
     if (!user)
-      return res.status(404).json({ isSuccess: false, message: "User not found" });
+      return res
+        .status(404)
+        .json({ isSuccess: false, message: "User not found" });
     if (!user.is_active)
-      return res.status(403).json({ isSuccess: false, message: "User is not active" });
+      return res
+        .status(403)
+        .json({ isSuccess: false, message: "User is not active" });
 
     const service = await Service.findById(serviceId);
     if (!service)
-      return res.status(404).json({ isSuccess: false, message: "Service not found" });
+      return res
+        .status(404)
+        .json({ isSuccess: false, message: "Service not found" });
 
     // Ownership check
     if (String(service.owner) !== String(user._id)) {
-      return res.status(403).json({ isSuccess: false, message: "Not authorized to edit this service" });
+      return res
+        .status(403)
+        .json({
+          isSuccess: false,
+          message: "Not authorized to edit this service",
+        });
     }
 
     // Parse and validate location
     const location = tryParse(body.location);
-    if (!location || !location.name || location.latitude == null || location.longitude == null) {
-      return res.status(400).json({ isSuccess: false, message: "Location (name, latitude, longitude) is required" });
+    if (
+      !location ||
+      !location.name ||
+      location.latitude == null ||
+      location.longitude == null
+    ) {
+      return res
+        .status(400)
+        .json({
+          isSuccess: false,
+          message: "Location (name, latitude, longitude) is required",
+        });
     }
 
     // Validate category
     if (!body.categoryId)
-      return res.status(400).json({ isSuccess: false, message: "categoryId is required" });
+      return res
+        .status(400)
+        .json({ isSuccess: false, message: "categoryId is required" });
     const category = await Category.findById(body.categoryId);
     if (!category)
-      return res.status(404).json({ isSuccess: false, message: "Category not found" });
+      return res
+        .status(404)
+        .json({ isSuccess: false, message: "Category not found" });
 
     // Validate tags
     const selectedTags = tryParse(body.selectedTags) || [];
     const validTags = category.tags.filter((tag) =>
-      selectedTags.map((t) => String(t).toLowerCase()).includes(tag.toLowerCase())
+      selectedTags
+        .map((t) => String(t).toLowerCase())
+        .includes(tag.toLowerCase())
     );
     if (!validTags.length)
-      return res.status(400).json({ isSuccess: false, message: "No valid tags selected from this category" });
+      return res
+        .status(400)
+        .json({
+          isSuccess: false,
+          message: "No valid tags selected from this category",
+        });
 
     const isFree = body.isFree === true || body.isFree === "true";
     const price = isFree ? 0 : Number(body.price || 0);
@@ -608,7 +701,10 @@ exports.updateService = async (req, res) => {
       isFree,
       price,
       location_name: location.name,
-      location: { type: "Point", coordinates: [Number(location.longitude), Number(location.latitude)] },
+      location: {
+        type: "Point",
+        coordinates: [Number(location.longitude), Number(location.latitude)],
+      },
       city: body.city,
       category: category._id,
       tags: validTags,
@@ -621,10 +717,20 @@ exports.updateService = async (req, res) => {
     // --- One-time service ---
     if (service_type === "one_time") {
       if (!isValidDateISO(body.date)) {
-        return res.status(400).json({ isSuccess: false, message: "Valid date (YYYY-MM-DD) required for one_time" });
+        return res
+          .status(400)
+          .json({
+            isSuccess: false,
+            message: "Valid date (YYYY-MM-DD) required for one_time",
+          });
       }
       if (!isValidTime(body.start_time) || !isValidTime(body.end_time)) {
-        return res.status(400).json({ isSuccess: false, message: "start_time and end_time must be in hh:mm AM/PM format" });
+        return res
+          .status(400)
+          .json({
+            isSuccess: false,
+            message: "start_time and end_time must be in hh:mm AM/PM format",
+          });
       }
 
       mongoUpdate.$set.date = String(body.date);
@@ -637,16 +743,30 @@ exports.updateService = async (req, res) => {
     // --- Recurring service ---
     if (service_type === "recurring") {
       const recurring_schedule = tryParse(body.recurring_schedule) || [];
-      if (!Array.isArray(recurring_schedule) || recurring_schedule.length === 0) {
-        return res.status(400).json({ isSuccess: false, message: "Recurring schedule is required for recurring services" });
+      if (
+        !Array.isArray(recurring_schedule) ||
+        recurring_schedule.length === 0
+      ) {
+        return res
+          .status(400)
+          .json({
+            isSuccess: false,
+            message: "Recurring schedule is required for recurring services",
+          });
       }
 
       const formattedSchedule = [];
       for (const item of recurring_schedule) {
-        if (!item.day || !isValidDateISO(item.date) || !isValidTime(item.start_time) || !isValidTime(item.end_time)) {
+        if (
+          !item.day ||
+          !isValidDateISO(item.date) ||
+          !isValidTime(item.start_time) ||
+          !isValidTime(item.end_time)
+        ) {
           return res.status(400).json({
             isSuccess: false,
-            message: "Each recurring schedule item must include day, date (YYYY-MM-DD), start_time, end_time in hh:mm AM/PM",
+            message:
+              "Each recurring schedule item must include day, date (YYYY-MM-DD), start_time, end_time in hh:mm AM/PM",
           });
         }
         formattedSchedule.push({
@@ -664,14 +784,23 @@ exports.updateService = async (req, res) => {
     }
 
     // --- Save update ---
-    const updatedService = await Service.findByIdAndUpdate(serviceId, mongoUpdate, { new: true });
+    const updatedService = await Service.findByIdAndUpdate(
+      serviceId,
+      mongoUpdate,
+      { new: true }
+    );
     notificationController.notifyOnUpdate(updatedService);
 
-    return res.json({ isSuccess: true, message: "Service updated successfully", data: updatedService });
-
+    return res.json({
+      isSuccess: true,
+      message: "Service updated successfully",
+      data: updatedService,
+    });
   } catch (err) {
     console.error("updateService error:", err);
-    return res.status(500).json({ isSuccess: false, message: "Server error", error: err.message });
+    return res
+      .status(500)
+      .json({ isSuccess: false, message: "Server error", error: err.message });
   }
 };
 

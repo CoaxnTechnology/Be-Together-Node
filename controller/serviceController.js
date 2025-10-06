@@ -802,9 +802,24 @@ exports.updateService = async (req, res) => {
 };
 
 //--------------------------Get Service ByID---------------------------------
+
+// Helper to calculate distance in km between two points
+function getDistanceKm(lat1, lon1, lat2, lon2) {
+  const toRad = (value) => (value * Math.PI) / 180;
+
+  const R = 6371; // Radius of Earth in km
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return +(R * c).toFixed(2); // rounded to 2 decimals
+}
+
 exports.getservicbyId = async (req, res) => {
   try {
-    const { serviceId } = req.body; // ✅ Now taking serviceId from POST body
+    const { serviceId, latitude, longitude } = req.body;
 
     if (!serviceId) {
       return res.status(400).json({
@@ -828,18 +843,23 @@ exports.getservicbyId = async (req, res) => {
       });
     }
 
-    // ✅ Populate owner (name, profile_image)
+    // Populate owner and category
     await service.populate("owner", "name profile_image");
-
-    // ✅ Populate category (name)
     await service.populate("category", "name");
 
-    // ✅ Fetch reviews
+    // Calculate distance if user's location is provided
+    let distance_km = null;
+    if (latitude && longitude && service.location?.coordinates) {
+      const [lon, lat] = service.location.coordinates; // [lon, lat]
+      distance_km = getDistanceKm(latitude, longitude, lat, lon);
+    }
+
+    // Fetch reviews
     const reviews = await Review.find({ service: serviceId })
       .populate("user", "name profile_image")
       .sort({ created_at: -1 });
 
-    // ✅ Calculate average rating
+    // Calculate average rating
     let avgRating = 0;
     if (reviews.length > 0) {
       const total = reviews.reduce((sum, r) => sum + r.rating, 0);
@@ -854,6 +874,7 @@ exports.getservicbyId = async (req, res) => {
         reviews,
         totalReviews: reviews.length,
         averageRating: avgRating,
+        distance_km, // ✅ distance included
       },
     });
   } catch (err) {
@@ -865,3 +886,4 @@ exports.getservicbyId = async (req, res) => {
     });
   }
 };
+

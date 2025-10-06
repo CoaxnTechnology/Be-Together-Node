@@ -340,12 +340,20 @@ exports.getServices = async (req, res) => {
 
     // ✅ Geo filter with proper distance in KM
     if (refLat != null && refLon != null) {
-      
+      pipeline.push({
+        $geoNear: {
+          near: { type: "Point", coordinates: [refLon, refLat] },
+          distanceField: "distance_km",
+          spherical: true,
+          maxDistance: radiusKm * 1000,
+          distanceMultiplier: 0.001,
+        },
+      });
 
       // Convert to km and round 2 decimal
       pipeline.push({
         $addFields: {
-          distance_km: { $round: [{ $divide: ["$distance_meters", 1000] }, 2] },
+          distance_km: { $round: ["$distance_km", 2] },
         },
       });
     }
@@ -857,4 +865,3 @@ exports.getservicbyId = async (req, res) => {
     });
   }
 };
-

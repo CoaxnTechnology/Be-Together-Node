@@ -804,6 +804,21 @@ exports.updateService = async (req, res) => {
 exports.getservicbyId = async (req, res) => {
   try {
     const serviceId = req.body.serviceId;
+
+    if (!serviceId) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "serviceId is required",
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(serviceId)) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Invalid serviceId",
+      });
+    }
+
     const service = await Service.findById(serviceId);
     if (!service) {
       return res.status(404).json({
@@ -811,13 +826,31 @@ exports.getservicbyId = async (req, res) => {
         message: "Service not found",
       });
     }
+
+    // Fetch reviews for this service
+    const reviews = await Review.find({ service: serviceId })
+      .populate("user", "name profile_image") // only name and profile_image
+      .sort({ created_at: -1 });
+
+    // Calculate average rating
+    let avgRating = 0;
+    if (reviews.length > 0) {
+      const total = reviews.reduce((sum, r) => sum + r.rating, 0);
+      avgRating = total / reviews.length;
+    }
+
     return res.json({
       isSuccess: true,
       message: "Service found successfully",
-      data: service,
+      data: {
+        service,
+        reviews,
+        totalReviews: reviews.length,
+        averageRating: avgRating,
+      },
     });
   } catch (err) {
-    console.error("getservicebyId error:", err);
+    console.error("getservicbyId error:", err);
     return res.status(500).json({
       isSuccess: false,
       message: "Server error",

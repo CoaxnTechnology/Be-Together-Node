@@ -18,9 +18,19 @@ const serviceSchema = new mongoose.Schema({
 
   // Location
   location_name: { type: String, default: null },
-  latitude: { type: Number, default: null },
-  longitude: { type: Number, default: null },
-  city: { type: String, default: null},
+  location: {
+    type: {
+      type: String,
+      enum: ["Point"],
+      default: "Point",
+    },
+    coordinates: {
+      type: [Number], // [longitude, latitude]
+      required: true,
+    },
+  },
+  city: { type: String, default: null },
+
   // Who created this service
   owner: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
 
@@ -52,6 +62,8 @@ const serviceSchema = new mongoose.Schema({
   created_at: { type: Date, default: Date.now },
   updated_at: { type: Date, default: Date.now },
 });
+
+serviceSchema.index({ location: "2dsphere" });
 
 serviceSchema.pre("save", function (next) {
   this.updated_at = Date.now();

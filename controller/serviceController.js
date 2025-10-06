@@ -270,9 +270,7 @@ exports.getServices = async (req, res) => {
     if (categoryId && typeof categoryId === "string") {
       try {
         categoryId = JSON.parse(categoryId);
-      } catch {
-        // keep as string
-      }
+      } catch {}
     }
 
     const tags = Array.isArray(q.tags) ? q.tags : q.tags ? [q.tags] : [];
@@ -280,8 +278,6 @@ exports.getServices = async (req, res) => {
     const page = Math.max(1, Number(q.page || 1));
     const limit = Math.min(100, Number(q.limit || 20));
     const skip = (page - 1) * limit;
-
-    console.log({ page, limit, skip, categoryId, tags, radiusKm });
 
     const and = [];
 
@@ -328,13 +324,10 @@ exports.getServices = async (req, res) => {
     const mongoQuery = and.length ? { $and: and } : {};
     console.log("Final MongoDB query:", mongoQuery);
 
-    const totalCount = await Service.countDocuments(mongoQuery);
     let services = await Service.find(mongoQuery)
       .select("-__v")
       .populate({ path: "category", select: "name" })
       .populate({ path: "owner", select: "name email profile_image" })
-      .skip(skip)
-      .limit(limit)
       .lean();
 
     console.log("Fetched services:", services.length);
@@ -343,7 +336,7 @@ exports.getServices = async (req, res) => {
     const toRad = (value) => (value * Math.PI) / 180;
     const R = 6371; // Earth radius in km
 
-    // Use user's lastLocation if available, otherwise use query lat/lon
+    // Reference location (user lastLocation or query lat/lon)
     let refLat = null;
     let refLon = null;
 
@@ -352,57 +345,65 @@ exports.getServices = async (req, res) => {
       if (Array.isArray(coords) && coords.length === 2) {
         refLon = coords[0];
         refLat = coords[1];
-        console.log("Using user's lastLocation for distance:", { refLat, refLon });
       }
     }
-
-    // If no user lastLocation, use query latitude/longitude
     if ((refLat === null || refLon === null) && q.latitude && q.longitude) {
       refLat = Number(q.latitude);
       refLon = Number(q.longitude);
-      console.log("Using query latitude/longitude for distance:", { refLat, refLon });
     }
 
+    // Calculate distance and filter by radius
     if (refLat !== null && refLon !== null) {
-      services.forEach((service) => {
-        if (
-          typeof service.latitude === "number" &&
-          typeof service.longitude === "number"
-        ) {
-          const dLat = toRad(service.latitude - refLat);
-          const dLon = toRad(service.longitude - refLon);
-          const a =
-            Math.sin(dLat / 2) ** 2 +
-            Math.cos(toRad(refLat)) *
-              Math.cos(toRad(service.latitude)) *
-              Math.sin(dLon / 2) ** 2;
-          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-          service.distance_km = parseFloat((R * c).toFixed(2));
-        } else {
-          service.distance_km = null;
-        }
-      });
-
-      // Sort by distance
-      services.sort(
-        (a, b) =>
-          (a.distance_km != null ? a.distance_km : 9999) -
-          (b.distance_km != null ? b.distance_km : 9999)
-      );
+      services = services
+        .map((service) => {
+          if (
+            typeof service.latitude === "number" &&
+            typeof service.longitude === "number"
+          ) {
+            const dLat = toRad(service.latitude - refLat);
+            const dLon = toRad(service.longitude - refLon);
+            const a =
+              Math.sin(dLat / 2) ** 2 +
+              Math.cos(toRad(refLat)) *
+                Math.cos(toRad(service.latitude)) *
+                Math.sin(dLon / 2) ** 2;
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            service.distance_km = parseFloat((R * c).toFixed(2));
+          } else {
+            service.distance_km = null;
+          }
+          return service;
+        })
+        .filter(
+          (service) =>
+            service.distance_km !== null && service.distance_km <= radiusKm
+        )
+        .sort((a, b) => a.distance_km - b.distance_km);
     }
+
+    const totalCount = services.length;
+    const paginatedServices = services.slice(skip, skip + limit);
 
     return res.json({
       isSuccess: true,
       message: "Services fetched successfully",
-      data: { totalCount, page, limit, services },
+      data: {
+        totalCount,
+        page,
+        limit,
+        services: paginatedServices,
+      },
     });
   } catch (err) {
     console.error("getServices error:", err);
-    return res
-      .status(500)
-      .json({ isSuccess: false, message: "Server error", error: err.message });
+    return res.status(500).json({
+      isSuccess: false,
+      message: "Server error",
+      error: err.message,
+    });
   }
 };
+
 
 
 

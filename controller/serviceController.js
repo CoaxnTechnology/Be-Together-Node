@@ -273,7 +273,9 @@ exports.getServices = async (req, res) => {
 
     let categoryId = q.categoryId || null;
     if (categoryId && typeof categoryId === "string") {
-      try { categoryId = JSON.parse(categoryId); } catch {}
+      try {
+        categoryId = JSON.parse(categoryId);
+      } catch {}
     }
 
     const tags = Array.isArray(q.tags) ? q.tags : q.tags ? [q.tags] : [];
@@ -285,9 +287,14 @@ exports.getServices = async (req, res) => {
     const match = {};
 
     // CATEGORY FILTER
-    if (categoryId) {
-      if (Array.isArray(categoryId)) match.category = { $in: categoryId };
-      else match.category = categoryId;
+    if (Array.isArray(categoryId) && categoryId.length > 0) {
+      match.category = { $in: categoryId };
+    } else if (
+      categoryId &&
+      typeof categoryId === "string" &&
+      categoryId.trim() !== ""
+    ) {
+      match.category = categoryId;
     }
 
     // TAGS FILTER
@@ -305,7 +312,7 @@ exports.getServices = async (req, res) => {
     if (q.date) {
       match.$or = [
         { service_type: "one_time", date: q.date },
-        { service_type: "recurring", "recurring_schedule.date": q.date }
+        { service_type: "recurring", "recurring_schedule.date": q.date },
       ];
     }
 
@@ -314,7 +321,11 @@ exports.getServices = async (req, res) => {
     let refLon = null;
     if (req.user?.lastLocation?.coords?.coordinates) {
       const coords = req.user.lastLocation.coords.coordinates;
-      if (Array.isArray(coords) && coords.length === 2 && !(coords[0] === 0 && coords[1] === 0)) {
+      if (
+        Array.isArray(coords) &&
+        coords.length === 2 &&
+        !(coords[0] === 0 && coords[1] === 0)
+      ) {
         refLon = coords[0];
         refLat = coords[1];
       }
@@ -344,20 +355,39 @@ exports.getServices = async (req, res) => {
 
     // Lookup category
     pipeline.push(
-      { $lookup: { from: "categories", localField: "category", foreignField: "_id", as: "category" } },
+      {
+        $lookup: {
+          from: "categories",
+          localField: "category",
+          foreignField: "_id",
+          as: "category",
+        },
+      },
       { $unwind: "$category" }
     );
 
     // Lookup owner but only return _id and profile_image
     pipeline.push(
-      { $lookup: { from: "users", localField: "owner", foreignField: "_id", as: "owner" } },
+      {
+        $lookup: {
+          from: "users",
+          localField: "owner",
+          foreignField: "_id",
+          as: "owner",
+        },
+      },
       { $unwind: "$owner" },
       {
         $replaceRoot: {
           newRoot: {
             $mergeObjects: [
               "$$ROOT",
-              { owner: { _id: "$owner._id", profile_image: "$owner.profile_image" } },
+              {
+                owner: {
+                  _id: "$owner._id",
+                  profile_image: "$owner.profile_image",
+                },
+              },
             ],
           },
         },
@@ -366,41 +396,44 @@ exports.getServices = async (req, res) => {
 
     // Lookup reviews for each service
     // Lookup reviews and populate only necessary user info
-pipeline.push(
-  { 
-    $lookup: {
-      from: "reviews",
-      let: { serviceId: "$_id" },
-      pipeline: [
-        { $match: { $expr: { $eq: ["$service", "$$serviceId"] } } },
-        { $lookup: {
-            from: "users",
-            localField: "user",
-            foreignField: "_id",
-            as: "user"
-        }},
-        { $unwind: "$user" },
-        { $project: {
-            _id: 1,
-            rating: 1,
-            text: 1,
-            created_at: 1,
-            "user.name": 1,
-            "user.email": 1,
-            "user.profile_image": 1
-        }}
-      ],
-      as: "reviews"
-    }
-  },
-  {
-    $addFields: {
-      averageRating: { $avg: "$reviews.rating" },
-      totalReviews: { $size: "$reviews" }
-    }
-  }
-);
-
+    pipeline.push(
+      {
+        $lookup: {
+          from: "reviews",
+          let: { serviceId: "$_id" },
+          pipeline: [
+            { $match: { $expr: { $eq: ["$service", "$$serviceId"] } } },
+            {
+              $lookup: {
+                from: "users",
+                localField: "user",
+                foreignField: "_id",
+                as: "user",
+              },
+            },
+            { $unwind: "$user" },
+            {
+              $project: {
+                _id: 1,
+                rating: 1,
+                text: 1,
+                created_at: 1,
+                "user.name": 1,
+                "user.email": 1,
+                "user.profile_image": 1,
+              },
+            },
+          ],
+          as: "reviews",
+        },
+      },
+      {
+        $addFields: {
+          averageRating: { $avg: "$reviews.rating" },
+          totalReviews: { $size: "$reviews" },
+        },
+      }
+    );
 
     // Pagination
     pipeline.push({ $skip: skip }, { $limit: limit });
@@ -408,8 +441,13 @@ pipeline.push(
     const services = await Service.aggregate(pipeline);
 
     // Total count (without skip/limit)
-    const totalCountPipeline = pipeline.filter(stage => !stage.$skip && !stage.$limit);
-    const totalCountResult = await Service.aggregate([...totalCountPipeline, { $count: "total" }]);
+    const totalCountPipeline = pipeline.filter(
+      (stage) => !stage.$skip && !stage.$limit
+    );
+    const totalCountResult = await Service.aggregate([
+      ...totalCountPipeline,
+      { $count: "total" },
+    ]);
     const totalCount = totalCountResult[0] ? totalCountResult[0].total : 0;
 
     return res.json({
@@ -417,13 +455,13 @@ pipeline.push(
       message: "Services fetched successfully",
       data: { totalCount, page, limit, services },
     });
-
   } catch (err) {
     console.error("getServices error:", err);
-    return res.status(500).json({ isSuccess: false, message: "Server error", error: err.message });
+    return res
+      .status(500)
+      .json({ isSuccess: false, message: "Server error", error: err.message });
   }
 };
-
 
 exports.getInterestedUsers = async (req, res) => {
   try {
@@ -665,8 +703,7 @@ exports.updateService = async (req, res) => {
     // Price & Free
     if (body.isFree !== undefined)
       updatePayload.isFree = body.isFree === true || body.isFree === "true";
-    if (body.price !== undefined)
-      updatePayload.price = Number(body.price || 0);
+    if (body.price !== undefined) updatePayload.price = Number(body.price || 0);
 
     // Language
     if (body.language || body.Language)
@@ -721,10 +758,13 @@ exports.updateService = async (req, res) => {
 
     // Date/time or recurring schedule (only if sent)
     if (body.date) updatePayload.date = String(body.date);
-    if (body.start_time) updatePayload.start_time = body.start_time.trim().toUpperCase();
-    if (body.end_time) updatePayload.end_time = body.end_time.trim().toUpperCase();
+    if (body.start_time)
+      updatePayload.start_time = body.start_time.trim().toUpperCase();
+    if (body.end_time)
+      updatePayload.end_time = body.end_time.trim().toUpperCase();
     if (body.recurring_schedule)
-      updatePayload.recurring_schedule = tryParse(body.recurring_schedule) || [];
+      updatePayload.recurring_schedule =
+        tryParse(body.recurring_schedule) || [];
 
     // Max participants
     if (body.max_participants)
@@ -751,7 +791,6 @@ exports.updateService = async (req, res) => {
       .json({ isSuccess: false, message: "Server error", error: err.message });
   }
 };
-
 
 //--------------------------Get Service ByID---------------------------------
 exports.getservicbyId = async (req, res) => {

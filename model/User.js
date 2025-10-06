@@ -59,14 +59,15 @@ const userSchema = new mongoose.Schema(
     lastResendAt: { type: Date, default: null },
     lastLocation: {
       coords: {
-        type: PointSchema,
-        default: { type: "Point", coordinates: [0, 0] },
+        type: { type: String, enum: ["Point"], default: "Point" },
+        coordinates: { type: [Number], default: [0, 0] }, // GeoJSON order: [lon, lat]
       },
-      accuracy: { type: Number, default: null }, // optional if you want
-      provider: { type: String, default: null }, // optional
+      accuracy: { type: Number, default: null },
+      provider: { type: String, default: null },
       recordedAt: { type: Date, default: null },
       updatedAt: { type: Date, default: Date.now },
     },
+
     reset_password_token: { type: String, default: null }, // store hashed token
     reset_password_expiry: { type: Date, default: null },
     reset_password_used: { type: Boolean, default: false },

@@ -266,7 +266,6 @@ function bboxForLatLon(lat, lon, radiusKm = 3) {
   };
 }
 //------------------Get Service------------------
-
 exports.getServices = async (req, res) => {
   try {
     const q = { ...req.query, ...req.body };

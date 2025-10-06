@@ -810,7 +810,14 @@ exports.getservicbyId = async (req, res) => {
       });
     }
 
-    const service = await Service.findById(serviceId);
+    const service = await Service.findById(serviceId).populate({
+      path: "owner",
+      select: "name profile_image",
+    }).populate({
+      path: "category",
+      select: "name",
+    });
+
     if (!service) {
       return res.status(404).json({
         isSuccess: false,
@@ -838,6 +845,9 @@ exports.getservicbyId = async (req, res) => {
         reviews,
         totalReviews: reviews.length,
         averageRating: avgRating,
+        ownerName: service.owner.name,
+        ownerProfileImage: getFullImageUrl(service.owner.profile_image),
+        categoryName: service.category.name,
       },
     });
   } catch (err) {

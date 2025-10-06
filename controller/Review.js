@@ -72,9 +72,20 @@ exports.getServiceReviews = async (req, res) => {
       .populate("user", "name profile_image") // gets the reviewer's name and profile
       .sort({ created_at: -1 });
 
+    // Calculate average rating
+    let avgRating = 0;
+    if (reviews.length > 0) {
+      const total = reviews.reduce((sum, r) => sum + r.rating, 0);
+      avgRating = total / reviews.length;
+    }
+
     return res.json({
       isSuccess: true,
-      data: reviews,
+      data: {
+        averageRating: avgRating,
+        totalReviews: reviews.length,
+        reviews: reviews,
+      },
     });
   } catch (err) {
     console.error("getServiceReviews error:", err);
@@ -85,4 +96,3 @@ exports.getServiceReviews = async (req, res) => {
     });
   }
 };
-

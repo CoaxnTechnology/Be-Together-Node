@@ -8,4 +8,5 @@ router.post("/get", serviceController.getServices);
 router.post("/user/search", serviceController.getInterestedUsers);
 router.get("/getall", serviceController.getAllServices);
 router.put("/update", auth, serviceController.updateService);
+router.get("/getbyId", serviceController.getservicbyId);
 module.exports = router;

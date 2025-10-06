@@ -4,6 +4,7 @@ const Category = require("../model/Category");
 const Service = require("../model/Service");
 const mongoose = require("mongoose");
 const notificationController = require("./notificationController");
+const Review = require("../model/review");
 // Helper to parse JSON safely
 function tryParse(val) {
   if (val === undefined || val === null) return val;
@@ -61,7 +62,7 @@ exports.createService = async (req, res) => {
     const price = isFree ? 0 : Number(body.price || 0);
 
     const location = tryParse(body.location);
-   // const city = body.city;
+    // const city = body.city;
     const service_type = body.service_type || "one_time";
     const date = body.date;
     const start_time = body.start_time;
@@ -105,24 +106,20 @@ exports.createService = async (req, res) => {
         .json({ isSuccess: false, message: "Category not found" });
 
     if (!Array.isArray(selectedTags) || !selectedTags.length) {
-      return res
-        .status(400)
-        .json({
-          isSuccess: false,
-          message: "selectedTags must be a non-empty array",
-        });
+      return res.status(400).json({
+        isSuccess: false,
+        message: "selectedTags must be a non-empty array",
+      });
     }
 
     const validTags = category.tags.filter((tag) =>
       selectedTags.map((t) => t.toLowerCase()).includes(tag.toLowerCase())
     );
     if (!validTags.length)
-      return res
-        .status(400)
-        .json({
-          isSuccess: false,
-          message: "No valid tags selected from this category",
-        });
+      return res.status(400).json({
+        isSuccess: false,
+        message: "No valid tags selected from this category",
+      });
 
     // ---- Build payload ----
     const servicePayload = {
@@ -132,7 +129,7 @@ exports.createService = async (req, res) => {
       isFree,
       price,
       location_name: location.name, // ✅ save location name
-    //  city, // ✅ save city
+      //  city, // ✅ save city
       location: {
         type: "Point",
         coordinates: [Number(location.longitude), Number(location.latitude)],
@@ -158,12 +155,10 @@ exports.createService = async (req, res) => {
       }
 
       if (!isValidDateISO(date)) {
-        return res
-          .status(400)
-          .json({
-            isSuccess: false,
-            message: "Valid date (YYYY-MM-DD) required for one_time",
-          });
+        return res.status(400).json({
+          isSuccess: false,
+          message: "Valid date (YYYY-MM-DD) required for one_time",
+        });
       }
 
       servicePayload.date = date;
@@ -175,12 +170,10 @@ exports.createService = async (req, res) => {
     if (service_type === "recurring") {
       const recurring_schedule = tryParse(body.recurring_schedule) || [];
       if (!Array.isArray(recurring_schedule) || !recurring_schedule.length) {
-        return res
-          .status(400)
-          .json({
-            isSuccess: false,
-            message: "Recurring schedule is required for recurring services",
-          });
+        return res.status(400).json({
+          isSuccess: false,
+          message: "Recurring schedule is required for recurring services",
+        });
       }
 
       servicePayload.recurring_schedule = recurring_schedule.map((item) => {
@@ -273,19 +266,18 @@ function bboxForLatLon(lat, lon, radiusKm = 3) {
   };
 }
 //------------------Get Service------------------
+
 exports.getServices = async (req, res) => {
   try {
     const q = { ...req.query, ...req.body };
 
     let categoryId = q.categoryId || null;
     if (categoryId && typeof categoryId === "string") {
-      try {
-        categoryId = JSON.parse(categoryId);
-      } catch {}
+      try { categoryId = JSON.parse(categoryId); } catch {}
     }
 
     const tags = Array.isArray(q.tags) ? q.tags : q.tags ? [q.tags] : [];
-    const radiusKm = q.radius_km !== undefined ? Number(q.radius_km) : 3;
+    const radiusKm = q.radius_km !== undefined ? Number(q.radius_km) : 10;
     const page = Math.max(1, Number(q.page || 1));
     const limit = Math.min(100, Number(q.limit || 20));
     const skip = (page - 1) * limit;
@@ -309,16 +301,20 @@ exports.getServices = async (req, res) => {
     let excludeOwnerId = q.excludeOwnerId || (req.user && req.user._id);
     if (excludeOwnerId) match.owner = { $ne: excludeOwnerId };
 
+    // DATE FILTER
+    if (q.date) {
+      match.$or = [
+        { service_type: "one_time", date: q.date },
+        { service_type: "recurring", "recurring_schedule.date": q.date }
+      ];
+    }
+
     // REFERENCE LOCATION
     let refLat = null;
     let refLon = null;
     if (req.user?.lastLocation?.coords?.coordinates) {
       const coords = req.user.lastLocation.coords.coordinates;
-      if (
-        Array.isArray(coords) &&
-        coords.length === 2 &&
-        !(coords[0] === 0 && coords[1] === 0)
-      ) {
+      if (Array.isArray(coords) && coords.length === 2 && !(coords[0] === 0 && coords[1] === 0)) {
         refLon = coords[0];
         refLat = coords[1];
       }
@@ -338,56 +334,73 @@ exports.getServices = async (req, res) => {
           near: { type: "Point", coordinates: [refLon, refLat] },
           distanceField: "distance_km",
           spherical: true,
-          maxDistance: radiusKm * 1000, // meters
+          maxDistance: radiusKm * 1000,
         },
       });
     }
 
-    // Match other filters
+    // Match filters
     pipeline.push({ $match: match });
 
     // Lookup category
     pipeline.push(
-      {
-        $lookup: {
-          from: "categories",
-          localField: "category",
-          foreignField: "_id",
-          as: "category",
-        },
-      },
+      { $lookup: { from: "categories", localField: "category", foreignField: "_id", as: "category" } },
       { $unwind: "$category" }
     );
 
     // Lookup owner but only return _id and profile_image
-    // Lookup owner but only return _id and profile_image
-    // Lookup owner but only keep _id and profile_image
     pipeline.push(
-      {
-        $lookup: {
-          from: "users",
-          localField: "owner",
-          foreignField: "_id",
-          as: "owner",
-        },
-      },
+      { $lookup: { from: "users", localField: "owner", foreignField: "_id", as: "owner" } },
       { $unwind: "$owner" },
       {
         $replaceRoot: {
           newRoot: {
             $mergeObjects: [
               "$$ROOT",
-              {
-                owner: {
-                  _id: "$owner._id",
-                  profile_image: "$owner.profile_image",
-                },
-              },
+              { owner: { _id: "$owner._id", profile_image: "$owner.profile_image" } },
             ],
           },
         },
       }
     );
+
+    // Lookup reviews for each service
+    // Lookup reviews and populate only necessary user info
+pipeline.push(
+  { 
+    $lookup: {
+      from: "reviews",
+      let: { serviceId: "$_id" },
+      pipeline: [
+        { $match: { $expr: { $eq: ["$service", "$$serviceId"] } } },
+        { $lookup: {
+            from: "users",
+            localField: "user",
+            foreignField: "_id",
+            as: "user"
+        }},
+        { $unwind: "$user" },
+        { $project: {
+            _id: 1,
+            rating: 1,
+            text: 1,
+            created_at: 1,
+            "user.name": 1,
+            "user.email": 1,
+            "user.profile_image": 1
+        }}
+      ],
+      as: "reviews"
+    }
+  },
+  {
+    $addFields: {
+      averageRating: { $avg: "$reviews.rating" },
+      totalReviews: { $size: "$reviews" }
+    }
+  }
+);
+
 
     // Pagination
     pipeline.push({ $skip: skip }, { $limit: limit });
@@ -395,13 +408,8 @@ exports.getServices = async (req, res) => {
     const services = await Service.aggregate(pipeline);
 
     // Total count (without skip/limit)
-    const totalCountPipeline = pipeline.filter(
-      (stage) => !stage.$skip && !stage.$limit
-    );
-    const totalCountResult = await Service.aggregate([
-      ...totalCountPipeline,
-      { $count: "total" },
-    ]);
+    const totalCountPipeline = pipeline.filter(stage => !stage.$skip && !stage.$limit);
+    const totalCountResult = await Service.aggregate([...totalCountPipeline, { $count: "total" }]);
     const totalCount = totalCountResult[0] ? totalCountResult[0].total : 0;
 
     return res.json({
@@ -409,13 +417,13 @@ exports.getServices = async (req, res) => {
       message: "Services fetched successfully",
       data: { totalCount, page, limit, services },
     });
+
   } catch (err) {
     console.error("getServices error:", err);
-    return res
-      .status(500)
-      .json({ isSuccess: false, message: "Server error", error: err.message });
+    return res.status(500).json({ isSuccess: false, message: "Server error", error: err.message });
   }
 };
+
 
 exports.getInterestedUsers = async (req, res) => {
   try {
@@ -639,12 +647,10 @@ exports.updateService = async (req, res) => {
 
     // Ownership check
     if (String(service.owner) !== String(user._id)) {
-      return res
-        .status(403)
-        .json({
-          isSuccess: false,
-          message: "Not authorized to edit this service",
-        });
+      return res.status(403).json({
+        isSuccess: false,
+        message: "Not authorized to edit this service",
+      });
     }
 
     // Parse and validate location
@@ -655,12 +661,10 @@ exports.updateService = async (req, res) => {
       location.latitude == null ||
       location.longitude == null
     ) {
-      return res
-        .status(400)
-        .json({
-          isSuccess: false,
-          message: "Location (name, latitude, longitude) is required",
-        });
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Location (name, latitude, longitude) is required",
+      });
     }
 
     // Validate category
@@ -682,12 +686,10 @@ exports.updateService = async (req, res) => {
         .includes(tag.toLowerCase())
     );
     if (!validTags.length)
-      return res
-        .status(400)
-        .json({
-          isSuccess: false,
-          message: "No valid tags selected from this category",
-        });
+      return res.status(400).json({
+        isSuccess: false,
+        message: "No valid tags selected from this category",
+      });
 
     const isFree = body.isFree === true || body.isFree === "true";
     const price = isFree ? 0 : Number(body.price || 0);
@@ -717,20 +719,16 @@ exports.updateService = async (req, res) => {
     // --- One-time service ---
     if (service_type === "one_time") {
       if (!isValidDateISO(body.date)) {
-        return res
-          .status(400)
-          .json({
-            isSuccess: false,
-            message: "Valid date (YYYY-MM-DD) required for one_time",
-          });
+        return res.status(400).json({
+          isSuccess: false,
+          message: "Valid date (YYYY-MM-DD) required for one_time",
+        });
       }
       if (!isValidTime(body.start_time) || !isValidTime(body.end_time)) {
-        return res
-          .status(400)
-          .json({
-            isSuccess: false,
-            message: "start_time and end_time must be in hh:mm AM/PM format",
-          });
+        return res.status(400).json({
+          isSuccess: false,
+          message: "start_time and end_time must be in hh:mm AM/PM format",
+        });
       }
 
       mongoUpdate.$set.date = String(body.date);
@@ -747,12 +745,10 @@ exports.updateService = async (req, res) => {
         !Array.isArray(recurring_schedule) ||
         recurring_schedule.length === 0
       ) {
-        return res
-          .status(400)
-          .json({
-            isSuccess: false,
-            message: "Recurring schedule is required for recurring services",
-          });
+        return res.status(400).json({
+          isSuccess: false,
+          message: "Recurring schedule is required for recurring services",
+        });
       }
 
       const formattedSchedule = [];

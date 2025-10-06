@@ -88,10 +88,10 @@ exports.createService = async (req, res) => {
       });
     }
 
-    if (!city)
-      return res
-        .status(400)
-        .json({ isSuccess: false, message: "City is required" });
+    // if (!city)
+    //   return res
+    //     .status(400)
+    //     .json({ isSuccess: false, message: "City is required" });
 
     if (!categoryId)
       return res
@@ -132,7 +132,7 @@ exports.createService = async (req, res) => {
       isFree,
       price,
       location_name: location.name, // ✅ save location name
-      city, // ✅ save city
+    //  city, // ✅ save city
       location: {
         type: "Point",
         coordinates: [Number(location.longitude), Number(location.latitude)],

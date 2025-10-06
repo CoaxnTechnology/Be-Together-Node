@@ -810,20 +810,17 @@ exports.getservicbyId = async (req, res) => {
       });
     }
 
-    const service = await Service.findById(serviceId).populate({
-      path: "owner",
-      select: "name profile_image",
-    }).populate({
-      path: "category",
-      select: "name",
-    });
-
+    const service = await Service.findById(serviceId);
     if (!service) {
       return res.status(404).json({
         isSuccess: false,
         message: "Service not found",
       });
     }
+    // fetch name and profile_image
+    await service.populate("owner", "name profile_image");
+    //fetch category name
+    await service.populate("category", "name");
 
     // Fetch reviews for this service
     const reviews = await Review.find({ service: serviceId })
@@ -845,9 +842,6 @@ exports.getservicbyId = async (req, res) => {
         reviews,
         totalReviews: reviews.length,
         averageRating: avgRating,
-        ownerName: service.owner.name,
-        ownerProfileImage: getFullImageUrl(service.owner.profile_image),
-        categoryName: service.category.name,
       },
     });
   } catch (err) {

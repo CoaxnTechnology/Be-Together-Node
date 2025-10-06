@@ -315,9 +315,10 @@ exports.getServices = async (req, res) => {
       ];
     }
 
-    // REFERENCE LOCATION
+    // LOCATION
     let refLat = null;
     let refLon = null;
+
     if (req.user?.lastLocation?.coords?.coordinates) {
       const coords = req.user.lastLocation.coords.coordinates;
       if (
@@ -334,25 +335,32 @@ exports.getServices = async (req, res) => {
       refLon = Number(q.longitude);
     }
 
-    // Build aggregation pipeline
+    // --- AGGREGATION PIPELINE ---
     const pipeline = [];
 
-    // Geo filter if location provided
+    // ✅ Geo filter with proper distance in KM
     if (refLat != null && refLon != null) {
       pipeline.push({
         $geoNear: {
           near: { type: "Point", coordinates: [refLon, refLat] },
-          distanceField: "distance_km",
+          distanceField: "distance_meters",
           spherical: true,
           maxDistance: radiusKm * 1000,
         },
       });
+
+      // Convert to km and round 2 decimal
+      pipeline.push({
+        $addFields: {
+          distance_km: { $round: [{ $divide: ["$distance_meters", 1000] }, 2] },
+        },
+      });
     }
 
-    // Match filters
+    // MATCH
     pipeline.push({ $match: match });
 
-    // Lookup category
+    // LOOKUP CATEGORY
     pipeline.push(
       {
         $lookup: {
@@ -365,7 +373,7 @@ exports.getServices = async (req, res) => {
       { $unwind: "$category" }
     );
 
-    // Lookup owner but only return _id and profile_image
+    // LOOKUP OWNER (only id + profile_image)
     pipeline.push(
       {
         $lookup: {
@@ -393,8 +401,7 @@ exports.getServices = async (req, res) => {
       }
     );
 
-    // Lookup reviews for each service
-    // Lookup reviews and populate only necessary user info
+    // LOOKUP REVIEWS
     pipeline.push(
       {
         $lookup: {
@@ -434,12 +441,12 @@ exports.getServices = async (req, res) => {
       }
     );
 
-    // Pagination
+    // PAGINATION
     pipeline.push({ $skip: skip }, { $limit: limit });
 
     const services = await Service.aggregate(pipeline);
 
-    // Total count (without skip/limit)
+    // COUNT
     const totalCountPipeline = pipeline.filter(
       (stage) => !stage.$skip && !stage.$limit
     );
@@ -456,9 +463,11 @@ exports.getServices = async (req, res) => {
     });
   } catch (err) {
     console.error("getServices error:", err);
-    return res
-      .status(500)
-      .json({ isSuccess: false, message: "Server error", error: err.message });
+    return res.status(500).json({
+      isSuccess: false,
+      message: "Server error",
+      error: err.message,
+    });
   }
 };
 

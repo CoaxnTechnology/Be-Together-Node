@@ -265,141 +265,153 @@ exports.getServices = async (req, res) => {
     const q = { ...req.query, ...req.body };
     console.log("Received query/body:", q);
 
-    const {
-      page = 1,
-      limit = 10,
-      categoryId,
-      tags = [],
-      isFree,
-      minPrice,
-      maxPrice,
-      latitude,
-      longitude,
-      radius_km,
-      excludeOwnerId,
-    } = q;
-
-    const skip = (page - 1) * limit;
-
-    // ---------- MAIN QUERY ----------
-    const query = {};
-
-    if (categoryId) query.category = categoryId;
-    if (Array.isArray(tags) && tags.length > 0) query.tags = { $in: tags };
-    if (isFree === "true") query.isFree = true;
-    else if (isFree === "false") query.isFree = false;
-    if (minPrice && maxPrice) query.price = { $gte: minPrice, $lte: maxPrice };
-
-    if (excludeOwnerId) query.owner = { $ne: excludeOwnerId };
-
-    // ✅ Location-based filter
-    let geoFilter = {};
-    if (
-      latitude &&
-      longitude &&
-      radius_km &&
-      !isNaN(latitude) &&
-      !isNaN(longitude)
-    ) {
-      geoFilter = {
-        latitude: { $exists: true },
-        longitude: { $exists: true },
-        $expr: {
-          $lte: [
-            {
-              // Haversine formula
-              $multiply: [
-                6371, // Radius of Earth in km
-                {
-                  $acos: {
-                    $add: [
-                      {
-                        $multiply: [
-                          { $sin: { $degreesToRadians: "$latitude" } },
-                          Math.sin((latitude * Math.PI) / 180),
-                        ],
-                      },
-                      {
-                        $multiply: [
-                          {
-                            $cos: { $degreesToRadians: "$latitude" },
-                          },
-                          Math.cos((latitude * Math.PI) / 180),
-                          {
-                            $cos: {
-                              $subtract: [
-                                { $degreesToRadians: "$longitude" },
-                                (longitude * Math.PI) / 180,
-                              ],
-                            },
-                          },
-                        ],
-                      },
-                    ],
-                  },
-                },
-              ],
-            },
-            radius_km,
-          ],
-        },
-      };
+    // ---------- QUERY PARAMS ----------
+    let categoryId = q.categoryId || null;
+    if (categoryId && typeof categoryId === "string") {
+      try {
+        categoryId = JSON.parse(categoryId);
+      } catch {
+        // keep as string
+      }
     }
 
-    // ---------- FIND SERVICES ----------
-    const services = await Service.find({
-      ...query,
-      ...geoFilter,
-    })
-      .populate("category", "name")
-      .populate("owner", "name email profile_image")
-      .skip(skip)
-      .limit(parseInt(limit));
+    const tags = Array.isArray(q.tags) ? q.tags : q.tags ? [q.tags] : [];
 
-    // ---------- Distance Calculation ----------
-    const servicesWithDistance = services.map((service) => {
-      if (latitude && longitude && service.latitude && service.longitude) {
-        const toRad = (value) => (value * Math.PI) / 180;
-        const R = 6371; // km
-        const dLat = toRad(service.latitude - latitude);
-        const dLon = toRad(service.longitude - longitude);
-        const a =
-          Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-          Math.cos(toRad(latitude)) *
-            Math.cos(toRad(service.latitude)) *
-            Math.sin(dLon / 2) *
-            Math.sin(dLon / 2);
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        service = service.toObject();
-        service.distance_km = +(R * c).toFixed(2);
+    const radiusKm = q.radius_km !== undefined ? Number(q.radius_km) : 3;
+    const page = Math.max(1, Number(q.page || 1));
+    const limit = Math.min(100, Number(q.limit || 20));
+    const skip = (page - 1) * limit;
+
+    console.log({ page, limit, skip, categoryId, tags, radiusKm });
+
+    const and = [];
+
+    // ---------- CATEGORY FILTER ----------
+    if (categoryId) {
+      if (Array.isArray(categoryId)) {
+        const validIds = categoryId.filter((id) => looksLikeObjectId(id));
+        if (validIds.length) {
+          and.push({ category: { $in: validIds } });
+          console.log("Multiple categories filter applied:", validIds);
+        }
+      } else {
+        if (!looksLikeObjectId(categoryId)) {
+          return res
+            .status(400)
+            .json({ isSuccess: false, message: "Invalid categoryId" });
+        }
+        and.push({ category: categoryId });
+        console.log("Single category filter applied:", categoryId);
       }
-      return service;
-    });
+    }
 
-    const totalCount = await Service.countDocuments({
-      ...query,
-      ...geoFilter,
-    });
+    // ---------- TAGS FILTER ----------
+    if (tags.length) {
+      const normalizedTags = tags.map((t) => String(t).trim()).filter(Boolean);
+      if (normalizedTags.length) {
+        and.push({ tags: { $in: normalizedTags } });
+        console.log("Tags filter applied:", normalizedTags);
+      }
+    }
 
-    res.status(200).json({
+    // ---------- USER CURRENT LOCATION ----------
+    let userLat = null;
+    let userLon = null;
+
+    if (req.user && req.user.lastLocation && req.user.lastLocation.coords) {
+      const coords = req.user.lastLocation.coords.coordinates;
+      if (Array.isArray(coords) && coords.length === 2) {
+        userLon = coords[0];
+        userLat = coords[1];
+        console.log("Using user's last saved location:", { userLat, userLon });
+      }
+    }
+
+    // ---------- LOCATION FILTER (using user location) ----------
+    if (userLat != null && userLon != null) {
+      const box = bboxForLatLon(userLat, userLon, radiusKm);
+      and.push({ latitude: { $gte: box.minLat, $lte: box.maxLat } });
+      and.push({ longitude: { $gte: box.minLon, $lte: box.maxLon } });
+      console.log("Location filter applied with bounding box:", box);
+    }
+
+    // ---------- FREE / PAID FILTER ----------
+    if (q.isFree === true || q.isFree === "true") {
+      and.push({ isFree: true });
+      console.log("Filtering only free services");
+    } else if (q.isFree === false || q.isFree === "false") {
+      and.push({ isFree: false });
+      console.log("Filtering only paid services");
+    }
+
+    // ---------- EXCLUDE OWN SERVICES ----------
+    let excludeOwnerId = null;
+    if (req.user && req.user._id) excludeOwnerId = req.user._id.toString();
+    if (q.excludeOwnerId) excludeOwnerId = q.excludeOwnerId;
+    if (excludeOwnerId && looksLikeObjectId(excludeOwnerId)) {
+      and.push({ owner: { $ne: excludeOwnerId } });
+      console.log("Excluding services owned by:", excludeOwnerId);
+    }
+
+    const mongoQuery = and.length ? { $and: and } : {};
+    console.log("Final MongoDB query:", mongoQuery);
+
+    const totalCount = await Service.countDocuments(mongoQuery);
+    let services = await Service.find(mongoQuery)
+      .select("-__v")
+      .populate({ path: "category", select: "name" })
+      .populate({ path: "owner", select: "name email profile_image" })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    console.log("Fetched services:", services.length);
+
+    // ---------- DISTANCE CALCULATION (from user's lastLocation) ----------
+    const toRad = (value) => (value * Math.PI) / 180;
+    const R = 6371; // Earth radius in km
+
+    if (userLat != null && userLon != null) {
+      services.forEach((service) => {
+        if (
+          typeof service.latitude === "number" &&
+          typeof service.longitude === "number"
+        ) {
+          const dLat = toRad(service.latitude - userLat);
+          const dLon = toRad(service.longitude - userLon);
+          const a =
+            Math.sin(dLat / 2) ** 2 +
+            Math.cos(toRad(userLat)) *
+              Math.cos(toRad(service.latitude)) *
+              Math.sin(dLon / 2) ** 2;
+          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+          service.distance_km = parseFloat((R * c).toFixed(2));
+        } else {
+          service.distance_km = null;
+        }
+      });
+
+      services.sort(
+        (a, b) =>
+          (a.distance_km != null ? a.distance_km : 9999) -
+          (b.distance_km != null ? b.distance_km : 9999)
+      );
+      console.log("Services sorted by distance.");
+    }
+
+    return res.json({
       isSuccess: true,
       message: "Services fetched successfully",
-      data: {
-        totalCount,
-        page: parseInt(page),
-        limit: parseInt(limit),
-        services: servicesWithDistance,
-      },
+      data: { totalCount, page, limit, services },
     });
-  } catch (error) {
-    console.error("Error fetching services:", error);
-    res.status(500).json({
-      isSuccess: false,
-      message: "Server error fetching services",
-      error: error.message,
-    });
+  } catch (err) {
+    console.error("getServices error:", err);
+    return res
+      .status(500)
+      .json({ isSuccess: false, message: "Server error", error: err.message });
   }
 };
+
 
 
 

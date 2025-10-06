@@ -276,7 +276,6 @@ exports.getServices = async (req, res) => {
     }
 
     const tags = Array.isArray(q.tags) ? q.tags : q.tags ? [q.tags] : [];
-
     const radiusKm = q.radius_km !== undefined ? Number(q.radius_km) : 3;
     const page = Math.max(1, Number(q.page || 1));
     const limit = Math.min(100, Number(q.limit || 20));
@@ -314,25 +313,31 @@ exports.getServices = async (req, res) => {
       }
     }
 
-    // ---------- USER CURRENT LOCATION ----------
+    // ---------- USER LAST LOCATION (for distance calculation) ----------
     let userLat = null;
     let userLon = null;
 
     if (req.user && req.user.lastLocation && req.user.lastLocation.coords) {
       const coords = req.user.lastLocation.coords.coordinates;
       if (Array.isArray(coords) && coords.length === 2) {
-        userLon = coords[0];
+        userLon = coords[0]; // lastLocation stored as [longitude, latitude]
         userLat = coords[1];
-        console.log("Using user's last saved location:", { userLat, userLon });
+        console.log("Using user's last saved location for distance:", { userLat, userLon });
       }
     }
 
-    // ---------- LOCATION FILTER (using user location) ----------
-    if (userLat != null && userLon != null) {
-      const box = bboxForLatLon(userLat, userLon, radiusKm);
+    // ---------- LOCATION FILTER (for query) ----------
+    let filterLat = null;
+    let filterLon = null;
+
+    if (q.latitude != null && q.longitude != null) {
+      filterLat = Number(q.latitude);
+      filterLon = Number(q.longitude);
+
+      const box = bboxForLatLon(filterLat, filterLon, radiusKm);
       and.push({ latitude: { $gte: box.minLat, $lte: box.maxLat } });
       and.push({ longitude: { $gte: box.minLon, $lte: box.maxLon } });
-      console.log("Location filter applied with bounding box:", box);
+      console.log("Filtering services near input location:", { filterLat, filterLon, box });
     }
 
     // ---------- FREE / PAID FILTER ----------
@@ -356,6 +361,7 @@ exports.getServices = async (req, res) => {
     const mongoQuery = and.length ? { $and: and } : {};
     console.log("Final MongoDB query:", mongoQuery);
 
+    // ---------- FETCH SERVICES ----------
     const totalCount = await Service.countDocuments(mongoQuery);
     let services = await Service.find(mongoQuery)
       .select("-__v")
@@ -391,12 +397,13 @@ exports.getServices = async (req, res) => {
         }
       });
 
+      // Sort services by distance from user's last location
       services.sort(
         (a, b) =>
           (a.distance_km != null ? a.distance_km : 9999) -
           (b.distance_km != null ? b.distance_km : 9999)
       );
-      console.log("Services sorted by distance.");
+      console.log("Services sorted by distance from user's last location.");
     }
 
     return res.json({

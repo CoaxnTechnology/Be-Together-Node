@@ -10,62 +10,62 @@ cloudinary.config({
 });
 
 // ✅ Create Category with auto or manual tags
-exports.createCategory = async (req, res) => {
-  try {
-    const { name, tags } = req.body;
-    let imageUrl = null;
+// exports.createCategory = async (req, res) => {
+//   try {
+//     const { name, tags } = req.body;
+//     let imageUrl = null;
 
-    if (!name) {
-      return res.status(400).json({ success: false, message: "Category name is required" });
-    }
+//     if (!name) {
+//       return res.status(400).json({ success: false, message: "Category name is required" });
+//     }
 
-    // ✅ Upload image to Cloudinary (if provided)
-    if (req.file) {
-      const uploadResult = await cloudinary.uploader.upload(req.file.path, {
-        folder: "categories",
-      });
-      imageUrl = uploadResult.secure_url;
-    }
+//     // ✅ Upload image to Cloudinary (if provided)
+//     if (req.file) {
+//       const uploadResult = await cloudinary.uploader.upload(req.file.path, {
+//         folder: "categories",
+//       });
+//       imageUrl = uploadResult.secure_url;
+//     }
 
-    // ✅ Try to generate tags automatically from OpenStreetMap API
-    let autoTags = [];
-    try {
-      const tagResponse = await axios.get(
-        `https://taginfo.openstreetmap.org/api/4/key/values?key=${encodeURIComponent(name)}&page=1&rp=10`
-      );
+//     // ✅ Try to generate tags automatically from OpenStreetMap API
+//     let autoTags = [];
+//     try {
+//       const tagResponse = await axios.get(
+//         `https://taginfo.openstreetmap.org/api/4/key/values?key=${encodeURIComponent(name)}&page=1&rp=10`
+//       );
 
-      if (tagResponse.data?.data?.length > 0) {
-        autoTags = tagResponse.data.data
-          .slice(0, 10)
-          .map((item) => item.value)
-          .filter(Boolean);
-      }
-    } catch (err) {
-      console.log("⚠️ TagInfo API error:", err.message);
-    }
+//       if (tagResponse.data?.data?.length > 0) {
+//         autoTags = tagResponse.data.data
+//           .slice(0, 10)
+//           .map((item) => item.value)
+//           .filter(Boolean);
+//       }
+//     } catch (err) {
+//       console.log("⚠️ TagInfo API error:", err.message);
+//     }
 
-    // ✅ If autoTags are empty, use manual tags from request body
-    const finalTags = autoTags.length > 0 ? autoTags : tags || [];
+//     // ✅ If autoTags are empty, use manual tags from request body
+//     const finalTags = autoTags.length > 0 ? autoTags : tags || [];
 
-    // ✅ Save category in MongoDB
-    const newCategory = new Category({
-      name,
-      image: imageUrl,
-      tags: finalTags,
-    });
+//     // ✅ Save category in MongoDB
+//     const newCategory = new Category({
+//       name,
+//       image: imageUrl,
+//       tags: finalTags,
+//     });
 
-    await newCategory.save();
+//     await newCategory.save();
 
-    return res.status(201).json({
-      success: true,
-      message: "Category created successfully",
-      data: newCategory,
-    });
-  } catch (error) {
-    console.error("Error creating category:", error);
-    res.status(500).json({ success: false, message: "Internal server error", error: error.message });
-  }
-};
+//     return res.status(201).json({
+//       success: true,
+//       message: "Category created successfully",
+//       data: newCategory,
+//     });
+//   } catch (error) {
+//     console.error("Error creating category:", error);
+//     res.status(500).json({ success: false, message: "Internal server error", error: error.message });
+//   }
+// };
 //-------------------------------GET ALL CATEGORY---------------------------------
 exports.getAllCategories = async (req, res) => {
   try {

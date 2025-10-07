@@ -480,8 +480,8 @@ exports.getInterestedUsers = async (req, res) => {
       radius_km = 10,
       categoryId,
       tags = [],
-      languages = [], // <-- new
-      age,            // <-- new
+      languages = [], // array of languages
+      age,            // exact age filter
       page = 1,
       limit = 10,
       userId,
@@ -489,6 +489,9 @@ exports.getInterestedUsers = async (req, res) => {
     } = req.body;
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    console.log("===== getInterestedUsers called =====");
+    console.log("Request body:", req.body);
 
     // ---------- Step 1: Build interests filter ----------
     let interestsFilter = [];
@@ -502,36 +505,40 @@ exports.getInterestedUsers = async (req, res) => {
       }
 
       if (category.name) interestsFilter.push(category.name.toLowerCase());
-      if (Array.isArray(category.tags)) interestsFilter.push(...category.tags.map(t => t.toLowerCase()));
+      if (Array.isArray(category.tags)) {
+        interestsFilter.push(...category.tags.map(t => t.toLowerCase()));
+      }
     }
 
-    if (tags && tags.length) {
-      interestsFilter.push(...tags.map(t => t.toLowerCase()));
-    }
+    if (tags.length) interestsFilter.push(...tags.map(t => t.toLowerCase()));
 
-    interestsFilter = [...new Set(interestsFilter)]; // remove duplicates
+    // Remove duplicates
+    interestsFilter = [...new Set(interestsFilter)];
+    console.log("Final interests filter:", interestsFilter);
 
     // ---------- Step 2: Build user query ----------
     const query = {};
 
-    if (excludeSelf && userId) {
-      query._id = { $ne: userId };
-    }
+    if (excludeSelf && userId) query._id = { $ne: userId };
+    if (interestsFilter.length) query.interests = { $in: interestsFilter };
 
-    if (interestsFilter.length) {
-      query.interests = { $in: interestsFilter };
-    }
-
-    // ---------- Step 3: Language filter (case-insensitive) ----------
+    // ---------- Step 3: Language filter ----------
     if (languages.length) {
-      query.languages = { 
-        $in: languages.map(l => new RegExp(`^${l}$`, "i"))
-      };
+      const regexLanguages = languages
+        .filter(l => typeof l === "string" && l.trim())
+        .map(l => new RegExp(`^${l.trim()}$`, "i"));
+
+      if (regexLanguages.length) {
+        query.languages = { $in: regexLanguages };
+      }
+
+      console.log("Applying language filter:", regexLanguages);
     }
 
     // ---------- Step 4: Age filter ----------
     if (age !== undefined && age !== null) {
       query.age = age;
+      console.log("Applying age filter:", age);
     }
 
     // ---------- Step 5: Location filter ----------
@@ -546,7 +553,10 @@ exports.getInterestedUsers = async (req, res) => {
           ],
         },
       };
+      console.log(`Applying location filter: center=[${longitude},${latitude}], radius_km=${radius_km}`);
     }
+
+    console.log("MongoDB user query:", JSON.stringify(query, null, 2));
 
     // ---------- Step 6: Fetch users ----------
     let users = await User.find(query)
@@ -557,11 +567,12 @@ exports.getInterestedUsers = async (req, res) => {
 
     // ---------- Step 7: Distance calculation ----------
     if (calculateDistance) {
-      const toRad = (v) => (v * Math.PI) / 180;
+      const toRad = v => (v * Math.PI) / 180;
       users.forEach(u => {
         if (u.lastLocation?.coords?.coordinates) {
           const [lon2, lat2] = u.lastLocation.coords.coordinates;
-          const lat1 = parseFloat(latitude), lon1 = parseFloat(longitude);
+          const lat1 = parseFloat(latitude),
+                lon1 = parseFloat(longitude);
           const R = 6371;
           const dLat = toRad(lat2 - lat1);
           const dLon = toRad(lon2 - lon1);
@@ -591,6 +602,7 @@ exports.getInterestedUsers = async (req, res) => {
       limit: parseInt(limit),
       users,
     });
+
   } catch (err) {
     console.error("getInterestedUsers error:", err);
     res.status(500).json({ success: false, message: err.message });
@@ -868,4 +880,3 @@ exports.getservicbyId = async (req, res) => {
     });
   }
 };
-

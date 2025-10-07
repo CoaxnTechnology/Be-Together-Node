@@ -41,7 +41,7 @@ app.use("/api/onbording", userTags);
 app.use("/api",ReviewRoutes)
 //app.use("/api/notifications", notificationRoutes);
 //----------------------Admin API ROutes
-app.use("/api/admin", AdminRoutes);
+//app.use("/api/admin", AdminRoutes);
 // app.use("/api/admin/services", serviceRoutes);
 
 

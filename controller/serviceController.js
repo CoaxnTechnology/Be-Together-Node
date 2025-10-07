@@ -864,7 +864,7 @@ exports.getservicbyId = async (req, res) => {
     if (reviews.length > 0) {
       const total = reviews.reduce((sum, r) => sum + r.rating, 0);
       avgRating = total / reviews.length;
-      avgRating = avgRating.toFixed(1);
+      avgRating = Number(avgRating.toFixed(1));
     }
 
     return res.json({

@@ -480,8 +480,8 @@ exports.getInterestedUsers = async (req, res) => {
       radius_km = 10,
       categoryId,
       tags = [],
-      languages = [], // array of languages to filter
-      age,           // exact age to filter
+      languages = [], // <-- new
+      age,            // <-- new
       page = 1,
       limit = 10,
       userId,
@@ -497,28 +497,42 @@ exports.getInterestedUsers = async (req, res) => {
       const category = await Category.findById(categoryId)
         .select("name tags")
         .lean();
-      if (category) {
-        if (category.name) interestsFilter.push(category.name.toLowerCase());
-        if (Array.isArray(category.tags)) interestsFilter.push(...category.tags.map(t => t.toLowerCase()));
+      if (!category) {
+        return res.status(404).json({ success: false, message: "Category not found" });
       }
+
+      if (category.name) interestsFilter.push(category.name.toLowerCase());
+      if (Array.isArray(category.tags)) interestsFilter.push(...category.tags.map(t => t.toLowerCase()));
     }
 
-    if (tags.length) interestsFilter.push(...tags.map(t => t.toLowerCase()));
+    if (tags && tags.length) {
+      interestsFilter.push(...tags.map(t => t.toLowerCase()));
+    }
 
-    interestsFilter = [...new Set(interestsFilter)];
+    interestsFilter = [...new Set(interestsFilter)]; // remove duplicates
 
     // ---------- Step 2: Build user query ----------
     const query = {};
 
-    if (excludeSelf && userId) query._id = { $ne: userId };
+    if (excludeSelf && userId) {
+      query._id = { $ne: userId };
+    }
 
-    if (interestsFilter.length) query.interests = { $in: interestsFilter };
+    if (interestsFilter.length) {
+      query.interests = { $in: interestsFilter };
+    }
 
-    // ---------- Step 3: Language filter ----------
-    if (languages.length) query.languages = { $in: languages.map(l => l.toLowerCase()) };
+    // ---------- Step 3: Language filter (case-insensitive) ----------
+    if (languages.length) {
+      query.languages = { 
+        $in: languages.map(l => new RegExp(`^${l}$`, "i"))
+      };
+    }
 
     // ---------- Step 4: Age filter ----------
-    if (age !== undefined) query.age = parseInt(age);
+    if (age !== undefined && age !== null) {
+      query.age = age;
+    }
 
     // ---------- Step 5: Location filter ----------
     let calculateDistance = false;
@@ -544,31 +558,32 @@ exports.getInterestedUsers = async (req, res) => {
     // ---------- Step 7: Distance calculation ----------
     if (calculateDistance) {
       const toRad = (v) => (v * Math.PI) / 180;
-      users.forEach((u) => {
+      users.forEach(u => {
         if (u.lastLocation?.coords?.coordinates) {
           const [lon2, lat2] = u.lastLocation.coords.coordinates;
-          const lat1 = parseFloat(latitude),
-            lon1 = parseFloat(longitude);
+          const lat1 = parseFloat(latitude), lon1 = parseFloat(longitude);
           const R = 6371;
           const dLat = toRad(lat2 - lat1);
           const dLon = toRad(lon2 - lon1);
           const a =
             Math.sin(dLat / 2) ** 2 +
             Math.cos(toRad(lat1)) *
-              Math.cos(toRad(lat2)) *
-              Math.sin(dLon / 2) ** 2;
+            Math.cos(toRad(lat2)) *
+            Math.sin(dLon / 2) ** 2;
           const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
           u.distance_km = Math.round(R * c * 100) / 100;
         } else {
           u.distance_km = null;
         }
       });
+
       users.sort((a, b) => (a.distance_km || 9999) - (b.distance_km || 9999));
     }
 
     // ---------- Step 8: Total count ----------
     const total = await User.countDocuments(query);
 
+    // ---------- Step 9: Return response ----------
     res.json({
       success: true,
       total,
@@ -581,6 +596,7 @@ exports.getInterestedUsers = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
+
 
 // ----------- Get All Services -------------
 exports.getAllServices = async (req, res) => {

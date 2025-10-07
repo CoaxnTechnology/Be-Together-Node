@@ -19,6 +19,7 @@ const userSchema = new mongoose.Schema(
     profile_image: { type: String, default: null },
     bio: { type: String, default: null },
     city: { type: String, default: null, index: true },
+    age: { type: Number, default: null },
 
     register_type: {
       type: String,

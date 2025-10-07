@@ -11,6 +11,7 @@ const categorySchema = new mongoose.Schema({
   name: { type: String, required: true },
   image: { type: String, default: null },
   tags: [{ type: String }], // object array with only name
+ imagePublicId: { type: String },
   created_at: { type: Date, default: Date.now },
   updated_at: { type: Date, default: Date.now },
 });

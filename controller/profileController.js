@@ -62,7 +62,7 @@ async function deleteCloudinaryImage(publicId) {
 exports.editProfile = async (req, res) => {
   try {
     // don't set defaults here; we need to detect if a field was provided
-    let { email, name, bio, city } = req.body;
+    let { email, name, bio, city,age } = req.body;
 
     // helper: try parse JSON string fields (common with multipart/form-data)
     const tryParse = (val) => {
@@ -110,6 +110,17 @@ exports.editProfile = async (req, res) => {
     if (typeof name === "string" && name.trim() !== "") user.name = name.trim();
     if (typeof bio === "string") user.bio = bio.trim();
     if (typeof city === "string") user.city = city.trim();
+    if (age !== undefined) {
+      const ageNumber = Number(age);
+      if (isNaN(ageNumber) || ageNumber < 0) {
+        return res.status(400).json({
+          isSuccess: false,
+          message: "Age must be a valid non-negative number",
+          data: null,
+        });
+      }
+      user.age = ageNumber;
+    }
 
     // keep track of old Cloudinary public_id (if any) to delete later
     let oldPublicId = null;

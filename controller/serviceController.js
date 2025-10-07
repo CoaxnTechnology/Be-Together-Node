@@ -480,6 +480,8 @@ exports.getInterestedUsers = async (req, res) => {
       radius_km = 10,
       categoryId,
       tags = [],
+      languages = [], // array of languages to filter
+      age,           // exact age to filter
       page = 1,
       limit = 10,
       userId,
@@ -488,9 +490,6 @@ exports.getInterestedUsers = async (req, res) => {
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    console.log("===== getInterestedUsers called =====");
-    console.log("Request body:", req.body);
-
     // ---------- Step 1: Build interests filter ----------
     let interestsFilter = [];
 
@@ -498,51 +497,30 @@ exports.getInterestedUsers = async (req, res) => {
       const category = await Category.findById(categoryId)
         .select("name tags")
         .lean();
-      if (!category) {
-        return res
-          .status(404)
-          .json({ success: false, message: "Category not found" });
-      }
-
-      console.log("Selected category:", category.name);
-
-      // ✅ Category name ko bhi filter me daal do
-      if (category.name) {
-        interestsFilter.push(category.name.toLowerCase());
-      }
-
-      // ✅ Category ke tags bhi allow karo
-      if (Array.isArray(category.tags)) {
-        interestsFilter.push(...category.tags.map((t) => t.toLowerCase()));
+      if (category) {
+        if (category.name) interestsFilter.push(category.name.toLowerCase());
+        if (Array.isArray(category.tags)) interestsFilter.push(...category.tags.map(t => t.toLowerCase()));
       }
     }
 
-    if (tags && tags.length) {
-      interestsFilter.push(...tags.map((t) => t.toLowerCase()));
-      console.log("Additional tags from request:", tags);
-    }
+    if (tags.length) interestsFilter.push(...tags.map(t => t.toLowerCase()));
 
-    // ✅ Remove duplicates
     interestsFilter = [...new Set(interestsFilter)];
-    console.log("Final interests filter:", interestsFilter);
 
     // ---------- Step 2: Build user query ----------
     const query = {};
 
-    if (excludeSelf && userId) {
-      query._id = { $ne: userId };
-      console.log("Excluding self userId:", userId);
-    }
+    if (excludeSelf && userId) query._id = { $ne: userId };
 
-    if (interestsFilter.length) {
-      // ✅ User ke interests (array of strings) me category name ya tags hona chahiye
-      query.interests = { $in: interestsFilter };
-      console.log("Applying interests filter:", interestsFilter);
-    } else {
-      console.log("No interests filter → will fetch all users within location");
-    }
+    if (interestsFilter.length) query.interests = { $in: interestsFilter };
 
-    // ---------- Step 3: Location filter ----------
+    // ---------- Step 3: Language filter ----------
+    if (languages.length) query.languages = { $in: languages.map(l => l.toLowerCase()) };
+
+    // ---------- Step 4: Age filter ----------
+    if (age !== undefined) query.age = parseInt(age);
+
+    // ---------- Step 5: Location filter ----------
     let calculateDistance = false;
     if (Number(latitude) !== 0 && Number(longitude) !== 0) {
       calculateDistance = true;
@@ -554,25 +532,16 @@ exports.getInterestedUsers = async (req, res) => {
           ],
         },
       };
-      console.log(
-        `Applying location filter: center=[${longitude},${latitude}], radius_km=${radius_km}`
-      );
-    } else {
-      console.log("Skipping location filter (lat/lon = 0)");
     }
 
-    console.log("MongoDB user query:", JSON.stringify(query, null, 2));
-
-    // ---------- Step 4: Fetch users ----------
+    // ---------- Step 6: Fetch users ----------
     let users = await User.find(query)
-      .select("name email profile_image interests lastLocation")
+      .select("name email profile_image interests languages age lastLocation")
       .skip(skip)
       .limit(parseInt(limit))
       .lean();
 
-    console.log(`Fetched ${users.length} users before distance calculation`);
-
-    // ---------- Step 5: Distance calculation ----------
+    // ---------- Step 7: Distance calculation ----------
     if (calculateDistance) {
       const toRad = (v) => (v * Math.PI) / 180;
       users.forEach((u) => {
@@ -594,16 +563,12 @@ exports.getInterestedUsers = async (req, res) => {
           u.distance_km = null;
         }
       });
-
       users.sort((a, b) => (a.distance_km || 9999) - (b.distance_km || 9999));
-      console.log("Users sorted by distance");
     }
 
-    // ---------- Step 6: Total count ----------
+    // ---------- Step 8: Total count ----------
     const total = await User.countDocuments(query);
-    console.log(`Total matching users: ${total}`);
 
-    // ---------- Step 7: Return response ----------
     res.json({
       success: true,
       total,

@@ -7,6 +7,6 @@ const upload = multer({ dest: "uploads/" });
 
 // POST /api/admin/category/create
 //router.post("/create", upload.single("image"), createCategory);
-router.get("/getall", getAllCategories);
+//router.get("/getall", getAllCategories);
 
 module.exports = router;

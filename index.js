@@ -11,6 +11,7 @@ const userTags = require("./routes/userTags");
 const locationRoutes = require("./routes/location");
 const ReviewRoutes = require("./routes/ReviewRoutes");
 const notificationRoutes= require("./routes/notificationRoutes")
+const AdminRoutes = require("./routes/AdminRoutes");
 const app = express();
 
 // Middleware
@@ -39,6 +40,11 @@ app.use("/api/onbording", userTags);
  app.use("/api/user", locationRoutes);
 app.use("/api",ReviewRoutes)
 //app.use("/api/notifications", notificationRoutes);
+//----------------------Admin API ROutes
+app.use("/api/admin", AdminRoutes);
+// app.use("/api/admin/services", serviceRoutes);
+
+
 // Connect to MongoDB (live Atlas)
 mongoose
   .connect(process.env.MONGO_URI, {

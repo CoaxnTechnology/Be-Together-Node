@@ -209,8 +209,9 @@ exports.createService = async (req, res) => {
     await user.save();
 
     console.log("Service created successfully:", createdService._id);
+     console.log("Sending notification...");
     notificationController.notifyOnNewService(createdService);
-
+    console.log("Notification triggered");
     return res.json({
       isSuccess: true,
       message: "Service created successfully",

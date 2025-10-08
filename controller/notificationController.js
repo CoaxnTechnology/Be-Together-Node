@@ -55,13 +55,26 @@ function buildServiceViewMessage(viewer, service) {
 // Common notification handler for services
 async function notifyUsersForService(service, scenarioType) {
   try {
+    console.log(
+      `🚀 Starting notification for service "${service.title}" [${scenarioType}]`
+    );
+
     const users = await User.find({
       interests: { $in: service.tags },
       is_active: true,
     });
 
+    console.log(`Found ${users.length} active users with matching interests`);
+
     for (const user of users) {
-      if (!user.fcmToken || !user.lastLocation) continue;
+      if (!user.fcmToken) {
+        console.log(`⚠️ Skipping ${user.name} - no FCM token`);
+        continue;
+      }
+      if (!user.lastLocation || !user.lastLocation.coords) {
+        console.log(`⚠️ Skipping ${user.name} - no last location`);
+        continue;
+      }
 
       const dist = getDistanceFromLatLonInKm(
         service.latitude,
@@ -70,10 +83,20 @@ async function notifyUsersForService(service, scenarioType) {
         user.lastLocation.coords.coordinates[0]
       );
 
-      if (dist > 10) continue;
+      if (dist > 10) {
+        console.log(
+          `⏩ Skipping ${user.name} - distance ${dist.toFixed(
+            2
+          )}km > 10km`
+        );
+        continue;
+      }
 
       const key = `${scenarioType}-${user._id}-${service._id}`;
-      if (notifiedMap[key]) continue;
+      if (notifiedMap[key]) {
+        console.log(`⏱ Already notified ${user.name} recently, skipping`);
+        continue;
+      }
 
       let message;
       if (scenarioType === "new") {
@@ -93,17 +116,26 @@ async function notifyUsersForService(service, scenarioType) {
         },
       };
 
-      await admin.messaging().sendMulticast(payload);
-      notifiedMap[key] = true;
-
-      console.log(
-        `✅ Notified ${user.name} for ${scenarioType} of "${service.title}"`
-      );
+      try {
+        await admin.messaging().sendMulticast(payload);
+        notifiedMap[key] = true;
+        console.log(
+          `✅ Notified ${user.name} (${user._id}) for "${service.title}" [${scenarioType}]`
+        );
+      } catch (err) {
+        console.error(
+          `❌ Failed to send notification to ${user.name} (${user._id}):`,
+          err.message
+        );
+      }
     }
+
+    console.log(`🎯 Finished notification for service "${service.title}"`);
   } catch (err) {
-    console.error(`❌ Notification error [${scenarioType}]:`, err.message);
+    console.error(`❌ Notification error [${scenarioType}] for service "${service.title}":`, err.message);
   }
 }
+
 
 // New: Notify nearby users when a user updates interests
 async function notifyNearbyUsersOnInterestUpdate(user) {

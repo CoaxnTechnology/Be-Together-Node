@@ -66,6 +66,9 @@ async function notifyUsersForService(service, scenarioType) {
 
     console.log(`Found ${users.length} active users with matching interests`);
 
+    let notifiedUsers = [];
+    let fcmCount = 0;
+
     for (const user of users) {
       if (!user.fcmToken) {
         console.log(`⚠️ Skipping ${user.name} - no FCM token`);
@@ -85,9 +88,7 @@ async function notifyUsersForService(service, scenarioType) {
 
       if (dist > 10) {
         console.log(
-          `⏩ Skipping ${user.name} - distance ${dist.toFixed(
-            2
-          )}km > 10km`
+          `⏩ Skipping ${user.name} - distance ${dist.toFixed(2)}km > 10km`
         );
         continue;
       }
@@ -119,6 +120,8 @@ async function notifyUsersForService(service, scenarioType) {
       try {
         await admin.messaging().sendMulticast(payload);
         notifiedMap[key] = true;
+        notifiedUsers.push(user.name);
+        fcmCount += 1;
         console.log(
           `✅ Notified ${user.name} (${user._id}) for "${service.title}" [${scenarioType}]`
         );
@@ -130,11 +133,18 @@ async function notifyUsersForService(service, scenarioType) {
       }
     }
 
-    console.log(`🎯 Finished notification for service "${service.title}"`);
+    console.log(
+      `🎯 Finished notification for service "${service.title}". FCM sent to ${fcmCount} users:`,
+      notifiedUsers
+    );
   } catch (err) {
-    console.error(`❌ Notification error [${scenarioType}] for service "${service.title}":`, err.message);
+    console.error(
+      `❌ Notification error [${scenarioType}] for service "${service.title}":`,
+      err.message
+    );
   }
 }
+
 
 
 // New: Notify nearby users when a user updates interests

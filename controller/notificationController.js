@@ -64,16 +64,15 @@ async function notifyUsersForService(service, scenarioType) {
 
     console.log(`Found ${users.length} active users with matching interests`);
 
-    let fcmCount = 0;
-    const notifiedUsers = [];
+    let notifiedUsers = [];
 
     for (const user of users) {
       if (!user.fcmToken) {
-        console.log(`⚠️ Skipping ${user.name} (${user._id}) - no FCM token`);
+        console.log(`⚠️ Skipping ${user.name} - no FCM token`);
         continue;
       }
       if (!user.lastLocation || !user.lastLocation.coords) {
-        console.log(`⚠️ Skipping ${user.name} (${user._id}) - no last location`);
+        console.log(`⚠️ Skipping ${user.name} - no last location`);
         continue;
       }
 
@@ -85,22 +84,18 @@ async function notifyUsersForService(service, scenarioType) {
       );
 
       if (dist > 10) {
-        console.log(`⏩ Skipping ${user.name} (${user._id}) - distance ${dist.toFixed(2)}km > 10km`);
+        console.log(`⏩ Skipping ${user.name} - distance ${dist.toFixed(2)}km > 10km`);
         continue;
       }
 
       const key = `${scenarioType}-${user._id}-${service._id}`;
-      if (notifiedMap[key]) {
-        console.log(`⏱ Already notified ${user.name} (${user._id}) recently, skipping`);
+      if (!global.notifiedMap) global.notifiedMap = {};
+      if (global.notifiedMap[key]) {
+        console.log(`⏱ Already notified ${user.name} recently, skipping`);
         continue;
       }
 
-      let message;
-      if (scenarioType === "new") {
-        message = buildNewServiceMessage(service, dist);
-      } else {
-        message = buildUpdateMessage(service);
-      }
+      let message = scenarioType === "new" ? buildNewServiceMessage(service, dist) : buildUpdateMessage(service);
 
       const payload = {
         tokens: [user.fcmToken],
@@ -115,9 +110,8 @@ async function notifyUsersForService(service, scenarioType) {
 
       try {
         await admin.messaging().sendMulticast(payload);
-        notifiedMap[key] = true;
-        fcmCount++;
-        notifiedUsers.push({ name: user.name, userId: user._id });
+        global.notifiedMap[key] = true;
+        notifiedUsers.push(user.name); // track who was notified
         console.log(`✅ Notified ${user.name} (${user._id}) for "${service.title}" [${scenarioType}]`);
       } catch (err) {
         console.error(`❌ Failed to send notification to ${user.name} (${user._id}):`, err.message);
@@ -125,9 +119,13 @@ async function notifyUsersForService(service, scenarioType) {
     }
 
     console.log(`🎯 Finished notification for service "${service.title}"`);
-    console.log(`📣 FCM sent to ${fcmCount} users:`, notifiedUsers);
+    console.log(`📣 Total users notified: ${notifiedUsers.length}`);
+    if (notifiedUsers.length > 0) console.log(`Users notified: ${notifiedUsers.join(", ")}`);
+
+    return notifiedUsers.length;
   } catch (err) {
     console.error(`❌ Notification error [${scenarioType}] for service "${service.title}":`, err.message);
+    return 0;
   }
 }
 

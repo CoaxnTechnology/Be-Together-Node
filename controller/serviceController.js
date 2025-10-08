@@ -210,12 +210,8 @@ exports.createService = async (req, res) => {
 
     console.log("Service created successfully:", createdService._id);
     console.log("Sending notification...");
-    notificationController.notifyOnNewService(createdService);
+    const notifiedCount = await notifyUsersForService(createdService, "new");
     console.log("Notification triggered");
-    const notifiedCount = Object.keys(notifiedMap).filter((key) =>
-      key.includes(createdService._id.toString())
-    ).length;
-
     console.log(
       `📣 Total users notified for service "${createdService.title}": ${notifiedCount}`
     );

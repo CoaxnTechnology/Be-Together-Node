@@ -204,11 +204,14 @@ exports.getUserById = async (req, res) => {
         .json({ success: false, message: "User ID is required" });
     }
 
-    // ✅ Populate *all* fields from Service model
     const user = await User.findById(id)
       .populate({
-        path: "services", // must match the field name in your User schema
-        model: "Service", // ensure this matches your service model name
+        path: "services",      // field in User schema
+        model: "Service",      // your Service model
+        populate: [
+          { path: "category", select: "name" }, // get only category name
+          { path: "owner", select: "name" },    // get only owner name
+        ],
       })
       .lean();
 

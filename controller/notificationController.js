@@ -1,5 +1,6 @@
 // controllers/notificationController.js
-const admin = require("firebase-admin");
+const admin = require("../utils/firebase"); // ✅ use initialized admin
+
 const User = require("../model/User");
 const Service = require("../model/Service");
 const Category = require("../model/Category");

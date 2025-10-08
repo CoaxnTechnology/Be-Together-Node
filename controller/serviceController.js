@@ -812,7 +812,7 @@ function getDistanceKm(lat1, lon1, lat2, lon2) {
 
 exports.getservicbyId = async (req, res) => {
   try {
-    const { serviceId, latitude, longitude } = req.body;
+    const { serviceId, latitude, longitude, viewerId } = req.body; // <-- add viewerId
 
     if (!serviceId) {
       return res.status(400).json({
@@ -837,8 +837,15 @@ exports.getservicbyId = async (req, res) => {
     }
 
     // Populate owner and category
-    await service.populate("owner", "name profile_image");
+    await service.populate("owner", "name profile_image notifyOnProfileView fcmToken");
     await service.populate("category", "name");
+
+    // Notify owner if viewerId is provided
+    if (viewerId) {
+      notifyOnServiceView(serviceId, viewerId).catch(err =>
+        console.error("Notification error:", err)
+      );
+    }
 
     // Calculate distance if user's location is provided
     let distance_km = null;
@@ -868,7 +875,7 @@ exports.getservicbyId = async (req, res) => {
         reviews,
         totalReviews: reviews.length,
         averageRating: avgRating,
-        distance_km, // ✅ distance included
+        distance_km,
       },
     });
   } catch (err) {

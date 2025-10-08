@@ -55,9 +55,7 @@ function buildServiceViewMessage(viewer, service) {
 // Common notification handler for services
 async function notifyUsersForService(service, scenarioType) {
   try {
-    console.log(
-      `🚀 Starting notification for service "${service.title}" [${scenarioType}]`
-    );
+    console.log(`🚀 Starting notification for service "${service.title}" [${scenarioType}]`);
 
     const users = await User.find({
       interests: { $in: service.tags },
@@ -66,16 +64,16 @@ async function notifyUsersForService(service, scenarioType) {
 
     console.log(`Found ${users.length} active users with matching interests`);
 
-    let notifiedUsers = [];
     let fcmCount = 0;
+    const notifiedUsers = [];
 
     for (const user of users) {
       if (!user.fcmToken) {
-        console.log(`⚠️ Skipping ${user.name} - no FCM token`);
+        console.log(`⚠️ Skipping ${user.name} (${user._id}) - no FCM token`);
         continue;
       }
       if (!user.lastLocation || !user.lastLocation.coords) {
-        console.log(`⚠️ Skipping ${user.name} - no last location`);
+        console.log(`⚠️ Skipping ${user.name} (${user._id}) - no last location`);
         continue;
       }
 
@@ -87,15 +85,13 @@ async function notifyUsersForService(service, scenarioType) {
       );
 
       if (dist > 10) {
-        console.log(
-          `⏩ Skipping ${user.name} - distance ${dist.toFixed(2)}km > 10km`
-        );
+        console.log(`⏩ Skipping ${user.name} (${user._id}) - distance ${dist.toFixed(2)}km > 10km`);
         continue;
       }
 
       const key = `${scenarioType}-${user._id}-${service._id}`;
       if (notifiedMap[key]) {
-        console.log(`⏱ Already notified ${user.name} recently, skipping`);
+        console.log(`⏱ Already notified ${user.name} (${user._id}) recently, skipping`);
         continue;
       }
 
@@ -120,30 +116,21 @@ async function notifyUsersForService(service, scenarioType) {
       try {
         await admin.messaging().sendMulticast(payload);
         notifiedMap[key] = true;
-        notifiedUsers.push(user.name);
-        fcmCount += 1;
-        console.log(
-          `✅ Notified ${user.name} (${user._id}) for "${service.title}" [${scenarioType}]`
-        );
+        fcmCount++;
+        notifiedUsers.push({ name: user.name, userId: user._id });
+        console.log(`✅ Notified ${user.name} (${user._id}) for "${service.title}" [${scenarioType}]`);
       } catch (err) {
-        console.error(
-          `❌ Failed to send notification to ${user.name} (${user._id}):`,
-          err.message
-        );
+        console.error(`❌ Failed to send notification to ${user.name} (${user._id}):`, err.message);
       }
     }
 
-    console.log(
-      `🎯 Finished notification for service "${service.title}". FCM sent to ${fcmCount} users:`,
-      notifiedUsers
-    );
+    console.log(`🎯 Finished notification for service "${service.title}"`);
+    console.log(`📣 FCM sent to ${fcmCount} users:`, notifiedUsers);
   } catch (err) {
-    console.error(
-      `❌ Notification error [${scenarioType}] for service "${service.title}":`,
-      err.message
-    );
+    console.error(`❌ Notification error [${scenarioType}] for service "${service.title}":`, err.message);
   }
 }
+
 
 
 

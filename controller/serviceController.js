@@ -209,9 +209,17 @@ exports.createService = async (req, res) => {
     await user.save();
 
     console.log("Service created successfully:", createdService._id);
-     console.log("Sending notification...");
+    console.log("Sending notification...");
     notificationController.notifyOnNewService(createdService);
     console.log("Notification triggered");
+    const notifiedCount = Object.keys(notifiedMap).filter((key) =>
+      key.includes(createdService._id.toString())
+    ).length;
+
+    console.log(
+      `📣 Total users notified for service "${createdService.title}": ${notifiedCount}`
+    );
+    console.log("Notification process completed ✅");
     return res.json({
       isSuccess: true,
       message: "Service created successfully",
@@ -482,7 +490,7 @@ exports.getInterestedUsers = async (req, res) => {
       categoryId,
       tags = [],
       languages = [], // array of languages
-      age,            // exact age filter
+      age, // exact age filter
       page = 1,
       limit = 10,
       userId,
@@ -502,16 +510,18 @@ exports.getInterestedUsers = async (req, res) => {
         .select("name tags")
         .lean();
       if (!category) {
-        return res.status(404).json({ success: false, message: "Category not found" });
+        return res
+          .status(404)
+          .json({ success: false, message: "Category not found" });
       }
 
       if (category.name) interestsFilter.push(category.name.toLowerCase());
       if (Array.isArray(category.tags)) {
-        interestsFilter.push(...category.tags.map(t => t.toLowerCase()));
+        interestsFilter.push(...category.tags.map((t) => t.toLowerCase()));
       }
     }
 
-    if (tags.length) interestsFilter.push(...tags.map(t => t.toLowerCase()));
+    if (tags.length) interestsFilter.push(...tags.map((t) => t.toLowerCase()));
 
     // Remove duplicates
     interestsFilter = [...new Set(interestsFilter)];
@@ -526,8 +536,8 @@ exports.getInterestedUsers = async (req, res) => {
     // ---------- Step 3: Language filter ----------
     if (languages.length) {
       const regexLanguages = languages
-        .filter(l => typeof l === "string" && l.trim())
-        .map(l => new RegExp(`^${l.trim()}$`, "i"));
+        .filter((l) => typeof l === "string" && l.trim())
+        .map((l) => new RegExp(`^${l.trim()}$`, "i"));
 
       if (regexLanguages.length) {
         query.languages = { $in: regexLanguages };
@@ -554,7 +564,9 @@ exports.getInterestedUsers = async (req, res) => {
           ],
         },
       };
-      console.log(`Applying location filter: center=[${longitude},${latitude}], radius_km=${radius_km}`);
+      console.log(
+        `Applying location filter: center=[${longitude},${latitude}], radius_km=${radius_km}`
+      );
     }
 
     console.log("MongoDB user query:", JSON.stringify(query, null, 2));
@@ -568,20 +580,20 @@ exports.getInterestedUsers = async (req, res) => {
 
     // ---------- Step 7: Distance calculation ----------
     if (calculateDistance) {
-      const toRad = v => (v * Math.PI) / 180;
-      users.forEach(u => {
+      const toRad = (v) => (v * Math.PI) / 180;
+      users.forEach((u) => {
         if (u.lastLocation?.coords?.coordinates) {
           const [lon2, lat2] = u.lastLocation.coords.coordinates;
           const lat1 = parseFloat(latitude),
-                lon1 = parseFloat(longitude);
+            lon1 = parseFloat(longitude);
           const R = 6371;
           const dLat = toRad(lat2 - lat1);
           const dLon = toRad(lon2 - lon1);
           const a =
             Math.sin(dLat / 2) ** 2 +
             Math.cos(toRad(lat1)) *
-            Math.cos(toRad(lat2)) *
-            Math.sin(dLon / 2) ** 2;
+              Math.cos(toRad(lat2)) *
+              Math.sin(dLon / 2) ** 2;
           const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
           u.distance_km = Math.round(R * c * 100) / 100;
         } else {
@@ -603,13 +615,11 @@ exports.getInterestedUsers = async (req, res) => {
       limit: parseInt(limit),
       users,
     });
-
   } catch (err) {
     console.error("getInterestedUsers error:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 };
-
 
 // ----------- Get All Services -------------
 exports.getAllServices = async (req, res) => {
@@ -838,12 +848,15 @@ exports.getservicbyId = async (req, res) => {
     }
 
     // Populate owner and category
-    await service.populate("owner", "name profile_image notifyOnProfileView fcmToken");
+    await service.populate(
+      "owner",
+      "name profile_image notifyOnProfileView fcmToken"
+    );
     await service.populate("category", "name");
 
     // Notify owner if viewerId is provided
     if (viewerId) {
-      notifyOnServiceView(serviceId, viewerId).catch(err =>
+      notifyOnServiceView(serviceId, viewerId).catch((err) =>
         console.error("Notification error:", err)
       );
     }

@@ -6,7 +6,6 @@ const mongoose = require("mongoose");
 const notificationController = require("./notificationController");
 const { notifyOnNewService } = require("./notificationController");
 
-
 const Review = require("../model/review");
 // Helper to parse JSON safely
 function tryParse(val) {
@@ -789,16 +788,14 @@ exports.updateService = async (req, res) => {
       { new: true }
     );
     console.log("Sending notification...");
-    const notifiedCount = const notificationController = require('./notificationController'); // path adjust karo
-
+    const notifiedCount = await notificationController.notifyOnUpdate(
+      updatedService
+    );
     console.log("Notification triggered");
     console.log(
-      `📣 Total users notified for service "${createdService.title}": ${notifiedCount}`
+      `📣 Total users notified for service "${updatedService.title}": ${notifiedCount}`
     );
     console.log("Notification process completed no errors ✅");
-
-
-   
 
     return res.json({
       isSuccess: true,

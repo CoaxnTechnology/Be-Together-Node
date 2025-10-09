@@ -277,7 +277,7 @@ async function notifyOnServiceView(service, viewer) {
       },
     };
 
-    const response = await admin.messaging().sendMulticast(payload);
+    const response = await admin.messaging().sendEachForMulticast(payload);
 
     console.log(
       `✅ Notified ${owner.name}: ${response.successCount} success, ${response.failureCount} failed`

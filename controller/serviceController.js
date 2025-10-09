@@ -5,6 +5,8 @@ const Service = require("../model/Service");
 const mongoose = require("mongoose");
 const notificationController = require("./notificationController");
 const { notifyOnNewService } = require("./notificationController");
+const { notifyOnServiceView } = require("./notificationController");
+
 
 const Review = require("../model/review");
 // Helper to parse JSON safely

@@ -23,8 +23,8 @@ function getDistanceFromLatLonInKm(lat1, lon1, lat2, lon2) {
 // Notification message templates
 function buildNewServiceMessage(service, distance) {
   return {
-    title: `✨ New Service: ${service.title}`,
-    body: `A ${service.category} service is near you (${distance.toFixed(
+    title: "✨ New Service Created",
+    body: `A ${service.title} service is near you (${distance.toFixed(
       1
     )} km away)!`,
   };
@@ -55,8 +55,15 @@ function buildServiceViewMessage(viewer, service) {
 // Common notification handler for services
 async function notifyUsersForService(service, scenarioType) {
   try {
-    console.log(`🚀 Starting notification for service "${service.title}" [${scenarioType}]`);
+    console.log(
+      `🚀 Starting notification for service "${service.title}" [${scenarioType}]`
+    );
+    const service = await Service.findById(serviceId).populate("category");
+    if (!service) return 0;
 
+    console.log(
+      `🚀 Starting notification for service "${service.title}" [${scenarioType}]`
+    );
     const users = await User.find({
       interests: { $in: service.tags },
       is_active: true,
@@ -67,7 +74,11 @@ async function notifyUsersForService(service, scenarioType) {
     let notifiedUsers = [];
 
     for (const user of users) {
-        if (!user.fcmToken || !Array.isArray(user.fcmToken) || user.fcmToken.length === 0) {
+      if (
+        !user.fcmToken ||
+        !Array.isArray(user.fcmToken) ||
+        user.fcmToken.length === 0
+      ) {
         console.log(`⚠️ Skipping ${user.name} - no FCM token`);
         continue;
       }
@@ -77,14 +88,16 @@ async function notifyUsersForService(service, scenarioType) {
       }
 
       const dist = getDistanceFromLatLonInKm(
-        service.latitude,
-        service.longitude,
+        service.location.coordinates[1], // latitude
+        service.location.coordinates[0], // longitude
         user.lastLocation.coords.coordinates[1],
         user.lastLocation.coords.coordinates[0]
       );
 
       if (dist > 10) {
-        console.log(`⏩ Skipping ${user.name} - distance ${dist.toFixed(2)}km > 10km`);
+        console.log(
+          `⏩ Skipping ${user.name} - distance ${dist.toFixed(2)}km > 10km`
+        );
         continue;
       }
 
@@ -95,7 +108,10 @@ async function notifyUsersForService(service, scenarioType) {
         continue;
       }
 
-      let message = scenarioType === "new" ? buildNewServiceMessage(service, dist) : buildUpdateMessage(service);
+      let message =
+        scenarioType === "new"
+          ? buildNewServiceMessage(service, dist)
+          : buildUpdateMessage(service);
 
       const payload = {
         tokens: user.fcmToken,
@@ -108,49 +124,52 @@ async function notifyUsersForService(service, scenarioType) {
         },
       };
 
-     try {
-  const response = await admin.messaging().sendEachForMulticast(payload);
+      try {
+        const response = await admin.messaging().sendEachForMulticast(payload);
 
-  console.log(
-    `📨 FCM response: ${response.successCount} success, ${response.failureCount} failed`
-  );
+        console.log(
+          `📨 FCM response: ${response.successCount} success, ${response.failureCount} failed`
+        );
 
-  response.responses.forEach((res, index) => {
-    const token = payload.tokens[index];
-    if (res.success) {
-      console.log(`✅ Notification sent successfully to token: ${token}`);
-    } else {
-      console.log(`❌ Failed for token: ${token} - ${res.error?.message}`);
-    }
-  });
+        response.responses.forEach((res, index) => {
+          const token = payload.tokens[index];
+          if (res.success) {
+            console.log(`✅ Notification sent successfully to token: ${token}`);
+          } else {
+            console.log(
+              `❌ Failed for token: ${token} - ${res.error?.message}`
+            );
+          }
+        });
 
-  notifiedMap[key] = true;
-  console.log(
-    `✅ Notified ${user.name} (${user._id}) for "${service.title}" [${scenarioType}]`
-  );
-} catch (err) {
-  console.error(
-    `❌ Failed to send notification to ${user.name} (${user._id}):`,
-    err.message
-  );
-}
+        notifiedMap[key] = true;
+        console.log(
+          `✅ Notified ${user.name} (${user._id}) for "${service.title}" [${scenarioType}]`
+        );
+      } catch (err) {
+        console.error(
+          `❌ Failed to send notification to ${user.name} (${user._id}):`,
+          err.message
+        );
+      }
 
       notifiedUsers.push(user.name);
     }
 
     console.log(`🎯 Finished notification for service "${service.title}"`);
     console.log(`📣 Total users notified: ${notifiedUsers.length}`);
-    if (notifiedUsers.length > 0) console.log(`Users notified: ${notifiedUsers.join(", ")}`);
+    if (notifiedUsers.length > 0)
+      console.log(`Users notified: ${notifiedUsers.join(", ")}`);
 
     return notifiedUsers.length;
   } catch (err) {
-    console.error(`❌ Notification error [${scenarioType}] for service "${service.title}":`, err.message);
+    console.error(
+      `❌ Notification error [${scenarioType}] for service "${service.title}":`,
+      err.message
+    );
     return 0;
   }
 }
-
-
-
 
 // New: Notify nearby users when a user updates interests
 async function notifyNearbyUsersOnInterestUpdate(user) {
@@ -238,15 +257,16 @@ async function notifyOnServiceView(serviceId, viewerId) {
     };
 
     await admin.messaging().sendMulticast(payload);
-    console.log(`✅ Notified ${owner.name} that ${viewer.name} viewed "${service.title}"`);
+    console.log(
+      `✅ Notified ${owner.name} that ${viewer.name} viewed "${service.title}"`
+    );
   } catch (err) {
     console.error("❌ Service view notification error:", err.message);
   }
 }
 
 // Exports
-exports.notifyOnNewService = (service) =>
-  notifyUsersForService(service, "new");
+exports.notifyOnNewService = (service) => notifyUsersForService(service, "new");
 exports.notifyOnUpdate = (service) => notifyUsersForService(service, "update");
 exports.notifyOnUserInterestUpdate = notifyNearbyUsersOnInterestUpdate;
 exports.notifyOnServiceView = notifyOnServiceView;

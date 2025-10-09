@@ -244,42 +244,28 @@ async function notifyNearbyUsersOnInterestUpdate(userId) {
 
 const notifiedViewMap = {}; // cooldown map
 
-async function notifyOnServiceView(serviceId, viewerId) {
+async function notifyOnServiceView(service, viewer) {
   try {
-    const service = await Service.findById(serviceId).populate("owner");
-    if (!service || !service.owner) return;
-
     const owner = service.owner;
 
-    // If owner has disabled notifications, skip
-    if (owner.notifyOnProfileView === false) {
-      console.log(`ℹ️ Owner ${owner.name} has notifications turned off`);
+    // Skip if no FCM token
+    if (!owner?.fcmToken || !Array.isArray(owner.fcmToken) || owner.fcmToken.length === 0) {
+      console.log(`⚠️ Owner ${owner.name} has no FCM token, skipping notification`);
       return;
     }
 
-    const viewer = await User.findById(viewerId);
-    if (!viewer) return;
-
-    // Cooldown: prevent multiple notifications in short time
-    const key = `${serviceId}-${viewerId}-${owner._id}`;
-    if (notifiedViewMap[key]) return;
+    const key = `${service._id}-${viewer._id}-${owner._id}`;
+    if (notifiedViewMap[key]) {
+      console.log(`⏱ Already notified recently, skipping`);
+      return;
+    }
     notifiedViewMap[key] = true;
     setTimeout(() => delete notifiedViewMap[key], 1000 * 60 * 5); // 5 min cooldown
-
-    // Make sure owner has tokens
-    let tokens = [];
-    if (Array.isArray(owner.fcmToken)) tokens = owner.fcmToken.filter(Boolean);
-    else if (typeof owner.fcmToken === "string") tokens = [owner.fcmToken];
-
-    if (tokens.length === 0) {
-      console.log(`⚠️ Owner ${owner.name} has no valid FCM tokens`);
-      return;
-    }
 
     const message = buildServiceViewMessage(viewer, service);
 
     const payload = {
-      tokens,
+      tokens: owner.fcmToken,
       notification: { title: message.title, body: message.body },
       data: {
         type: "ServiceView",
@@ -287,26 +273,18 @@ async function notifyOnServiceView(serviceId, viewerId) {
         serviceId: service._id.toString(),
         viewerId: viewer._id.toString(),
         viewerName: viewer.name,
-        viewerProfile: viewer.profile_image || "",
+        viewerProfileImage: viewer.profile_image || "",
       },
     };
 
-    const response = await admin.messaging().sendMulticast(payload);
+    const response = await admin.messaging().sendEachForMulticast(payload);
 
     console.log(
       `✅ Notified ${owner.name}: ${response.successCount} success, ${response.failureCount} failed`
     );
-
-    // Log success/failure per token
-    response.responses.forEach((res, index) => {
-      const token = tokens[index];
-      if (res.success) {
-        console.log(`✅ Sent to token: ${token}`);
-      } else {
-        console.log(`❌ Failed for token: ${token} - ${res.error?.message}`);
-        // Optional: remove invalid token from owner.fcmToken in DB
-        // if (res.error?.code === 'messaging/registration-token-not-registered') { ... }
-      }
+    response.responses.forEach((res, i) => {
+      if (res.success) console.log(`✅ Sent to token: ${payload.tokens[i]}`);
+      else console.log(`❌ Failed for token: ${payload.tokens[i]} - ${res.error?.message}`);
     });
   } catch (err) {
     console.error("❌ Service view notification error:", err.message);

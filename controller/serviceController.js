@@ -834,18 +834,11 @@ exports.getservicbyId = async (req, res) => {
 
     console.log("🚀 getservicbyId called with", { serviceId, viewerId });
 
-    if (!serviceId) {
-      return res.status(400).json({ isSuccess: false, message: "serviceId is required" });
-    }
-
-    if (!mongoose.Types.ObjectId.isValid(serviceId)) {
-      return res.status(400).json({ isSuccess: false, message: "Invalid serviceId" });
-    }
+    if (!serviceId) return res.status(400).json({ isSuccess: false, message: "serviceId is required" });
+    if (!mongoose.Types.ObjectId.isValid(serviceId)) return res.status(400).json({ isSuccess: false, message: "Invalid serviceId" });
 
     const service = await Service.findById(serviceId);
-    if (!service) {
-      return res.status(404).json({ isSuccess: false, message: "Service not found" });
-    }
+    if (!service) return res.status(404).json({ isSuccess: false, message: "Service not found" });
 
     // Populate owner and category
     await service.populate("owner", "name profile_image notifyOnProfileView fcmToken");
@@ -854,23 +847,16 @@ exports.getservicbyId = async (req, res) => {
     console.log(`✅ Service found: ${service.title}`);
     console.log(`📌 Owner: ${service.owner.name}, notifyOnProfileView: ${service.owner.notifyOnProfileView}`);
 
-    // Notify owner if viewerId is provided
+    // Notify owner if viewerId provided
     if (viewerId) {
-      const viewer = await User.findById(viewerId).select("name profile_image");
-      if (viewer) {
-        console.log(`🚀 Sending view notification to owner for viewer ${viewerId}`);
-        notifyOnServiceView(service, viewer).catch(err =>
-          console.error("Notification error:", err)
-        );
-      } else {
-        console.log(`⚠️ Viewer not found: ${viewerId}`);
-      }
+      console.log(`🚀 Sending view notification to owner for viewer ${viewerId}`);
+      notifyOnServiceView(serviceId, viewerId).catch(err => console.error("Notification error:", err.message));
     }
 
-    // Calculate distance if latitude & longitude provided
+    // Calculate distance if lat/lon provided
     let distance_km = null;
     if (latitude && longitude && service.location?.coordinates) {
-      const [lon, lat] = service.location.coordinates; // [lon, lat]
+      const [lon, lat] = service.location.coordinates;
       distance_km = getDistanceKm(latitude, longitude, lat, lon);
       console.log(`📍 Calculated distance: ${distance_km.toFixed(2)} km`);
     }
@@ -885,6 +871,7 @@ exports.getservicbyId = async (req, res) => {
       const total = reviews.reduce((sum, r) => sum + r.rating, 0);
       avgRating = Number((total / reviews.length).toFixed(1));
     }
+
     console.log(`⭐ Reviews fetched: ${reviews.length}, averageRating: ${avgRating}`);
 
     return res.json({
@@ -898,13 +885,8 @@ exports.getservicbyId = async (req, res) => {
         distance_km,
       },
     });
-
   } catch (err) {
     console.error("getservicbyId error:", err);
-    return res.status(500).json({
-      isSuccess: false,
-      message: "Server error",
-      error: err.message,
-    });
+    return res.status(500).json({ isSuccess: false, message: "Server error", error: err.message });
   }
 };

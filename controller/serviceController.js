@@ -828,55 +828,39 @@ function getDistanceKm(lat1, lon1, lat2, lon2) {
 
 exports.getservicbyId = async (req, res) => {
   try {
-    const { serviceId, latitude, longitude, viewerId } = req.body; // viewerId added
+    const { serviceId, latitude, longitude, viewerId } = req.body; // <-- viewerId added
 
-    console.log(`🚀 getservicbyId called with serviceId: ${serviceId}, viewerId: ${viewerId}`);
+    console.log("🚀 getservicbyId called with", { serviceId, viewerId });
 
     if (!serviceId) {
-      console.log("❌ serviceId is missing");
-      return res.status(400).json({
-        isSuccess: false,
-        message: "serviceId is required",
-      });
+      return res.status(400).json({ isSuccess: false, message: "serviceId is required" });
     }
 
     if (!mongoose.Types.ObjectId.isValid(serviceId)) {
-      console.log("❌ Invalid serviceId format");
-      return res.status(400).json({
-        isSuccess: false,
-        message: "Invalid serviceId",
-      });
+      return res.status(400).json({ isSuccess: false, message: "Invalid serviceId" });
     }
 
     const service = await Service.findById(serviceId);
     if (!service) {
-      console.log(`❌ Service not found for id: ${serviceId}`);
-      return res.status(404).json({
-        isSuccess: false,
-        message: "Service not found",
-      });
+      return res.status(404).json({ isSuccess: false, message: "Service not found" });
     }
 
-    console.log(`✅ Service found: ${service.title || service._id}`);
-
     // Populate owner and category
-    await service.populate(
-      "owner",
-      "name profile_image notifyOnProfileView fcmToken"
-    );
+    await service.populate("owner", "name profile_image notifyOnProfileView fcmToken");
     await service.populate("category", "name");
 
-    console.log(`📌 Owner: ${service.owner?.name}, notifyOnProfileView: ${service.owner?.notifyOnProfileView}`);
+    console.log(`✅ Service found: ${service.title}`);
+    console.log(`📌 Owner: ${service.owner.name}, notifyOnProfileView: ${service.owner.notifyOnProfileView}`);
 
     // Notify owner if viewerId is provided
     if (viewerId) {
-      console.log(`📣 Calling notifyOnServiceView for viewerId: ${viewerId}`);
-      notifyOnServiceView(serviceId, viewerId).catch((err) =>
-        console.error("❌ Notification error:", err)
+      console.log(`🚀 Sending view notification to owner for viewer ${viewerId}`);
+      notifyOnServiceView(serviceId, viewerId).catch(err =>
+        console.error("Notification error:", err)
       );
     }
 
-    // Calculate distance if user's location is provided
+    // Calculate distance if latitude & longitude provided
     let distance_km = null;
     if (latitude && longitude && service.location?.coordinates) {
       const [lon, lat] = service.location.coordinates; // [lon, lat]
@@ -889,13 +873,11 @@ exports.getservicbyId = async (req, res) => {
       .populate("user", "name profile_image")
       .sort({ created_at: -1 });
 
-    // Calculate average rating
     let avgRating = 0;
     if (reviews.length > 0) {
       const total = reviews.reduce((sum, r) => sum + r.rating, 0);
       avgRating = Number((total / reviews.length).toFixed(1));
     }
-
     console.log(`⭐ Reviews fetched: ${reviews.length}, averageRating: ${avgRating}`);
 
     return res.json({
@@ -909,8 +891,9 @@ exports.getservicbyId = async (req, res) => {
         distance_km,
       },
     });
+
   } catch (err) {
-    console.error("❌ getservicbyId error:", err);
+    console.error("getservicbyId error:", err);
     return res.status(500).json({
       isSuccess: false,
       message: "Server error",

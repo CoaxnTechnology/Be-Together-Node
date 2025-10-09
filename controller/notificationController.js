@@ -67,7 +67,7 @@ async function notifyUsersForService(service, scenarioType) {
     let notifiedUsers = [];
 
     for (const user of users) {
-       if (!user.fcmToken || typeof user.fcmToken !== "string") {
+        if (!user.fcmToken || !Array.isArray(user.fcmToken) || user.fcmToken.length === 0) {
         console.log(`⚠️ Skipping ${user.name} - no FCM token`);
         continue;
       }
@@ -98,7 +98,7 @@ async function notifyUsersForService(service, scenarioType) {
       let message = scenarioType === "new" ? buildNewServiceMessage(service, dist) : buildUpdateMessage(service);
 
       const payload = {
-        tokens: [user.fcmToken],
+        tokens: user.fcmToken,
         notification: { title: message.title, body: message.body },
         data: {
           type: "Notify",

@@ -111,7 +111,9 @@ async function notifyUsersForService(service, scenarioType) {
      try {
   const response = await admin.messaging().sendEachForMulticast(payload);
 
-  console.log(`📨 FCM response: ${response.successCount} success, ${response.failureCount} failed`);
+  console.log(
+    `📨 FCM response: ${response.successCount} success, ${response.failureCount} failed`
+  );
 
   response.responses.forEach((res, index) => {
     const token = payload.tokens[index];
@@ -123,11 +125,18 @@ async function notifyUsersForService(service, scenarioType) {
   });
 
   notifiedMap[key] = true;
-  console.log(`✅ Notified ${user.name} (${user._id}) for "${service.title}" [${scenarioType}]`);
+  console.log(
+    `✅ Notified ${user.name} (${user._id}) for "${service.title}" [${scenarioType}]`
+  );
 } catch (err) {
-  console.error(`❌ Failed to send notification to ${user.name} (${user._id}):`, err.message);
+  console.error(
+    `❌ Failed to send notification to ${user.name} (${user._id}):`,
+    err.message
+  );
 }
 
+      notifiedUsers.push(user.name);
+    }
 
     console.log(`🎯 Finished notification for service "${service.title}"`);
     console.log(`📣 Total users notified: ${notifiedUsers.length}`);

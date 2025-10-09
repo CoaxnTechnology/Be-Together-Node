@@ -23,8 +23,8 @@ function getDistanceFromLatLonInKm(lat1, lon1, lat2, lon2) {
 // Notification message templates
 function buildNewServiceMessage(service, distance) {
   return {
-    title: `✨ New Service: ${service.title}`,
-    body: `A ${service.category} service is near you (${distance.toFixed(
+    title: "✨ New Service Created",
+    body: `A ${service.title} service is near you (${distance.toFixed(
       1
     )} km away)!`,
   };

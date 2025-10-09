@@ -83,11 +83,15 @@ async function notifyUsersForService(service, scenarioType) {
       }
 
       const dist = getDistanceFromLatLonInKm(
-        service.location.coordinates[1], // latitude
-        service.location.coordinates[0], // longitude
-        user.lastLocation.coords.coordinates[1],
-        user.lastLocation.coords.coordinates[0]
+        service.location.coordinates[1], // latitude ✅ correct
+        service.location.coordinates[0], // longitude ✅ correct
+        user.lastLocation.coords.coordinates[1], // latitude ✅ correct
+        user.lastLocation.coords.coordinates[0] // longitude ✅ correct
       );
+      console.log("Service coords:", service.location.coordinates);
+      console.log("User coords:", user.lastLocation.coords.coordinates);
+      console.log(`${user.name} distance from service: ${dist.toFixed(2)} km`);
+
 
       if (dist > 10) {
         console.log(

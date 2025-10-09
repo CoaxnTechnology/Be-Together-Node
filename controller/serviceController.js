@@ -789,7 +789,8 @@ exports.updateService = async (req, res) => {
       { new: true }
     );
     console.log("Sending notification...");
-    const notifiedCount = await notifyOnUpdate(updatedService);
+    const notifiedCount = const notificationController = require('./notificationController'); // path adjust karo
+
     console.log("Notification triggered");
     console.log(
       `📣 Total users notified for service "${createdService.title}": ${notifiedCount}`

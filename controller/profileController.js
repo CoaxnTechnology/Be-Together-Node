@@ -209,6 +209,7 @@ exports.editProfile = async (req, res) => {
     }
 
     // ---------- Interests -> store ONLY canonical tags from matched Categories that user selected ----------
+  const oldInterests = user.interests ? [...user.interests] : [];
     if (rawInterests !== undefined) {
       if (!Array.isArray(rawInterests)) {
         return res
@@ -271,6 +272,7 @@ exports.editProfile = async (req, res) => {
           user.interests = result;
         }
       }
+      console.log("Interests updated:", user.interests);
     }
 
     // ---------- OfferedTags -> store ONLY canonical tags from matched Categories that user selected ----------
@@ -344,18 +346,21 @@ exports.editProfile = async (req, res) => {
     }
 
     await user.save();
+    console.log("User profile saved successfully");
     // Only trigger if interests were updated
-    if (
+   const interestsChanged =
       rawInterests !== undefined &&
-      Array.isArray(user.interests) &&
-      user.interests.length
-    ) {
+      (oldInterests.length !== user.interests.length || oldInterests.some(i => !user.interests.includes(i)));
+
+    if (interestsChanged) {
+      console.log("Interests changed, sending notifications...");
       notificationController
         .notifyOnUserInterestUpdate(user)
-        .catch((err) =>
-          console.error("Interest notification failed:", err.message)
-        );
+        .catch(err => console.error("Interest notification failed:", err.message));
+    } else {
+      console.log("Interests not changed, skipping notifications");
     }
+
 
     return res.json({
       isSuccess: true,

@@ -173,6 +173,10 @@ async function notifyUsersForService(service, scenarioType) {
 // New: Notify nearby users when a user updates interests
 async function notifyNearbyUsersOnInterestUpdate(user) {
   try {
+    console.log(`🚀 Starting interest update notifications for ${user.name} (${user._id})`);
+    console.log("User interests:", user.interests);
+    console.log("User location coords:", user.lastLocation?.coords?.coordinates);
+
     const users = await User.find({
       _id: { $ne: user._id }, // exclude self
       interests: { $in: user.interests },
@@ -180,48 +184,93 @@ async function notifyNearbyUsersOnInterestUpdate(user) {
       lastLocation: { $exists: true },
     });
 
+    console.log(`Found ${users.length} nearby active users with at least one matching interest`);
+
+    let notifiedUsers = [];
+
     for (const nearbyUser of users) {
+      if (!nearbyUser.lastLocation || !nearbyUser.lastLocation.coords) {
+        console.log(`⚠️ Skipping ${nearbyUser.name} - no last location`);
+        continue;
+      }
+      if (!nearbyUser.fcmToken || !Array.isArray(nearbyUser.fcmToken) || nearbyUser.fcmToken.length === 0) {
+        console.log(`⚠️ Skipping ${nearbyUser.name} - no FCM token`);
+        continue;
+      }
+
       const dist = getDistanceFromLatLonInKm(
-        user.lastLocation.coords.coordinates[1],
-        user.lastLocation.coords.coordinates[0],
-        nearbyUser.lastLocation.coords.coordinates[1],
-        nearbyUser.lastLocation.coords.coordinates[0]
+        user.lastLocation.coords.coordinates[1], // latitude
+        user.lastLocation.coords.coordinates[0], // longitude
+        nearbyUser.lastLocation.coords.coordinates[1], // latitude
+        nearbyUser.lastLocation.coords.coordinates[0]  // longitude
       );
 
-      if (dist > 10) continue; // only within 10km
+      console.log(`${nearbyUser.name} distance from user: ${dist.toFixed(2)} km`);
+      if (dist > 10) {
+        console.log(`⏩ Skipping ${nearbyUser.name} - distance ${dist.toFixed(2)} km > 10 km`);
+        continue;
+      }
 
-      const mutualInterests = nearbyUser.interests.filter((i) =>
-        user.interests.includes(i)
-      );
-      if (!mutualInterests.length) continue;
+      const mutualInterests = nearbyUser.interests.filter((i) => user.interests.includes(i));
+      if (!mutualInterests.length) {
+        console.log(`⏩ Skipping ${nearbyUser.name} - no mutual interests`);
+        continue;
+      }
 
       const key = `interest-${nearbyUser._id}-${user._id}`;
-      if (notifiedMap[key]) continue;
+      if (notifiedMap[key]) {
+        console.log(`⏱ Already notified ${nearbyUser.name} recently, skipping`);
+        continue;
+      }
 
       const message = buildUserInterestUpdateMessage(user, mutualInterests);
 
       const payload = {
-        tokens: [nearbyUser.fcmToken],
+        tokens: nearbyUser.fcmToken,
         notification: { title: message.title, body: message.body },
         data: {
           type: "UserInterestUpdate",
           pageType: "UserDetailPage",
-          userId: user._id.toString(), // the user who updated interests
+          userId: user._id.toString(),
         },
       };
 
-      await admin.messaging().sendEachForMulticast(payload);
+      try {
+        const response = await admin.messaging().sendEachForMulticast(payload);
 
-      notifiedMap[key] = true;
+        console.log(
+          `📨 FCM response for ${nearbyUser.name}: ${response.successCount} success, ${response.failureCount} failed`
+        );
 
-      console.log(
-        `✅ Notified ${nearbyUser.name} about interest update of ${user.name}`
-      );
+        response.responses.forEach((res, index) => {
+          const token = payload.tokens[index];
+          if (res.success) {
+            console.log(`✅ Notification sent successfully to token: ${token}`);
+          } else {
+            console.log(`❌ Failed for token: ${token} - ${res.error?.message}`);
+          }
+        });
+
+        notifiedMap[key] = true;
+        notifiedUsers.push(nearbyUser.name);
+
+        console.log(`✅ Notified ${nearbyUser.name} about interest update of ${user.name}`);
+      } catch (err) {
+        console.error(`❌ Failed to send notification to ${nearbyUser.name} (${nearbyUser._id}):`, err.message);
+      }
     }
+
+    console.log(`🎯 Finished interest update notifications for ${user.name}`);
+    console.log(`📣 Total users notified: ${notifiedUsers.length}`);
+    if (notifiedUsers.length > 0) console.log(`Users notified: ${notifiedUsers.join(", ")}`);
+
+    return notifiedUsers.length;
   } catch (err) {
-    console.error("❌ Interest update notification error:", err.message);
+    console.error(`❌ Error sending interest update notifications for ${user.name}:`, err.message);
+    return 0;
   }
 }
+
 const notifiedViewMap = {}; // separate map for views to rate-limit
 async function notifyOnServiceView(serviceId, viewerId) {
   try {

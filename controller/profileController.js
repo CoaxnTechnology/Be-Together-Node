@@ -348,7 +348,7 @@ exports.editProfile = async (req, res) => {
     await user.save();
     console.log("User profile saved successfully");
     // ✅ Refresh user from DB to get latest saved interests
-const updatedUser = await User.findById(user._id);
+const updatedUser = await User.findById(user._id).select("name interests lastLocation fcmToken");
     // Only trigger if interests were updated
    const interestsChanged =
       rawInterests !== undefined &&
@@ -356,7 +356,7 @@ const updatedUser = await User.findById(user._id);
 
     if (interestsChanged) {
       console.log("Interests changed, sending notifications...");
-      notificationController
+    await   notificationController
         .notifyOnUserInterestUpdate(updatedUser)
         .catch(err => console.error("Interest notification failed:", err.message));
     } else {

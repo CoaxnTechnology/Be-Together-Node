@@ -62,7 +62,7 @@ async function deleteCloudinaryImage(publicId) {
 exports.editProfile = async (req, res) => {
   try {
     // don't set defaults here; we need to detect if a field was provided
-    let { email, name, bio, city,age } = req.body;
+    let { email, name, bio, city, age } = req.body;
 
     // helper: try parse JSON string fields (common with multipart/form-data)
     const tryParse = (val) => {
@@ -209,7 +209,7 @@ exports.editProfile = async (req, res) => {
     }
 
     // ---------- Interests -> store ONLY canonical tags from matched Categories that user selected ----------
-  const oldInterests = user.interests ? [...user.interests] : [];
+    const oldInterests = user.interests ? [...user.interests] : [];
     if (rawInterests !== undefined) {
       if (!Array.isArray(rawInterests)) {
         return res
@@ -348,21 +348,25 @@ exports.editProfile = async (req, res) => {
     await user.save();
     console.log("User profile saved successfully");
     // ✅ Refresh user from DB to get latest saved interests
-const updatedUser = await User.findById(user._id).select("name interests lastLocation fcmToken");
+    const updatedUser = await User.findById(user._id).select(
+      "name interests lastLocation fcmToken"
+    );
     // Only trigger if interests were updated
-   const interestsChanged =
+    const interestsChanged =
       rawInterests !== undefined &&
-      (oldInterests.length !== user.interests.length || oldInterests.some(i => !user.interests.includes(i)));
+      (oldInterests.length !== user.interests.length ||
+        oldInterests.some((i) => !user.interests.includes(i)));
 
     if (interestsChanged) {
       console.log("Interests changed, sending notifications...");
-    await   notificationController
+      await notificationController
         .notifyOnUserInterestUpdate(updatedUser)
-        .catch(err => console.error("Interest notification failed:", err.message));
+        .catch((err) =>
+          console.error("Interest notification failed:", err.message)
+        );
     } else {
       console.log("Interests not changed, skipping notifications");
     }
-
 
     return res.json({
       isSuccess: true,

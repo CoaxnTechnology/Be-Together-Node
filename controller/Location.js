@@ -112,7 +112,7 @@ exports.location = async (req, res) => {
       return res.status(400).json({ error: 'recordedAt too old' });
 
     const user = await User.findById(userId).select('lastLocation').lean();
-    const MIN_MOVE_METERS = 1;
+    const MIN_MOVE_METERS = 20;
 
     let shouldUpdate = true;
     if (user?.lastLocation?.recordedAt && user.lastLocation.coords?.coordinates?.length === 2) {

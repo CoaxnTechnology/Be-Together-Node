@@ -32,7 +32,7 @@ function buildNewServiceMessage(service, distance) {
 
 function buildUpdateMessage(service) {
   return {
-    title: `🔔 Service Updated: ${service.title}`,
+    title: '🔔 Service Updated',
     body: `"${service.title}" details have been updated near you!`,
   };
 }

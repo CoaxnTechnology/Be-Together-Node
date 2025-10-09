@@ -3,8 +3,9 @@ const User = require("../model/User");
 const Category = require("../model/Category");
 const Service = require("../model/Service");
 const mongoose = require("mongoose");
-const notificationController = require("./notificationController");
-const { notifyUsersForService } = require("./notificationController");
+//const notificationController = require("./notificationController");
+const { notifyOnNewService } = require("./notificationController");
+
 
 const Review = require("../model/review");
 // Helper to parse JSON safely
@@ -212,7 +213,7 @@ exports.createService = async (req, res) => {
 
     console.log("Service created successfully:", createdService._id);
     console.log("Sending notification...");
-    const notifiedCount = await notifyUsersForService(createdService, "new");
+    const notifiedCount = await notifyUsersForService(createdService);
     console.log("Notification triggered");
     console.log(
       `📣 Total users notified for service "${createdService.title}": ${notifiedCount}`

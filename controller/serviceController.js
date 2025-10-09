@@ -4,6 +4,8 @@ const Category = require("../model/Category");
 const Service = require("../model/Service");
 const mongoose = require("mongoose");
 const notificationController = require("./notificationController");
+const { notifyUsersForService } = require("./notificationController");
+
 const Review = require("../model/review");
 // Helper to parse JSON safely
 function tryParse(val) {

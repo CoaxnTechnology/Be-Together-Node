@@ -172,7 +172,8 @@ async function notifyNearbyUsersOnInterestUpdate(user) {
         },
       };
 
-      await admin.messaging().sendMulticast(payload);
+      await admin.messaging().sendEachForMulticast(payload);
+
       notifiedMap[key] = true;
 
       console.log(

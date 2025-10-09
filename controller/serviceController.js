@@ -217,7 +217,7 @@ exports.createService = async (req, res) => {
     console.log(
       `📣 Total users notified for service "${createdService.title}": ${notifiedCount}`
     );
-    console.log("Notification process completed ✅");
+    console.log("Notification process completed no errors ✅");
     return res.json({
       isSuccess: true,
       message: "Service created successfully",

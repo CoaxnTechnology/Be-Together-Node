@@ -3,7 +3,7 @@ const User = require("../model/User");
 const Category = require("../model/Category");
 const Service = require("../model/Service");
 const mongoose = require("mongoose");
-//const notificationController = require("./notificationController");
+const notificationController = require("./notificationController");
 const { notifyOnNewService } = require("./notificationController");
 
 
@@ -788,8 +788,16 @@ exports.updateService = async (req, res) => {
       { $set: updatePayload },
       { new: true }
     );
+    console.log("Sending notification...");
+    const notifiedCount = await notifyOnUpdate(updatedService);
+    console.log("Notification triggered");
+    console.log(
+      `📣 Total users notified for service "${createdService.title}": ${notifiedCount}`
+    );
+    console.log("Notification process completed no errors ✅");
 
-    notificationController.notifyOnUpdate(updatedService);
+
+   
 
     return res.json({
       isSuccess: true,

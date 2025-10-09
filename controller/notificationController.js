@@ -67,7 +67,7 @@ async function notifyUsersForService(service, scenarioType) {
     let notifiedUsers = [];
 
     for (const user of users) {
-      if (!user.fcmToken) {
+       if (!user.fcmToken || typeof user.fcmToken !== "string") {
         console.log(`⚠️ Skipping ${user.name} - no FCM token`);
         continue;
       }

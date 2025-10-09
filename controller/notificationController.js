@@ -245,27 +245,51 @@ async function notifyNearbyUsersOnInterestUpdate(userId) {
 const notifiedViewMap = {}; // separate map for views to rate-limit
 async function notifyOnServiceView(serviceId, viewerId) {
   try {
+    console.log(`🚀 Starting service view notification for serviceId: ${serviceId}, viewerId: ${viewerId}`);
+
     const service = await Service.findById(serviceId).populate("owner");
-    if (!service || !service.owner) return;
+    if (!service) {
+      console.log(`⚠️ Service not found for id: ${serviceId}`);
+      return;
+    }
+    if (!service.owner) {
+      console.log(`⚠️ Service owner not found for service: ${service.title}`);
+      return;
+    }
 
     const owner = service.owner;
 
-    if (!owner.notifyOnProfileView) return; // owner toggle
+    if (!owner.notifyOnProfileView) {
+      console.log(`⏩ Owner ${owner.name} has notifications turned off`);
+      return;
+    }
 
     const viewer = await User.findById(viewerId);
-    if (!viewer) return;
+    if (!viewer) {
+      console.log(`⚠️ Viewer not found for id: ${viewerId}`);
+      return;
+    }
 
+    // cooldown check
     const key = `${serviceId}-${viewerId}-${owner._id}`;
-    if (notifiedViewMap[key]) return;
+    if (notifiedViewMap[key]) {
+      console.log(`⏱ Already notified owner for this view recently, skipping`);
+      return;
+    }
     notifiedViewMap[key] = true;
     setTimeout(() => delete notifiedViewMap[key], 1000 * 60 * 5); // 5 min cooldown
 
-    if (!owner.fcmToken) return;
+    if (!owner.fcmToken || !Array.isArray(owner.fcmToken) || owner.fcmToken.length === 0) {
+      console.log(`⚠️ Owner ${owner.name} has no FCM tokens`);
+      return;
+    }
 
+    // Build notification message
     const message = buildServiceViewMessage(viewer, service);
+    console.log(`📩 Sending notification to ${owner.name}: title="${message.title}", body="${message.body}"`);
 
     const payload = {
-      tokens: [owner.fcmToken],
+      tokens: owner.fcmToken,
       notification: { title: message.title, body: message.body },
       data: {
         type: "ServiceView",
@@ -275,12 +299,21 @@ async function notifyOnServiceView(serviceId, viewerId) {
       },
     };
 
-    await admin.messaging().sendMulticast(payload);
-    console.log(
-      `✅ Notified ${owner.name} that ${viewer.name} viewed "${service.title}"`
-    );
+    const response = await admin.messaging().sendMulticast(payload);
+    console.log(`📨 FCM response: ${response.successCount} success, ${response.failureCount} failed`);
+
+    response.responses.forEach((res, index) => {
+      const token = payload.tokens[index];
+      if (res.success) {
+        console.log(`✅ Notification sent successfully to token: ${token}`);
+      } else {
+        console.log(`❌ Failed for token: ${token} - ${res.error?.message}`);
+      }
+    });
+
+    console.log(`🎯 Done notifying owner ${owner.name} for service "${service.title}" viewed by ${viewer.name}`);
   } catch (err) {
-    console.error("❌ Service view notification error:", err.message);
+    console.error(`❌ Service view notification error: ${err.message}`);
   }
 }
 

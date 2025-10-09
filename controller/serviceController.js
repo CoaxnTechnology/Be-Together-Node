@@ -828,9 +828,12 @@ function getDistanceKm(lat1, lon1, lat2, lon2) {
 
 exports.getservicbyId = async (req, res) => {
   try {
-    const { serviceId, latitude, longitude, viewerId } = req.body; // <-- add viewerId
+    const { serviceId, latitude, longitude, viewerId } = req.body; // viewerId added
+
+    console.log(`🚀 getservicbyId called with serviceId: ${serviceId}, viewerId: ${viewerId}`);
 
     if (!serviceId) {
+      console.log("❌ serviceId is missing");
       return res.status(400).json({
         isSuccess: false,
         message: "serviceId is required",
@@ -838,6 +841,7 @@ exports.getservicbyId = async (req, res) => {
     }
 
     if (!mongoose.Types.ObjectId.isValid(serviceId)) {
+      console.log("❌ Invalid serviceId format");
       return res.status(400).json({
         isSuccess: false,
         message: "Invalid serviceId",
@@ -846,11 +850,14 @@ exports.getservicbyId = async (req, res) => {
 
     const service = await Service.findById(serviceId);
     if (!service) {
+      console.log(`❌ Service not found for id: ${serviceId}`);
       return res.status(404).json({
         isSuccess: false,
         message: "Service not found",
       });
     }
+
+    console.log(`✅ Service found: ${service.title || service._id}`);
 
     // Populate owner and category
     await service.populate(
@@ -859,10 +866,13 @@ exports.getservicbyId = async (req, res) => {
     );
     await service.populate("category", "name");
 
+    console.log(`📌 Owner: ${service.owner?.name}, notifyOnProfileView: ${service.owner?.notifyOnProfileView}`);
+
     // Notify owner if viewerId is provided
     if (viewerId) {
+      console.log(`📣 Calling notifyOnServiceView for viewerId: ${viewerId}`);
       notifyOnServiceView(serviceId, viewerId).catch((err) =>
-        console.error("Notification error:", err)
+        console.error("❌ Notification error:", err)
       );
     }
 
@@ -871,6 +881,7 @@ exports.getservicbyId = async (req, res) => {
     if (latitude && longitude && service.location?.coordinates) {
       const [lon, lat] = service.location.coordinates; // [lon, lat]
       distance_km = getDistanceKm(latitude, longitude, lat, lon);
+      console.log(`📍 Calculated distance: ${distance_km.toFixed(2)} km`);
     }
 
     // Fetch reviews
@@ -882,9 +893,10 @@ exports.getservicbyId = async (req, res) => {
     let avgRating = 0;
     if (reviews.length > 0) {
       const total = reviews.reduce((sum, r) => sum + r.rating, 0);
-      avgRating = total / reviews.length;
-      avgRating = Number(avgRating.toFixed(1));
+      avgRating = Number((total / reviews.length).toFixed(1));
     }
+
+    console.log(`⭐ Reviews fetched: ${reviews.length}, averageRating: ${avgRating}`);
 
     return res.json({
       isSuccess: true,
@@ -898,7 +910,7 @@ exports.getservicbyId = async (req, res) => {
       },
     });
   } catch (err) {
-    console.error("getservicbyId error:", err);
+    console.error("❌ getservicbyId error:", err);
     return res.status(500).json({
       isSuccess: false,
       message: "Server error",
@@ -906,3 +918,4 @@ exports.getservicbyId = async (req, res) => {
     });
   }
 };
+

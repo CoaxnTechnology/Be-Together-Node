@@ -67,10 +67,17 @@ async function notifyUsersForService(service, scenarioType) {
     let notifiedUsers = [];
 
     for (const user of users) {
+      // ❌ Skip the service owner
+      if (String(user._id) === String(service.owner)) {
+        console.log(`🙈 Skipping owner ${user.name} for their own service`);
+        continue;
+      }
+
       if (!user.fcmToken?.length) {
         console.log(`⚠️ Skipping ${user.name} - no FCM token`);
         continue;
       }
+
       if (!user.lastLocation?.coords) {
         console.log(`⚠️ Skipping ${user.name} - no last location`);
         continue;
@@ -95,7 +102,7 @@ async function notifyUsersForService(service, scenarioType) {
         continue;
       }
 
-      // Build different messages and type
+      // Build different messages and payload type
       let message, payloadType;
       if (scenarioType === "new") {
         message = buildNewServiceMessage(service, dist);
@@ -135,6 +142,10 @@ async function notifyUsersForService(service, scenarioType) {
     }
 
     console.log(`🎯 Finished notification for service "${service.title}"`);
+    console.log(`📣 Total users notified: ${notifiedUsers.length}`);
+    if (notifiedUsers.length > 0)
+      console.log(`Users notified: ${notifiedUsers.join(", ")}`);
+
     return notifiedUsers.length;
   } catch (err) {
     console.error(`❌ Notification error [${scenarioType}] for service "${service.title}":`, err.message);

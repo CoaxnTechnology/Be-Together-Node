@@ -32,7 +32,7 @@ function buildNewServiceMessage(service, distance) {
 
 function buildUpdateMessage(service) {
   return {
-    title: '🔔 Service Updated',
+    title: "🔔 Service Updated",
     body: `"${service.title}" details have been updated near you!`,
   };
 }
@@ -91,7 +91,6 @@ async function notifyUsersForService(service, scenarioType) {
       console.log("Service coords:", service.location.coordinates);
       console.log("User coords:", user.lastLocation.coords.coordinates);
       console.log(`${user.name} distance from service: ${dist.toFixed(2)} km`);
-
 
       if (dist > 10) {
         console.log(
@@ -192,7 +191,8 @@ async function notifyNearbyUsersOnInterestUpdate(userId) {
 
     for (const nearUser of nearbyUsers) {
       // check token and location
-      if (!nearUser.fcmToken?.length || !nearUser.lastLocation?.coords) continue;
+      if (!nearUser.fcmToken?.length || !nearUser.lastLocation?.coords)
+        continue;
 
       const dist = getDistanceFromLatLonInKm(
         user.lastLocation.coords.coordinates[1],
@@ -204,7 +204,7 @@ async function notifyNearbyUsersOnInterestUpdate(userId) {
       if (dist > 10) continue; // skip far away users
 
       // ✅ now find mutual interests correctly
-      const mutualInterests = nearUser.interests.filter(i =>
+      const mutualInterests = nearUser.interests.filter((i) =>
         user.interests.includes(i)
       );
 
@@ -213,7 +213,9 @@ async function notifyNearbyUsersOnInterestUpdate(userId) {
       // create message
       const message = {
         title: "👋 Someone nearby updated their interests!",
-        body: `${user.name} now likes ${mutualInterests.join(", ")}. Tap to see profile.`,
+        body: `${user.name} now likes ${mutualInterests.join(
+          ", "
+        )}. Tap to see profile.`,
       };
 
       const payload = {
@@ -221,27 +223,28 @@ async function notifyNearbyUsersOnInterestUpdate(userId) {
         notification: message,
         data: {
           type: "UserInterestUpdate",
-          pageType: "UserDetailPage",
-          userId: user._id.toString(),
+          pageType: "UserProfilePage",
+          viewerId: user._id.toString(),
         },
       };
 
       // send notification
       const response = await admin.messaging().sendEachForMulticast(payload);
-      console.log(`📩 Sent to ${nearUser.name}: ${response.successCount} success`);
+      console.log(
+        `📩 Sent to ${nearUser.name}: ${response.successCount} success`
+      );
 
       notifiedUsers.push(nearUser.name);
     }
 
     console.log(`🎯 Done! Notified users: ${notifiedUsers.join(", ")}`);
     return notifiedUsers;
-
   } catch (err) {
     console.error("❌ Error:", err.message);
   }
 }
 
-const notifiedViewMap = {}; // cooldown map
+const notifiedViewMap = {}; // cooldown memory
 
 async function notifyOnServiceView(service, viewer) {
   try {
@@ -253,23 +256,24 @@ async function notifyOnServiceView(service, viewer) {
       return;
     }
 
-    // Skip if no FCM token
+    // 🚫 Skip if no FCM token
     if (!owner?.fcmToken || !Array.isArray(owner.fcmToken) || owner.fcmToken.length === 0) {
       console.log(`⚠️ Owner ${owner.name} has no FCM token, skipping notification`);
       return;
     }
 
+    // 🕒 60-minute cooldown key
     const key = `${service._id}-${viewer._id}-${owner._id}`;
     if (notifiedViewMap[key]) {
-      console.log(`⏱ Already notified recently, skipping`);
+      console.log(`⏱ Already notified within the last 60 minutes, skipping`);
       return;
     }
 
     notifiedViewMap[key] = true;
-    setTimeout(() => delete notifiedViewMap[key], 1000 * 60 * 5); // 5 min cooldown
+    setTimeout(() => delete notifiedViewMap[key], 1000 * 60 * 60); // 60 minutes = 1 hour
 
+    // ✉️ Build notification
     const message = buildServiceViewMessage(viewer, service);
-
     const payload = {
       tokens: owner.fcmToken,
       notification: { title: message.title, body: message.body },
@@ -285,22 +289,19 @@ async function notifyOnServiceView(service, viewer) {
 
     const response = await admin.messaging().sendEachForMulticast(payload);
 
-    console.log(
-      `✅ Notified ${owner.name}: ${response.successCount} success, ${response.failureCount} failed`
-    );
+    console.log(`✅ Notified ${owner.name}: ${response.successCount} success, ${response.failureCount} failed`);
 
     response.responses.forEach((res, i) => {
-      if (res.success) console.log(`✅ Sent to token: ${payload.tokens[i]}`);
-      else console.log(`❌ Failed for token: ${payload.tokens[i]} - ${res.error?.message}`);
+      if (res.success)
+        console.log(`✅ Sent to token: ${payload.tokens[i]}`);
+      else
+        console.log(`❌ Failed for token: ${payload.tokens[i]} - ${res.error?.message}`);
     });
+
   } catch (err) {
     console.error("❌ Service view notification error:", err.message);
   }
 }
-
-
-
-
 
 // Exports
 exports.notifyOnNewService = (service) => notifyUsersForService(service, "new");

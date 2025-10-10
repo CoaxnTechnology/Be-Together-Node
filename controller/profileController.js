@@ -407,16 +407,28 @@ exports.getUserProfileByEmail = async (req, res) => {
         .json({ isSuccess: false, message: "email is required" });
     }
 
-    // ✅ Find user and populate full service details
+    // ✅ Find user and populate full service details + category + reviews
     const user = await User.findOne({ email }).populate({
       path: "services",
       model: "Service",
-      select: "-__v -updated_at", // hide unneeded fields, keep all useful ones
-      populate: {
-        path: "category", // 👈 populate category inside service
-        model: "Category",
-        select: "name", // 👈 only fetch category name
-      },
+      select: "-__v -updated_at", // hide unneeded fields
+      populate: [
+        {
+          path: "category",
+          model: "Category",
+          select: "name",
+        },
+        {
+          path: "reviews",
+          model: "Review",
+          select: "rating user created_at",
+          populate: {
+            path: "user",
+            model: "User",
+            select: "name profile_image",
+          },
+        },
+      ],
     });
 
     if (!user) {
@@ -424,6 +436,21 @@ exports.getUserProfileByEmail = async (req, res) => {
         .status(404)
         .json({ isSuccess: false, message: "User not found" });
     }
+
+    // ✅ Calculate average rating & total reviews for each service
+    const servicesWithRatings = user.services.map((service) => {
+      let avgRating = 0;
+      if (service.reviews && service.reviews.length > 0) {
+        const total = service.reviews.reduce((sum, r) => sum + r.rating, 0);
+        avgRating = Number((total / service.reviews.length).toFixed(1));
+      }
+
+      return {
+        ...service.toObject(),
+        totalReviews: service.reviews.length,
+        averageRating: avgRating,
+      };
+    });
 
     res.json({
       isSuccess: true,
@@ -436,11 +463,10 @@ exports.getUserProfileByEmail = async (req, res) => {
         bio: user.bio || "",
         city: user.city || "",
         languages: user.languages || [],
-        interests: user.interests || [], // plain strings
+        interests: user.interests || [],
         offeredTags: user.offeredTags || [],
-
-        servicesCount: user.services.length, // ✅ total services count
-        services: user.services || [], // ✅ full service details
+        servicesCount: user.services.length,
+        services: servicesWithRatings,
       },
     });
   } catch (err) {
@@ -452,6 +478,7 @@ exports.getUserProfileByEmail = async (req, res) => {
     });
   }
 };
+
 exports.getProfileById = async (req, res) => {
   try {
     const { userId } = req.body;

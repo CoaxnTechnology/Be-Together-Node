@@ -33,7 +33,7 @@ function buildNewServiceMessage(service, distance) {
 function buildUpdateMessage(service) {
   return {
     title: "🔔 Service Updated",
-    body: `"${service.title}" details have been updated near you!`,
+    body: `Good news! The details of "${service.title}"  have been updated in your area.`,
   };
 }
 
@@ -49,7 +49,7 @@ function buildUserInterestUpdateMessage(user, mutualInterests) {
 function buildServiceViewMessage(viewer, service) {
   return {
     title: `👀 ${viewer.name} viewed your service!`,
-    body: `${viewer.name} checked out "${service.title}"`,
+    body: `${viewer.name} just checked out your service "${service.title}"`,
   };
 }
 // Common notification handler for services
@@ -213,9 +213,9 @@ async function notifyNearbyUsersOnInterestUpdate(userId) {
       // create message
       const message = {
         title: "👋 Someone nearby updated their interests!",
-        body: `${user.name} now likes ${mutualInterests.join(
+        body: `${user.name} now shares your interest in ${mutualInterests.join(
           ", "
-        )}. Tap to see profile.`,
+        )}. Tap to check out their profile!`,
       };
 
       const payload = {

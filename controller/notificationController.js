@@ -241,12 +241,17 @@ async function notifyNearbyUsersOnInterestUpdate(userId) {
   }
 }
 
-
 const notifiedViewMap = {}; // cooldown map
 
 async function notifyOnServiceView(service, viewer) {
   try {
     const owner = service.owner;
+
+    // 🧠 Skip if viewer is the same as owner
+    if (!owner || String(owner._id) === String(viewer._id)) {
+      console.log(`🙈 Self-view detected for ${viewer.name}, skipping notification`);
+      return;
+    }
 
     // Skip if no FCM token
     if (!owner?.fcmToken || !Array.isArray(owner.fcmToken) || owner.fcmToken.length === 0) {
@@ -259,6 +264,7 @@ async function notifyOnServiceView(service, viewer) {
       console.log(`⏱ Already notified recently, skipping`);
       return;
     }
+
     notifiedViewMap[key] = true;
     setTimeout(() => delete notifiedViewMap[key], 1000 * 60 * 5); // 5 min cooldown
 
@@ -282,6 +288,7 @@ async function notifyOnServiceView(service, viewer) {
     console.log(
       `✅ Notified ${owner.name}: ${response.successCount} success, ${response.failureCount} failed`
     );
+
     response.responses.forEach((res, i) => {
       if (res.success) console.log(`✅ Sent to token: ${payload.tokens[i]}`);
       else console.log(`❌ Failed for token: ${payload.tokens[i]} - ${res.error?.message}`);
@@ -290,6 +297,7 @@ async function notifyOnServiceView(service, viewer) {
     console.error("❌ Service view notification error:", err.message);
   }
 }
+
 
 
 

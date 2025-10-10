@@ -169,16 +169,16 @@ async function notifyUsersForService(service, scenarioType) {
 // New: Notify nearby users when a user updates interests
 async function notifyNearbyUsersOnInterestUpdate(userId) {
   try {
-    // ✅ Fetch the user who updated interests
+    // ✅ Fetch updated user
     const user = await User.findById(userId);
     if (!user) return console.log("User not found");
 
     console.log(`🚀 Interest update notification start for ${user.name}`);
     console.log("Updated interests:", user.interests);
 
-    // ✅ Find nearby active users with any same interest
+    // ✅ Find nearby active users with at least one matching interest
     const nearbyUsers = await User.find({
-      _id: { $ne: user._id },
+      _id: { $ne: user._id }, // exclude self
       is_active: true,
       interests: { $in: user.interests },
       lastLocation: { $exists: true },
@@ -187,52 +187,67 @@ async function notifyNearbyUsersOnInterestUpdate(userId) {
     let notifiedUsers = [];
 
     for (const nearUser of nearbyUsers) {
-      // skip if no token or location
+      // Skip if no token or no location
       if (!nearUser.fcmToken?.length || !nearUser.lastLocation?.coords) continue;
 
+      // Remove any tokens that belong to the updating user
+      const tokensToSend = nearUser.fcmToken.filter(
+        (t) => !user.fcmToken?.includes(t)
+      );
+      if (!tokensToSend.length) continue; // skip if no valid token
+
+      // Calculate distance
       const dist = getDistanceFromLatLonInKm(
         user.lastLocation.coords.coordinates[1],
         user.lastLocation.coords.coordinates[0],
         nearUser.lastLocation.coords.coordinates[1],
         nearUser.lastLocation.coords.coordinates[0]
       );
+      if (dist > 10) continue; // skip far users
 
-      if (dist > 10) continue; // skip far away users
+      // Find mutual interests
+      const mutualInterests = nearUser.interests.filter((i) =>
+        user.interests.includes(i)
+      );
+      if (!mutualInterests.length) continue;
 
-      // ✅ Find mutual interests
-      const mutualInterests = nearUser.interests.filter(i => user.interests.includes(i));
-      if (mutualInterests.length === 0) continue;
-
-      // ✉️ Build notification message
+      // Build notification
       const message = {
         title: "👋 Someone nearby updated their interests!",
-        body: `${user.name} now shares your interest in ${mutualInterests.join(", ")}.`,
-        image: user.profile_image || "", // send profile image
+        body: `${user.name} now shares your interest in ${mutualInterests.join(
+          ", "
+        )}. Tap to check out their profile!`,
+        image: user.profile_image || "", // profile image included
       };
 
       const payload = {
-        tokens: nearUser.fcmToken,
+        tokens: tokensToSend,
         notification: message,
         data: {
           type: "UserInterestUpdate",
           pageType: "UserProfilePage",
+          viewerId: user._id.toString(),
           viewerName: user.name,
           viewerProfileImage: user.profile_image || "",
         },
       };
 
-      // ✅ Send FCM notification
-      const response = await admin.messaging().sendEachForMulticast(payload);
-      console.log(`📩 Sent to ${nearUser.name}: ${response.successCount} success`);
-
-      notifiedUsers.push(nearUser.name);
+      // Send notification
+      try {
+        const response = await admin.messaging().sendEachForMulticast(payload);
+        console.log(
+          `📩 Sent to ${nearUser.name}: ${response.successCount} success, ${response.failureCount} failed`
+        );
+        notifiedUsers.push(nearUser.name);
+      } catch (err) {
+        console.error(`❌ Failed to notify ${nearUser.name}:`, err.message);
+      }
     }
 
     console.log(`🎯 Done! Notified users: ${notifiedUsers.join(", ")}`);
     return notifiedUsers;
-
   } catch (err) {
-    console.error("❌ Error:", err.message);
+    console.error("❌ Error in notifyNearbyUsersOnInterestUpdate:", err.message);
   }
 }
 

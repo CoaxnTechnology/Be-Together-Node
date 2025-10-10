@@ -830,7 +830,8 @@ function getDistanceKm(lat1, lon1, lat2, lon2) {
 
 exports.getservicbyId = async (req, res) => {
   try {
-    const { serviceId, latitude, longitude, viewerId } = req.body;
+    const { serviceId, latitude, longitude } = req.body;
+    const viewerId = req.user?._id; // 👈 automatically get logged-in user
 
     console.log("🚀 getservicbyId called with", { serviceId, viewerId });
 
@@ -854,11 +855,11 @@ exports.getservicbyId = async (req, res) => {
     console.log(`✅ Service found: ${service.title}`);
     console.log(`📌 Owner: ${service.owner.name}, notifyOnProfileView: ${service.owner.notifyOnProfileView}`);
 
-    // Notify owner if viewerId is provided
+    // Notify owner if viewer exists and is not the owner
     if (viewerId) {
       const viewer = await User.findById(viewerId).select("name profile_image");
       if (viewer) {
-        console.log(`🚀 Sending view notification to owner for viewer ${viewerId}`);
+        console.log(`🚀 Sending view notification to owner for viewer ${viewer._id}`);
         notifyOnServiceView(service, viewer).catch(err =>
           console.error("Notification error:", err)
         );

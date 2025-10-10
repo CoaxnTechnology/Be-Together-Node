@@ -55,7 +55,9 @@ function buildServiceViewMessage(viewer, service) {
 // Common notification handler for services
 async function notifyUsersForService(service, scenarioType) {
   try {
-    console.log(`🚀 Starting notification for service "${service.title}" [${scenarioType}]`);
+    console.log(
+      `🚀 Starting notification for service "${service.title}" [${scenarioType}]`
+    );
 
     const users = await User.find({
       interests: { $in: service.tags },
@@ -91,7 +93,9 @@ async function notifyUsersForService(service, scenarioType) {
       );
 
       if (dist > 10) {
-        console.log(`⏩ Skipping ${user.name} - distance ${dist.toFixed(2)}km > 10km`);
+        console.log(
+          `⏩ Skipping ${user.name} - distance ${dist.toFixed(2)}km > 10km`
+        );
         continue;
       }
 
@@ -131,13 +135,19 @@ async function notifyUsersForService(service, scenarioType) {
         response.responses.forEach((res, index) => {
           const token = payload.tokens[index];
           if (res.success) console.log(`✅ Sent to token: ${token}`);
-          else console.log(`❌ Failed for token: ${token} - ${res.error?.message}`);
+          else
+            console.log(
+              `❌ Failed for token: ${token} - ${res.error?.message}`
+            );
         });
 
         global.notifiedMap[key] = true;
         notifiedUsers.push(user.name);
       } catch (err) {
-        console.error(`❌ Failed to send notification to ${user.name}:`, err.message);
+        console.error(
+          `❌ Failed to send notification to ${user.name}:`,
+          err.message
+        );
       }
     }
 
@@ -148,7 +158,10 @@ async function notifyUsersForService(service, scenarioType) {
 
     return notifiedUsers.length;
   } catch (err) {
-    console.error(`❌ Notification error [${scenarioType}] for service "${service.title}":`, err.message);
+    console.error(
+      `❌ Notification error [${scenarioType}] for service "${service.title}":`,
+      err.message
+    );
     return 0;
   }
 }
@@ -156,7 +169,7 @@ async function notifyUsersForService(service, scenarioType) {
 // New: Notify nearby users when a user updates interests
 async function notifyNearbyUsersOnInterestUpdate(userId) {
   try {
-    // ✅ fresh user from DB (updated interests)
+    // ✅ Fetch the user who updated interests
     const user = await User.findById(userId);
     if (!user) return console.log("User not found");
 
@@ -174,9 +187,8 @@ async function notifyNearbyUsersOnInterestUpdate(userId) {
     let notifiedUsers = [];
 
     for (const nearUser of nearbyUsers) {
-      // check token and location
-      if (!nearUser.fcmToken?.length || !nearUser.lastLocation?.coords)
-        continue;
+      // skip if no token or location
+      if (!nearUser.fcmToken?.length || !nearUser.lastLocation?.coords) continue;
 
       const dist = getDistanceFromLatLonInKm(
         user.lastLocation.coords.coordinates[1],
@@ -187,19 +199,15 @@ async function notifyNearbyUsersOnInterestUpdate(userId) {
 
       if (dist > 10) continue; // skip far away users
 
-      // ✅ now find mutual interests correctly
-      const mutualInterests = nearUser.interests.filter((i) =>
-        user.interests.includes(i)
-      );
-
+      // ✅ Find mutual interests
+      const mutualInterests = nearUser.interests.filter(i => user.interests.includes(i));
       if (mutualInterests.length === 0) continue;
 
-      // create message
+      // ✉️ Build notification message
       const message = {
         title: "👋 Someone nearby updated their interests!",
-        body: `${user.name} now shares your interest in ${mutualInterests.join(
-          ", "
-        )}. Tap to check out their profile!`,
+        body: `${user.name} now shares your interest in ${mutualInterests.join(", ")}.`,
+        image: user.profile_image || "", // send profile image
       };
 
       const payload = {
@@ -208,26 +216,26 @@ async function notifyNearbyUsersOnInterestUpdate(userId) {
         data: {
           type: "UserInterestUpdate",
           pageType: "UserProfilePage",
-          viewerId: user._id.toString(),
-           viewerProfileImage: viewer.profile_image || ""
+          viewerName: user.name,
+          viewerProfileImage: user.profile_image || "",
         },
       };
 
-      // send notification
+      // ✅ Send FCM notification
       const response = await admin.messaging().sendEachForMulticast(payload);
-      console.log(
-        `📩 Sent to ${nearUser.name}: ${response.successCount} success`
-      );
+      console.log(`📩 Sent to ${nearUser.name}: ${response.successCount} success`);
 
       notifiedUsers.push(nearUser.name);
     }
 
     console.log(`🎯 Done! Notified users: ${notifiedUsers.join(", ")}`);
     return notifiedUsers;
+
   } catch (err) {
     console.error("❌ Error:", err.message);
   }
 }
+
 
 const notifiedViewMap = {}; // cooldown memory
 
@@ -242,13 +250,21 @@ async function notifyOnServiceView(service, viewer) {
 
     // 🧠 Skip if viewer is the same as owner
     if (!owner || String(owner._id) === String(viewer._id)) {
-      console.log(`🙈 Self-view detected for ${viewer?.name}, skipping notification`);
+      console.log(
+        `🙈 Self-view detected for ${viewer?.name}, skipping notification`
+      );
       return;
     }
 
     // 🚫 Skip if no FCM token
-    if (!owner?.fcmToken || !Array.isArray(owner.fcmToken) || owner.fcmToken.length === 0) {
-      console.log(`⚠️ Owner ${owner.name} has no FCM token, skipping notification`);
+    if (
+      !owner?.fcmToken ||
+      !Array.isArray(owner.fcmToken) ||
+      owner.fcmToken.length === 0
+    ) {
+      console.log(
+        `⚠️ Owner ${owner.name} has no FCM token, skipping notification`
+      );
       return;
     }
 
@@ -282,15 +298,17 @@ async function notifyOnServiceView(service, viewer) {
 
     const response = await admin.messaging().sendEachForMulticast(payload);
 
-    console.log(`✅ Notified ${owner.name}: ${response.successCount} success, ${response.failureCount} failed`);
+    console.log(
+      `✅ Notified ${owner.name}: ${response.successCount} success, ${response.failureCount} failed`
+    );
 
     response.responses.forEach((res, i) => {
-      if (res.success)
-        console.log(`✅ Sent to token: ${payload.tokens[i]}`);
+      if (res.success) console.log(`✅ Sent to token: ${payload.tokens[i]}`);
       else
-        console.log(`❌ Failed for token: ${payload.tokens[i]} - ${res.error?.message}`);
+        console.log(
+          `❌ Failed for token: ${payload.tokens[i]} - ${res.error?.message}`
+        );
     });
-
   } catch (err) {
     console.error("❌ Service view notification error:", err.message);
   }
@@ -304,7 +322,12 @@ exports.getservicbyId = async (req, res) => {
   try {
     const { serviceId, latitude, longitude, viewerId } = req.body;
 
-    console.log("🚀 getservicbyId called with", { serviceId, viewerId, latitude, longitude });
+    console.log("🚀 getservicbyId called with", {
+      serviceId,
+      viewerId,
+      latitude,
+      longitude,
+    });
 
     // Step 1: Check if viewerId exists
     if (!viewerId) {
@@ -314,12 +337,16 @@ exports.getservicbyId = async (req, res) => {
     // Step 2: Validate serviceId
     if (!serviceId) {
       console.log("❌ Missing serviceId");
-      return res.status(400).json({ isSuccess: false, message: "serviceId is required" });
+      return res
+        .status(400)
+        .json({ isSuccess: false, message: "serviceId is required" });
     }
 
     if (!mongoose.Types.ObjectId.isValid(serviceId)) {
       console.log("❌ Invalid serviceId format:", serviceId);
-      return res.status(400).json({ isSuccess: false, message: "Invalid serviceId" });
+      return res
+        .status(400)
+        .json({ isSuccess: false, message: "Invalid serviceId" });
     }
 
     // Step 3: Find service
@@ -327,23 +354,32 @@ exports.getservicbyId = async (req, res) => {
     const service = await Service.findById(serviceId);
     if (!service) {
       console.log("❌ Service not found in DB");
-      return res.status(404).json({ isSuccess: false, message: "Service not found" });
+      return res
+        .status(404)
+        .json({ isSuccess: false, message: "Service not found" });
     }
 
     // Step 4: Populate relations
-    await service.populate("owner", "name profile_image notifyOnProfileView fcmToken");
+    await service.populate(
+      "owner",
+      "name profile_image notifyOnProfileView fcmToken"
+    );
     await service.populate("category", "name");
 
     console.log(`✅ Service found: ${service.title}`);
-    console.log(`📌 Owner: ${service.owner.name}, notifyOnProfileView: ${service.owner.notifyOnProfileView}`);
+    console.log(
+      `📌 Owner: ${service.owner.name}, notifyOnProfileView: ${service.owner.notifyOnProfileView}`
+    );
 
     // Step 5: Notify owner if viewerId is provided
     if (viewerId) {
       console.log(`👤 Trying to find viewer in DB: ${viewerId}`);
       const viewer = await User.findById(viewerId).select("name profile_image");
       if (viewer) {
-        console.log(`🚀 Sending view notification to owner for viewer ${viewerId} (${viewer.name})`);
-        notifyOnServiceView(service, viewer).catch(err =>
+        console.log(
+          `🚀 Sending view notification to owner for viewer ${viewerId} (${viewer.name})`
+        );
+        notifyOnServiceView(service, viewer).catch((err) =>
           console.error("Notification error:", err)
         );
       } else {
@@ -374,7 +410,9 @@ exports.getservicbyId = async (req, res) => {
       const total = reviews.reduce((sum, r) => sum + r.rating, 0);
       avgRating = Number((total / reviews.length).toFixed(1));
     }
-    console.log(`⭐ Reviews fetched: ${reviews.length}, averageRating: ${avgRating}`);
+    console.log(
+      `⭐ Reviews fetched: ${reviews.length}, averageRating: ${avgRating}`
+    );
 
     // Step 8: Final response
     return res.json({
@@ -388,7 +426,6 @@ exports.getservicbyId = async (req, res) => {
         distance_km,
       },
     });
-
   } catch (err) {
     console.error("💥 getservicbyId error:", err);
     return res.status(500).json({
@@ -398,7 +435,6 @@ exports.getservicbyId = async (req, res) => {
     });
   }
 };
-
 
 // Exports
 exports.notifyOnNewService = (service) => notifyUsersForService(service, "new");

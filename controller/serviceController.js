@@ -830,57 +830,57 @@ function getDistanceKm(lat1, lon1, lat2, lon2) {
 
 exports.getservicbyId = async (req, res) => {
   try {
-    const { serviceId, latitude, longitude } = req.body;
-    const viewerId = req.user?._id; // 👈 automatically get logged-in user
+    const { serviceId, latitude, longitude, viewerId } = req.body;
 
-    console.log("🚀 getservicbyId called with", { serviceId, viewerId });
+    console.log("🚀 getservicbyId called");
+    console.log("📌 Received body:", req.body);
+    console.log("🔹 serviceId:", serviceId);
+    console.log("🔹 viewerId:", viewerId);
 
     if (!serviceId) {
+      console.log("❌ serviceId missing!");
       return res.status(400).json({ isSuccess: false, message: "serviceId is required" });
     }
 
     if (!mongoose.Types.ObjectId.isValid(serviceId)) {
+      console.log("❌ Invalid serviceId format!");
       return res.status(400).json({ isSuccess: false, message: "Invalid serviceId" });
     }
 
     const service = await Service.findById(serviceId);
     if (!service) {
+      console.log("❌ Service not found!");
       return res.status(404).json({ isSuccess: false, message: "Service not found" });
     }
 
-    // Populate owner and category
     await service.populate("owner", "name profile_image notifyOnProfileView fcmToken");
     await service.populate("category", "name");
 
     console.log(`✅ Service found: ${service.title}`);
     console.log(`📌 Owner: ${service.owner.name}, notifyOnProfileView: ${service.owner.notifyOnProfileView}`);
 
-    // Notify owner if viewer exists and is not the owner
     if (viewerId) {
+      console.log(`🚀 Attempting to send notification for viewerId: ${viewerId}`);
       const viewer = await User.findById(viewerId).select("name profile_image");
       if (viewer) {
-        console.log(`🚀 Sending view notification to owner for viewer ${viewer._id}`);
-        notifyOnServiceView(service, viewer).catch(err =>
-          console.error("Notification error:", err)
-        );
+        console.log(`✅ Viewer found: ${viewer.name}`);
+        notifyOnServiceView(service, viewer).catch(err => console.error("Notification error:", err));
       } else {
-        console.log(`⚠️ Viewer not found: ${viewerId}`);
+        console.log(`❌ Viewer not found for ID: ${viewerId}`);
       }
+    } else {
+      console.log("⚠️ viewerId is undefined. Notification will NOT be sent.");
     }
 
-    // Calculate distance if latitude & longitude provided
+    // Calculate distance if provided
     let distance_km = null;
     if (latitude && longitude && service.location?.coordinates) {
-      const [lon, lat] = service.location.coordinates; // [lon, lat]
+      const [lon, lat] = service.location.coordinates;
       distance_km = getDistanceKm(latitude, longitude, lat, lon);
       console.log(`📍 Calculated distance: ${distance_km.toFixed(2)} km`);
     }
 
-    // Fetch reviews
-    const reviews = await Review.find({ service: serviceId })
-      .populate("user", "name profile_image")
-      .sort({ created_at: -1 });
-
+    const reviews = await Review.find({ service: serviceId }).populate("user", "name profile_image").sort({ created_at: -1 });
     let avgRating = 0;
     if (reviews.length > 0) {
       const total = reviews.reduce((sum, r) => sum + r.rating, 0);
@@ -891,21 +891,11 @@ exports.getservicbyId = async (req, res) => {
     return res.json({
       isSuccess: true,
       message: "Service found successfully",
-      data: {
-        service,
-        reviews,
-        totalReviews: reviews.length,
-        averageRating: avgRating,
-        distance_km,
-      },
+      data: { service, reviews, totalReviews: reviews.length, averageRating: avgRating, distance_km },
     });
 
   } catch (err) {
     console.error("getservicbyId error:", err);
-    return res.status(500).json({
-      isSuccess: false,
-      message: "Server error",
-      error: err.message,
-    });
+    return res.status(500).json({ isSuccess: false, message: "Server error", error: err.message });
   }
 };

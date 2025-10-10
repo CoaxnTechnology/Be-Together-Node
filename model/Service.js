@@ -69,5 +69,10 @@ serviceSchema.pre("save", function (next) {
   this.updated_at = Date.now();
   next();
 });
+serviceSchema.virtual("reviews", {
+  ref: "Review",
+  localField: "_id",
+  foreignField: "service",
+});
 
 module.exports = mongoose.model("Service", serviceSchema);

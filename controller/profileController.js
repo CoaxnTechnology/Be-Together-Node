@@ -400,33 +400,23 @@ exports.editProfile = async (req, res) => {
 exports.getUserProfileByEmail = async (req, res) => {
   try {
     const { email } = req.body;
-
     if (!email) {
       return res
         .status(400)
-        .json({ isSuccess: false, message: "email is required" });
+        .json({ isSuccess: false, message: "Email is required" });
     }
 
-    // ✅ Find user and populate full service details + category + reviews
+    // ✅ Find user and populate full service details
     const user = await User.findOne({ email }).populate({
       path: "services",
       model: "Service",
-      select: "-__v -updated_at", // hide unneeded fields
+      select: "-__v -updated_at",
       populate: [
-        {
-          path: "category",
-          model: "Category",
-          select: "name",
-        },
+        { path: "category", model: "Category", select: "name" },
         {
           path: "reviews",
           model: "Review",
-          select: "rating user created_at",
-          populate: {
-            path: "user",
-            model: "User",
-            select: "name profile_image",
-          },
+          populate: { path: "user", select: "name profile_image" },
         },
       ],
     });
@@ -437,17 +427,16 @@ exports.getUserProfileByEmail = async (req, res) => {
         .json({ isSuccess: false, message: "User not found" });
     }
 
-    // ✅ Calculate average rating & total reviews for each service
-    const servicesWithRatings = user.services.map((service) => {
+    // ✅ Compute avg rating for each service
+    const servicesWithRating = user.services.map((service) => {
       let avgRating = 0;
-      if (service.reviews && service.reviews.length > 0) {
+      if (service.reviews?.length) {
         const total = service.reviews.reduce((sum, r) => sum + r.rating, 0);
         avgRating = Number((total / service.reviews.length).toFixed(1));
       }
-
       return {
         ...service.toObject(),
-        totalReviews: service.reviews.length,
+        totalReviews: service.reviews?.length || 0,
         averageRating: avgRating,
       };
     });
@@ -465,8 +454,9 @@ exports.getUserProfileByEmail = async (req, res) => {
         languages: user.languages || [],
         interests: user.interests || [],
         offeredTags: user.offeredTags || [],
-        servicesCount: user.services.length,
-        services: servicesWithRatings,
+
+        servicesCount: servicesWithRating.length, // total services
+        services: servicesWithRating, // full service details with avg rating
       },
     });
   } catch (err) {

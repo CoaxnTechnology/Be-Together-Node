@@ -209,6 +209,7 @@ async function notifyNearbyUsersOnInterestUpdate(userId) {
           type: "UserInterestUpdate",
           pageType: "UserProfilePage",
           viewerId: user._id.toString(),
+           viewerProfileImage: viewer.profile_image || ""
         },
       };
 

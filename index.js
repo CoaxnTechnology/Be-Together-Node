@@ -42,9 +42,9 @@ app.use("/api",ReviewRoutes)
 //app.use("/api/notifications", notificationRoutes);
 //----------------------Admin API ROutes
 app.use("/api/admin", AdminRoutes);
-// app.use("/api/admin/services", serviceRoutes);
 
 
+//new chnages addes
 // Connect to MongoDB (live Atlas)
 mongoose
   .connect(process.env.MONGO_URI, {

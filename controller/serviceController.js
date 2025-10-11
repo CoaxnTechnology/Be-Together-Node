@@ -133,7 +133,7 @@ exports.createService = async (req, res) => {
       isFree,
       price,
       location_name: location.name, // ✅ save location name
-      //  city, // ✅ save city
+      city, // ✅ save city
       location: {
         type: "Point",
         coordinates: [Number(location.longitude), Number(location.latitude)],

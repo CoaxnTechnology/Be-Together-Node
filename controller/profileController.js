@@ -484,11 +484,14 @@ exports.getProfileById = async (req, res) => {
       path: "services",
       model: "Service",
       select: "-__v -updated_at",
-      populate: {
-        path: "category", // 👈 populate category inside service
-        model: "Category",
-        select: "name", // 👈 only fetch category name
-      },
+      populate: [
+        { path: "category", model: "Category", select: "name" },
+        {
+          path: "reviews",
+          model: "Review",
+          populate: { path: "user", select: "name profile_image" },
+        },
+      ],
     });
 
     if (!user) {
@@ -496,7 +499,18 @@ exports.getProfileById = async (req, res) => {
         .status(404)
         .json({ isSuccess: false, message: "User not found" });
     }
-
+    const servicesWithRating = user.services.map((service) => {
+      let avgRating = 0;
+      if (service.reviews?.length) {
+        const total = service.reviews.reduce((sum, r) => sum + r.rating, 0);
+        avgRating = Number((total / service.reviews.length).toFixed(1));
+      }
+      return {
+        ...service.toObject(),
+        totalReviews: service.reviews?.length || 0,
+        averageRating: avgRating,
+      };
+    });
     res.json({
       isSuccess: true,
       message: "Profile fetched successfully",
@@ -513,6 +527,8 @@ exports.getProfileById = async (req, res) => {
 
         servicesCount: user.services.length,
         services: user.services || [],
+        servicesCount: servicesWithRating.length, // total services
+        services: servicesWithRating, // full service details with avg rating
       },
     });
   } catch (err) {

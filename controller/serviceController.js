@@ -66,7 +66,7 @@ exports.createService = async (req, res) => {
     const price = isFree ? 0 : Number(body.price || 0);
 
     const location = tryParse(body.location);
-    // const city = body.city;
+    const city = body.city;
     const service_type = body.service_type || "one_time";
     const date = body.date;
     const start_time = body.start_time;
@@ -93,10 +93,10 @@ exports.createService = async (req, res) => {
       });
     }
 
-    // if (!city)
-    //   return res
-    //     .status(400)
-    //     .json({ isSuccess: false, message: "City is required" });
+    if (!city)
+      return res
+        .status(400)
+        .json({ isSuccess: false, message: "City is required" });
 
     if (!categoryId)
       return res

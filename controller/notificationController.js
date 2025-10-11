@@ -284,14 +284,14 @@ async function notifyOnServiceView(service, viewer) {
     }
 
     // 🕒 60-minute cooldown key
-    const key = `${service._id}-${viewer._id}-${owner._id}`;
-    if (notifiedViewMap[key]) {
-      console.log(`⏱ Already notified within the last 60 minutes, skipping`);
-      return;
-    }
+    // const key = `${service._id}-${viewer._id}-${owner._id}`;
+    // if (notifiedViewMap[key]) {
+    //   console.log(`⏱ Already notified within the last 60 minutes, skipping`);
+    //   return;
+    // }
 
-    notifiedViewMap[key] = true;
-    setTimeout(() => delete notifiedViewMap[key], 1000 * 60 * 60); // 60 minutes = 1 hour
+    // notifiedViewMap[key] = true;
+    // setTimeout(() => delete notifiedViewMap[key], 1000 * 60 * 60); // 60 minutes = 1 hour
 
     console.log("✉️ Building FCM message payload...");
 
@@ -333,123 +333,123 @@ async function notifyOnServiceView(service, viewer) {
 // getservicbyId
 // -------------------------------
 
-exports.getservicbyId = async (req, res) => {
-  try {
-    const { serviceId, latitude, longitude, viewerId } = req.body;
+// exports.getservicbyId = async (req, res) => {
+//   try {
+//     const { serviceId, latitude, longitude, viewerId } = req.body;
 
-    console.log("🚀 getservicbyId called with", {
-      serviceId,
-      viewerId,
-      latitude,
-      longitude,
-    });
+//     console.log("🚀 getservicbyId called with", {
+//       serviceId,
+//       viewerId,
+//       latitude,
+//       longitude,
+//     });
 
-    // Step 1: Check if viewerId exists
-    if (!viewerId) {
-      console.log("⚠️ viewerId missing in request body");
-    }
+//     // Step 1: Check if viewerId exists
+//     if (!viewerId) {
+//       console.log("⚠️ viewerId missing in request body");
+//     }
 
-    // Step 2: Validate serviceId
-    if (!serviceId) {
-      console.log("❌ Missing serviceId");
-      return res
-        .status(400)
-        .json({ isSuccess: false, message: "serviceId is required" });
-    }
+//     // Step 2: Validate serviceId
+//     if (!serviceId) {
+//       console.log("❌ Missing serviceId");
+//       return res
+//         .status(400)
+//         .json({ isSuccess: false, message: "serviceId is required" });
+//     }
 
-    if (!mongoose.Types.ObjectId.isValid(serviceId)) {
-      console.log("❌ Invalid serviceId format:", serviceId);
-      return res
-        .status(400)
-        .json({ isSuccess: false, message: "Invalid serviceId" });
-    }
+//     if (!mongoose.Types.ObjectId.isValid(serviceId)) {
+//       console.log("❌ Invalid serviceId format:", serviceId);
+//       return res
+//         .status(400)
+//         .json({ isSuccess: false, message: "Invalid serviceId" });
+//     }
 
-    // Step 3: Find service
-    console.log("🔍 Fetching service from DB...");
-    const service = await Service.findById(serviceId);
-    if (!service) {
-      console.log("❌ Service not found in DB");
-      return res
-        .status(404)
-        .json({ isSuccess: false, message: "Service not found" });
-    }
+//     // Step 3: Find service
+//     console.log("🔍 Fetching service from DB...");
+//     const service = await Service.findById(serviceId);
+//     if (!service) {
+//       console.log("❌ Service not found in DB");
+//       return res
+//         .status(404)
+//         .json({ isSuccess: false, message: "Service not found" });
+//     }
 
-    // Step 4: Populate relations
-    await service.populate(
-      "owner",
-      "name profile_image notifyOnProfileView fcmToken"
-    );
-    await service.populate("category", "name");
+//     // Step 4: Populate relations
+//     await service.populate(
+//       "owner",
+//       "name profile_image notifyOnProfileView fcmToken"
+//     );
+//     await service.populate("category", "name");
 
-    console.log(`✅ Service found: ${service.title}`);
-    console.log(
-      `📌 Owner: ${service.owner.name}, notifyOnProfileView: ${service.owner.notifyOnProfileView}`
-    );
+//     console.log(`✅ Service found: ${service.title}`);
+//     console.log(
+//       `📌 Owner: ${service.owner.name}, notifyOnProfileView: ${service.owner.notifyOnProfileView}`
+//     );
 
-    // Step 5: Notify owner if viewerId is provided
-    if (viewerId) {
-      console.log(`👤 Trying to find viewer in DB: ${viewerId}`);
-      const viewer = await User.findById(viewerId).select("name profile_image");
-      if (viewer) {
-        console.log(
-          `🚀 Sending view notification to owner for viewer ${viewerId} (${viewer.name})`
-        );
-        notifyOnServiceView(service, viewer).catch((err) =>
-          console.error("Notification error:", err)
-        );
-      } else {
-        console.log(`⚠️ Viewer not found in DB for ID: ${viewerId}`);
-      }
-    } else {
-      console.log("🚫 Skipping notification — viewerId not provided");
-    }
+//     // Step 5: Notify owner if viewerId is provided
+//     if (viewerId) {
+//       console.log(`👤 Trying to find viewer in DB: ${viewerId}`);
+//       const viewer = await User.findById(viewerId).select("name profile_image");
+//       if (viewer) {
+//         console.log(
+//           `🚀 Sending view notification to owner for viewer ${viewerId} (${viewer.name})`
+//         );
+//         notifyOnServiceView(service, viewer).catch((err) =>
+//           console.error("Notification error:", err)
+//         );
+//       } else {
+//         console.log(`⚠️ Viewer not found in DB for ID: ${viewerId}`);
+//       }
+//     } else {
+//       console.log("🚫 Skipping notification — viewerId not provided");
+//     }
 
-    // Step 6: Distance calculation
-    let distance_km = null;
-    if (latitude && longitude && service.location?.coordinates) {
-      const [lon, lat] = service.location.coordinates;
-      distance_km = getDistanceKm(latitude, longitude, lat, lon);
-      console.log(`📍 Calculated distance: ${distance_km.toFixed(2)} km`);
-    } else {
-      console.log("📍 Skipping distance calculation (lat/long missing)");
-    }
+//     // Step 6: Distance calculation
+//     let distance_km = null;
+//     if (latitude && longitude && service.location?.coordinates) {
+//       const [lon, lat] = service.location.coordinates;
+//       distance_km = getDistanceKm(latitude, longitude, lat, lon);
+//       console.log(`📍 Calculated distance: ${distance_km.toFixed(2)} km`);
+//     } else {
+//       console.log("📍 Skipping distance calculation (lat/long missing)");
+//     }
 
-    // Step 7: Reviews
-    console.log("📝 Fetching reviews...");
-    const reviews = await Review.find({ service: serviceId })
-      .populate("user", "name profile_image")
-      .sort({ created_at: -1 });
+//     // Step 7: Reviews
+//     console.log("📝 Fetching reviews...");
+//     const reviews = await Review.find({ service: serviceId })
+//       .populate("user", "name profile_image")
+//       .sort({ created_at: -1 });
 
-    let avgRating = 0;
-    if (reviews.length > 0) {
-      const total = reviews.reduce((sum, r) => sum + r.rating, 0);
-      avgRating = Number((total / reviews.length).toFixed(1));
-    }
-    console.log(
-      `⭐ Reviews fetched: ${reviews.length}, averageRating: ${avgRating}`
-    );
+//     let avgRating = 0;
+//     if (reviews.length > 0) {
+//       const total = reviews.reduce((sum, r) => sum + r.rating, 0);
+//       avgRating = Number((total / reviews.length).toFixed(1));
+//     }
+//     console.log(
+//       `⭐ Reviews fetched: ${reviews.length}, averageRating: ${avgRating}`
+//     );
 
-    // Step 8: Final response
-    return res.json({
-      isSuccess: true,
-      message: "Service found successfully",
-      data: {
-        service,
-        reviews,
-        totalReviews: reviews.length,
-        averageRating: avgRating,
-        distance_km,
-      },
-    });
-  } catch (err) {
-    console.error("💥 getservicbyId error:", err);
-    return res.status(500).json({
-      isSuccess: false,
-      message: "Server error",
-      error: err.message,
-    });
-  }
-};
+//     // Step 8: Final response
+//     return res.json({
+//       isSuccess: true,
+//       message: "Service found successfully",
+//       data: {
+//         service,
+//         reviews,
+//         totalReviews: reviews.length,
+//         averageRating: avgRating,
+//         distance_km,
+//       },
+//     });
+//   } catch (err) {
+//     console.error("💥 getservicbyId error:", err);
+//     return res.status(500).json({
+//       isSuccess: false,
+//       message: "Server error",
+//       error: err.message,
+//     });
+//   }
+// };
 
 // Exports
 exports.notifyOnNewService = (service) => notifyUsersForService(service, "new");

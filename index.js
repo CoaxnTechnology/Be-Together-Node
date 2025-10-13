@@ -34,7 +34,7 @@ app.get("/api/terms", (req, res) => {
 // API routes
 app.use("/api/auth", authRoutes);
 app.use("/api", profileRoutes);
-app.use("/api/admin/categories", categoryRoutes);
+//app.use("/api/admin/categories", categoryRoutes);
 app.use("/api/service", serviceRoutes);
 app.use("/api/onbording", userTags);
  app.use("/api/user", locationRoutes);

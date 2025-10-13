@@ -4,7 +4,7 @@ const axios = require("axios");
 const Category = require("../model/Category");
 const User = require("../model/User");
 const Service = require("../model/Service");
-
+require("dotenv").config();
 // Helper to upload buffer to Cloudinary
 const uploadFromBuffer = (buffer) =>
   new Promise((resolve, reject) => {
@@ -22,11 +22,24 @@ exports.createCategory = async (req, res) => {
   try {
     const { name, tags } = req.body;
     if (!name) {
-      return res
-        .status(400)
-        .json({ isSuccess: false, message: "Category name is required" });
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Category name is required",
+      });
     }
 
+    // 🧱 Prevent duplicate category names
+    const existing = await Category.findOne({
+      name: { $regex: new RegExp(`^${name}$`, "i") },
+    });
+    if (existing) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Category with this name already exists",
+      });
+    }
+
+    // ✅ Upload image if provided
     let imageUrl = null;
     let imagePublicId = null;
 
@@ -34,31 +47,66 @@ exports.createCategory = async (req, res) => {
       try {
         const uploadResult = await uploadFromBuffer(req.file.buffer);
         imageUrl = uploadResult.secure_url;
-        imagePublicId = uploadResult.public_id; // save public_id
+        imagePublicId = uploadResult.public_id;
       } catch (err) {
+        console.error("Image upload error:", err);
         return res
           .status(500)
           .json({ isSuccess: false, message: "Image upload failed" });
       }
     }
 
-    // Auto-tags from OpenStreetMap
-    let autoTags = [];
-    try {
-      const tagRes = await axios.get(
-        `https://taginfo.openstreetmap.org/api/4/key/values?key=${encodeURIComponent(
-          name
-        )}&page=1&rp=10`
-      );
-      autoTags = tagRes.data.data?.map((t) => t.value).filter(Boolean) || [];
-    } catch (err) {}
+    // ✅ Fetch AI tags from HrFlow
+    // Fetch AI tags
+const getHrFlowTags = async (text) => {
+  try {
+    const response = await axios.post(
+      "https://api.hrflow.ai/v1/text/tagging",
+      {
+        algorithm_key: "tagger-rome-family",
+        text: text,
+        top_n: 10,
+        output_lang: "en",
+      },
+      {
+        headers: {
+          "X-API-KEY": process.env.HRFLOW_API_KEY,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+    console.log("HrFlow tagging response:", response.data);
+    return response.data.data?.tags?.map((t) => t.name) || [];
+  } catch (err) {
+    console.error("HrFlow tagging error:", err.response?.data || err.message);
+    return [];
+  }
+};
 
-    const finalTags = autoTags.length > 0 ? autoTags : tags || [];
+// ✅ Actually call it
+let autoTags = await getHrFlowTags(name);
+console.log("Auto tags fetched:", autoTags);
 
+
+    // ✅ Merge manual + AI tags
+    let userTags = [];
+    if (Array.isArray(tags)) userTags = tags;
+    else if (typeof tags === "string") {
+      try {
+        userTags = JSON.parse(tags);
+      } catch {
+        userTags = [tags];
+      }
+    }
+
+    const finalTags = [...new Set([...autoTags, ...userTags])].filter(Boolean);
+    console.log("✅ Final Tags to Save:", finalTags);
+
+    // ✅ Save the new category
     const newCategory = new Category({
       name,
       image: imageUrl,
-      imagePublicId, // save public_id
+      imagePublicId,
       tags: finalTags,
     });
 
@@ -66,10 +114,11 @@ exports.createCategory = async (req, res) => {
 
     return res.status(201).json({
       isSuccess: true,
-      message: "Category created",
+      message: "Category created successfully",
       data: newCategory,
     });
   } catch (err) {
+    console.error("❌ createCategory error:", err);
     return res.status(500).json({
       isSuccess: false,
       message: "Internal server error",
@@ -77,7 +126,6 @@ exports.createCategory = async (req, res) => {
     });
   }
 };
-
 // ---------------------------------GET ALL CATEGORY -------------------------------
 exports.getAllCategories = async (req, res) => {
   try {
@@ -105,7 +153,7 @@ exports.getAllCategories = async (req, res) => {
 exports.updateCategory = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, tags } = req.body;
+    let { name, tags } = req.body;
 
     if (!id) {
       return res
@@ -120,11 +168,21 @@ exports.updateCategory = async (req, res) => {
         .json({ isSuccess: false, message: "Category not found" });
     }
 
-    // Update name and tags
+    // ✅ Update name and tags safely
     category.name = name || category.name;
-    category.tags = tags || category.tags;
 
-    // If new image is uploaded, delete old one from Cloudinary
+    // ✅ Convert tags string (like '["spa"]') to array
+    if (typeof tags === "string") {
+      try {
+        category.tags = JSON.parse(tags);
+      } catch {
+        category.tags = [];
+      }
+    } else {
+      category.tags = tags || category.tags;
+    }
+
+    // ✅ Handle image update
     if (req.file) {
       if (category.imagePublicId) {
         try {
@@ -134,7 +192,6 @@ exports.updateCategory = async (req, res) => {
         }
       }
 
-      // Upload new image
       const uploadResult = await uploadFromBuffer(req.file.buffer);
       category.image = uploadResult.secure_url;
       category.imagePublicId = uploadResult.public_id;
@@ -156,6 +213,7 @@ exports.updateCategory = async (req, res) => {
     });
   }
 };
+
 
 //-------------------------------------DELETE CATEGROY--------------------------
 exports.deleteCategory = async (req, res) => {
@@ -206,11 +264,11 @@ exports.getUserById = async (req, res) => {
 
     const user = await User.findById(id)
       .populate({
-        path: "services",      // field in User schema
-        model: "Service",      // your Service model
+        path: "services",
+        model: "Service",
         populate: [
-          { path: "category", select: "name" }, // get only category name
-          { path: "owner", select: "name" },    // get only owner name
+          { path: "category", select: "name" },
+          { path: "owner", select: "name" },
         ],
       })
       .lean();
@@ -243,6 +301,39 @@ exports.getAllUsers = async (req, res) => {
     res.json({ success: true, data: users });
   } catch (err) {
     console.error("Error fetching users:", err);
+    res
+      .status(500)
+      .json({ success: false, message: "Server error", error: err.message });
+  }
+};
+//--------------------ALL SERVICES----------
+exports.getAllService = async (req, res) => {
+  try {
+    const services = await Service.find()
+      .populate("category", "name")
+      .populate("owner", "name");
+    //console.log(services);
+    // services.forEach(s => {
+    //   console.log(s.title, s.owner); // dekho kaunse null aa rahe
+    // });
+    res.json({ success: true, data: services });
+  } catch (err) {
+    console.error("Error fetching services:", err);
+    res
+      .status(500)
+      .json({ success: false, message: "Server error", error: err.message });
+  }
+};
+//--------------------Service By ID----------
+exports.getServiceById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const service = await Service.findById(id)
+      .populate("category", "name") // only get the category name
+      .populate("owner", "name email");
+    res.json({ success: true, data: service });
+  } catch (err) {
+    console.error("Error fetching service:", err);
     res
       .status(500)
       .json({ success: false, message: "Server error", error: err.message });

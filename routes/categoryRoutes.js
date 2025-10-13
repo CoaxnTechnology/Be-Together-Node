@@ -13,6 +13,6 @@ const upload = multer({
 router.post("/add", upload.single("image"), categoryController.addCategory);
 
 // 📥 Get Categories
-router.get("/all", categoryController.getCategories);
+//router.get("/all", categoryController.getCategories);
 
 module.exports = router;

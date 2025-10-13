@@ -20,6 +20,7 @@ const userSchema = new mongoose.Schema(
     bio: { type: String, default: null },
     city: { type: String, default: null, index: true },
     age: { type: Number, default: null },
+    is_fake: { type: Boolean, default: false },
 
     register_type: {
       type: String,

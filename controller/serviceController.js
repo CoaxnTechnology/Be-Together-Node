@@ -468,7 +468,7 @@ exports.getInterestedUsers = async (req, res) => {
       latitude = 0,
       longitude = 0,
       radius_km = 10,
-      categoryId,
+      categoryId = [], // can be empty array
       tags = [],
       languages = [], // array of languages
       age, // exact age filter
@@ -486,20 +486,23 @@ exports.getInterestedUsers = async (req, res) => {
     // ---------- Step 1: Build interests filter ----------
     let interestsFilter = [];
 
-    if (categoryId) {
-      const category = await Category.findById(categoryId)
+    if (Array.isArray(categoryId) && categoryId.length) {
+      const categories = await Category.find({ _id: { $in: categoryId } })
         .select("name tags")
         .lean();
-      if (!category) {
+
+      if (!categories.length) {
         return res
           .status(404)
           .json({ success: false, message: "Category not found" });
       }
 
-      if (category.name) interestsFilter.push(category.name.toLowerCase());
-      if (Array.isArray(category.tags)) {
-        interestsFilter.push(...category.tags.map((t) => t.toLowerCase()));
-      }
+      categories.forEach((category) => {
+        if (category.name) interestsFilter.push(category.name.toLowerCase());
+        if (Array.isArray(category.tags)) {
+          interestsFilter.push(...category.tags.map((t) => t.toLowerCase()));
+        }
+      });
     }
 
     if (tags.length) interestsFilter.push(...tags.map((t) => t.toLowerCase()));
@@ -601,6 +604,7 @@ exports.getInterestedUsers = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
+
 
 // ----------- Get All Services -------------
 exports.getAllServices = async (req, res) => {

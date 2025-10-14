@@ -611,8 +611,8 @@ function escapeRegExp(str) {
 
 exports.editProfile = async (req, res) => {
   try {
-    console.log("req.body:", req.body);
-    console.log("req.file:", req.file);
+   // console.log("req.body:", req.body);
+    //console.log("req.file:", req.file);
 
     let {
       email,
@@ -658,7 +658,7 @@ exports.editProfile = async (req, res) => {
         "profile_images",
         publicId
       );
-      console.log("Cloudinary upload result:", result);
+      //console.log("Cloudinary upload result:", result);
       user.profile_image = result.secure_url;
       user.profile_image_public_id = result.public_id;
 

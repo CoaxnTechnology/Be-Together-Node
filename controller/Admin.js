@@ -646,11 +646,11 @@ exports.editProfile = async (req, res) => {
         recordedAt: new Date(),
         updatedAt: new Date(),
       };
-      console.log("Last location saved:", user.lastLocation);
+   //   console.log("Last location saved:", user.lastLocation);
     }
 
     await user.save();
-    console.log("User updated:", user);
+  //  console.log("User updated:", user);
 
     return res.json({
       isSuccess: true,

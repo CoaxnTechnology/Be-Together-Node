@@ -122,9 +122,9 @@ exports.createCategory = async (req, res) => {
 // ---------------------------------GET ALL CATEGORY -------------------------------
 exports.getAllCategories = async (req, res) => {
   try {
-    // Get page and limit from query params
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
+    // Get page and limit from request body
+    const page = parseInt(req.body.page) || 1;
+    const limit = parseInt(req.body.limit) || 10;
     const skip = (page - 1) * limit;
 
     // Count total categories
@@ -153,6 +153,7 @@ exports.getAllCategories = async (req, res) => {
     });
   }
 };
+
 
 //------------------------------Update Category---------------
 exports.updateCategory = async (req, res) => {

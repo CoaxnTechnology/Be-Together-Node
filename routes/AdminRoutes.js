@@ -45,6 +45,6 @@ router.get("/fake-users", getFakeUsers);
 
 router.delete("/fake-users/:id", deleteFakeUser);
 router.get("/:id", getUserById);
-router.get("/category/all", getAllCategories);
+router.post("/category/all", getAllCategories);
 
 module.exports = router;

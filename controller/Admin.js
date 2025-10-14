@@ -122,19 +122,30 @@ exports.createCategory = async (req, res) => {
 // ---------------------------------GET ALL CATEGORY -------------------------------
 exports.getAllCategories = async (req, res) => {
   try {
-    // console.log("===== getAllCategories called =====");
-    // console.log("Request query:", req.query);
+    // Get page and limit from query params
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
 
-    const categories = await Category.find().sort({ created_at: -1 });
-    //    console.log("Categories fetched from DB:", categories.length);
+    // Count total categories
+    const total = await Category.countDocuments();
+
+    // Fetch paginated categories
+    const categories = await Category.find()
+      .sort({ created_at: -1 })
+      .skip(skip)
+      .limit(limit);
 
     return res.status(200).json({
       isSuccess: true,
       message: "Categories fetched successfully",
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
       data: categories,
     });
   } catch (err) {
-    // console.error("Error fetching categories:", err);
     return res.status(500).json({
       isSuccess: false,
       message: "Internal server error",
@@ -142,6 +153,7 @@ exports.getAllCategories = async (req, res) => {
     });
   }
 };
+
 //------------------------------Update Category---------------
 exports.updateCategory = async (req, res) => {
   try {

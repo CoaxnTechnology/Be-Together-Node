@@ -14,7 +14,7 @@ const userSchema = new mongoose.Schema(
     uid: { type: String, default: null }, // Google UID
     name: { type: String, required: true },
     email: { type: String, unique: true, required: true, index: true },
-    mobile: { type: String, required: true },
+    mobile: { type: String, required: false },
     hashed_password: { type: String, default: null },
     profile_image: { type: String, default: null },
     bio: { type: String, default: null },

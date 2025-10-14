@@ -333,69 +333,90 @@ exports.verifyOtpRegister = async (req, res) => {
 // ---------------- LOGIN ----------------
 exports.login = async (req, res) => {
   try {
-    const { email, password, login_type, provider_id, provider_uid, fcmToken } =
-      req.body;
+    console.log("📥 Login request body:", req.body);
+
+    const {
+      email,
+      password,
+      login_type,
+      provider_id,
+      provider_uid,
+      fcmToken,
+      name,
+    } = req.body;
 
     if (!email) {
+      console.log("❌ Email missing in request");
       return res
         .status(400)
         .json({ IsSucces: false, message: "Email required" });
     }
 
-    const user = await User.findOne({ email: String(email).toLowerCase() });
-    if (!user) {
-      return res
-        .status(404)
-        .json({ IsSucces: false, message: "User not found" });
-    }
+    let user = await User.findOne({ email: String(email).toLowerCase() });
+    console.log("🔍 Fetched user:", user);
 
-    // Manual login
+    // -------------------- MANUAL LOGIN --------------------
     if (login_type === "manual") {
+      console.log("💻 Attempting manual login");
+
+      if (!user) {
+        console.log("❌ Manual login failed: user not found");
+        return res
+          .status(404)
+          .json({ IsSucces: false, message: "User not found" });
+      }
+
       if (!user.hashed_password || !password) {
+        console.log("❌ Password missing for manual login");
         return res
           .status(400)
           .json({ IsSucces: false, message: "Password required" });
       }
 
-      const valid = await bcrypt.compare(
-        String(password),
-        user.hashed_password
-      );
+      const valid = await bcrypt.compare(String(password), user.hashed_password);
+      console.log("🔑 Password valid?", valid);
+
       if (!valid) {
+        console.log("❌ Manual login failed: invalid password");
         return res
           .status(401)
           .json({ IsSucces: false, message: "Invalid password" });
       }
 
-      // Generate OTP
       const { otp, expiry } = generateOTP();
       user.otp_code = otp;
       user.otp_expiry = expiry;
       user.otp_verified = false;
 
-      // ✅ Safe FCM token update
-      if (fcmToken) await user.addFcmToken(fcmToken);
+      if (fcmToken) {
+        console.log("📲 Adding FCM token:", fcmToken);
+        await user.addFcmToken(fcmToken);
+      }
 
       await user.save();
+      console.log("✅ Manual login OTP saved:", otp);
 
       try {
         await sendOtpEmail(user.email, otp);
+        console.log("✉️ OTP email sent");
       } catch (emailErr) {
-        console.error("Failed to send login OTP email (non-fatal):", emailErr);
+        console.error("⚠️ Failed to send OTP email (non-fatal):", emailErr);
       }
 
       return res.json({
         IsSucces: true,
         message: "OTP sent for login. Please verify.",
         require_otp: true,
-        fcmToken: user.fcmTokens, // updated array
+        fcmToken: user.fcmTokens,
       });
     }
 
-    // Google login
+    // -------------------- GOOGLE LOGIN --------------------
     if (login_type === "google_auth") {
-      // If user doesn't exist → create new one
+      console.log("🌐 Attempting Google login");
+
       if (!user) {
+        console.log("🆕 User not found, creating new Google user");
         user = new User({
           email: email.toLowerCase(),
           name: name || "No Name",
@@ -407,9 +428,14 @@ exports.login = async (req, res) => {
         });
 
         await user.save();
+        console.log("✅ New Google user created:", user._id);
       } else {
-        // User exists but registered manually?
+        console.log("🔄 Existing user found:", user._id);
+
         if (user.register_type && user.register_type === "manual") {
+          console.log(
+            "❌ Conflict: existing manual registration prevents Google login"
+          );
           return res.status(409).json({
             IsSucces: false,
             message:
@@ -417,11 +443,12 @@ exports.login = async (req, res) => {
           });
         }
 
-        // Update FCM token safely
-        if (fcmToken) await user.addFcmToken(fcmToken);
+        if (fcmToken) {
+          console.log("📲 Adding FCM token:", fcmToken);
+          await user.addFcmToken(fcmToken);
+        }
       }
 
-      // Create session + access token
       const session_id = randomUUID();
       const access_token = createAccessToken({ id: user._id, session_id });
 
@@ -430,6 +457,8 @@ exports.login = async (req, res) => {
       user.otp_verified = true;
 
       await user.save();
+      console.log("🔑 Google login session & access token saved");
+
       return res.json({
         IsSucces: true,
         message: "Login successful",
@@ -444,11 +473,13 @@ exports.login = async (req, res) => {
           profile_image: getFullImageUrl(user.profile_image),
           register_type: user.register_type,
           otp_verified: user.otp_verified,
-          fcmToken: user.fcmTokens, // updated array
+          fcmToken: user.fcmTokens,
         },
       });
     }
 
+    // -------------------- INVALID LOGIN TYPE --------------------
+    console.log("❌ Invalid login_type:", login_type);
     return res
       .status(400)
       .json({ IsSucces: false, message: "Invalid login_type" });
@@ -457,6 +488,7 @@ exports.login = async (req, res) => {
     return res.status(500).json({ IsSucces: false, message: "Server error" });
   }
 };
+
 
 // ---------------- VERIFY OTP (LOGIN) ----------------
 exports.verifyOtpLogin = async (req, res) => {

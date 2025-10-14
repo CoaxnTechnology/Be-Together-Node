@@ -119,7 +119,7 @@ exports.createCategory = async (req, res) => {
     });
   }
 };
-// ---------------------------------GET ALL CATEGORY -------------------------------
+// ---------------------------------GET ALL CATEGORY With Pagination-------------------------------
 exports.getAllCategories = async (req, res) => {
   try {
     // Get page and limit from request body
@@ -153,7 +153,6 @@ exports.getAllCategories = async (req, res) => {
     });
   }
 };
-
 
 //------------------------------Update Category---------------
 exports.updateCategory = async (req, res) => {
@@ -565,22 +564,31 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-function uploadBufferToCloudinary(buffer, folder = "profile_images", publicId = null) {
+function uploadBufferToCloudinary(
+  buffer,
+  folder = "profile_images",
+  publicId = null
+) {
   return new Promise((resolve, reject) => {
     const opts = { folder, resource_type: "image", overwrite: false };
     if (publicId) opts.public_id = publicId;
 
-    const uploadStream = cloudinary.uploader.upload_stream(opts, (err, result) => {
-      if (err) return reject(err);
-      resolve(result);
-    });
+    const uploadStream = cloudinary.uploader.upload_stream(
+      opts,
+      (err, result) => {
+        if (err) return reject(err);
+        resolve(result);
+      }
+    );
     streamifier.createReadStream(buffer).pipe(uploadStream);
   });
 }
 
 function extractPublicIdFromCloudinaryUrl(url) {
   if (!url) return null;
-  const m = url.match(/\/upload\/(?:.*\/)?v\d+\/(.+)\.[^/.]+$/) || url.match(/\/upload\/(.+)\.[^/.]+$/);
+  const m =
+    url.match(/\/upload\/(?:.*\/)?v\d+\/(.+)\.[^/.]+$/) ||
+    url.match(/\/upload\/(.+)\.[^/.]+$/);
   return m ? decodeURIComponent(m[1]) : null;
 }
 
@@ -602,16 +610,32 @@ exports.editProfile = async (req, res) => {
     console.log("req.body:", req.body);
     console.log("req.file:", req.file);
 
-    let { email, name, bio, city, age, languages, interests, offeredTags, location } = req.body;
+    let {
+      email,
+      name,
+      bio,
+      city,
+      age,
+      languages,
+      interests,
+      offeredTags,
+      location,
+    } = req.body;
 
     // Parse JSON fields if needed
-    languages = typeof languages === "string" ? JSON.parse(languages) : languages;
-    interests = typeof interests === "string" ? JSON.parse(interests) : interests;
-    offeredTags = typeof offeredTags === "string" ? JSON.parse(offeredTags) : offeredTags;
+    languages =
+      typeof languages === "string" ? JSON.parse(languages) : languages;
+    interests =
+      typeof interests === "string" ? JSON.parse(interests) : interests;
+    offeredTags =
+      typeof offeredTags === "string" ? JSON.parse(offeredTags) : offeredTags;
     location = typeof location === "string" ? JSON.parse(location) : location;
 
     const user = await User.findById(req.params.userId);
-    if (!user) return res.status(404).json({ isSuccess: false, message: "User not found" });
+    if (!user)
+      return res
+        .status(404)
+        .json({ isSuccess: false, message: "User not found" });
 
     // Update basic fields
     if (name) user.name = name.trim();
@@ -622,8 +646,14 @@ exports.editProfile = async (req, res) => {
     // ---------- Image Upload ----------
     if (req.file?.buffer) {
       const oldPublicId = user.profile_image_public_id;
-      const publicId = `user_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-      const result = await uploadBufferToCloudinary(req.file.buffer, "profile_images", publicId);
+      const publicId = `user_${Date.now()}_${Math.random()
+        .toString(36)
+        .slice(2, 8)}`;
+      const result = await uploadBufferToCloudinary(
+        req.file.buffer,
+        "profile_images",
+        publicId
+      );
       console.log("Cloudinary upload result:", result);
       user.profile_image = result.secure_url;
       user.profile_image_public_id = result.public_id;
@@ -638,15 +668,23 @@ exports.editProfile = async (req, res) => {
     if (Array.isArray(languages)) user.languages = languages;
 
     if (Array.isArray(interests) && interests.length > 0) {
-      const tagRegexes = interests.map((t) => new RegExp(`^${escapeRegExp(t)}$`, "i"));
-      const foundCategories = await Category.find({ tags: { $in: tagRegexes } });
+      const tagRegexes = interests.map(
+        (t) => new RegExp(`^${escapeRegExp(t)}$`, "i")
+      );
+      const foundCategories = await Category.find({
+        tags: { $in: tagRegexes },
+      });
       const canonical = foundCategories.flatMap((c) => c.tags);
       user.interests = interests.filter((t) => canonical.includes(t));
     }
 
     if (Array.isArray(offeredTags) && offeredTags.length > 0) {
-      const tagRegexes = offeredTags.map((t) => new RegExp(`^${escapeRegExp(t)}$`, "i"));
-      const foundCategories = await Category.find({ tags: { $in: tagRegexes } });
+      const tagRegexes = offeredTags.map(
+        (t) => new RegExp(`^${escapeRegExp(t)}$`, "i")
+      );
+      const foundCategories = await Category.find({
+        tags: { $in: tagRegexes },
+      });
       const canonical = foundCategories.flatMap((c) => c.tags);
       user.offeredTags = offeredTags.filter((t) => canonical.includes(t));
     }
@@ -654,16 +692,22 @@ exports.editProfile = async (req, res) => {
     // ---------- Location ----------
     if (location?.coordinates?.length === 2) {
       user.lastLocation = {
-        coords: { type: "Point", coordinates: [Number(location.coordinates[0]), Number(location.coordinates[1])] },
+        coords: {
+          type: "Point",
+          coordinates: [
+            Number(location.coordinates[0]),
+            Number(location.coordinates[1]),
+          ],
+        },
         provider: location.provider || "frontend",
         recordedAt: new Date(),
         updatedAt: new Date(),
       };
-   //   console.log("Last location saved:", user.lastLocation);
+      //   console.log("Last location saved:", user.lastLocation);
     }
 
     await user.save();
-  //  console.log("User updated:", user);
+    //  console.log("User updated:", user);
 
     return res.json({
       isSuccess: true,
@@ -683,29 +727,31 @@ exports.editProfile = async (req, res) => {
     });
   } catch (err) {
     console.error("editProfile error:", err);
-    return res.status(500).json({ isSuccess: false, message: "Server error", error: err.message });
+    return res
+      .status(500)
+      .json({ isSuccess: false, message: "Server error", error: err.message });
   }
 };
 
-exports.getFakeUserById=async (req, res) => {
+exports.getFakeUserById = async (req, res) => {
   try {
-    const { id } = req.params;    
+    const { id } = req.params;
     if (!id) {
       return res
         .status(400)
         .json({ success: false, message: "User ID is required" });
-    } 
+    }
     const user = await User.findById(id).lean();
     if (!user) {
       return res
         .status(404)
         .json({ success: false, message: "User not found" });
-    } 
-    return res.status(200).json({ success: true, data: user }); 
+    }
+    return res.status(200).json({ success: true, data: user });
   } catch (err) {
     console.error("Error fetching fake user:", err);
     return res
       .status(500)
       .json({ success: false, message: "Server error", error: err.message });
   }
-}
+};

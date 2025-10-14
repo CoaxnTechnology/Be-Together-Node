@@ -122,9 +122,12 @@ exports.createCategory = async (req, res) => {
 // ---------------------------------GET ALL CATEGORY With Pagination-------------------------------
 exports.getAllCategories = async (req, res) => {
   try {
-    // Get page and limit from request body
-    const page = parseInt(req.body.page) || 1;
-    const limit = parseInt(req.body.limit) || 10;
+    // Ensure req.body exists
+    const body = req.body || {};
+
+    // Read page and limit from body with defaults
+    const page = parseInt(body.page) || 1;
+    const limit = parseInt(body.limit) || 10;
     const skip = (page - 1) * limit;
 
     // Count total categories
@@ -146,6 +149,7 @@ exports.getAllCategories = async (req, res) => {
       data: categories,
     });
   } catch (err) {
+    console.error("getAllCategories error:", err);
     return res.status(500).json({
       isSuccess: false,
       message: "Internal server error",

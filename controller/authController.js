@@ -639,6 +639,8 @@ exports.resendOtp = async (req, res) => {
  * 1) Request reset link: body: { email }
  * 2) Perform reset:     body: { email, token, new_password }
  */
+
+
 exports.forgotOrResetPassword = async (req, res) => {
   try {
     const { email, token, new_password } = req.body;

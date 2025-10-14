@@ -275,7 +275,7 @@ function bboxForLatLon(lat, lon, radiusKm = 3) {
   };
 }
 //------------------Get Service------------------
- // Adjust path
+// Adjust path
 
 exports.getServices = async (req, res) => {
   try {
@@ -311,7 +311,11 @@ exports.getServices = async (req, res) => {
     // CATEGORY filter (convert string to ObjectId if needed)
     if (Array.isArray(categoryId) && categoryId.length > 0) {
       match.category = { $in: categoryId.map((id) => new Types.ObjectId(id)) };
-    } else if (categoryId && typeof categoryId === "string" && categoryId.trim() !== "") {
+    } else if (
+      categoryId &&
+      typeof categoryId === "string" &&
+      categoryId.trim() !== ""
+    ) {
       match.category = new Types.ObjectId(categoryId);
     }
 
@@ -324,7 +328,8 @@ exports.getServices = async (req, res) => {
 
     // EXCLUDE OWNER
     let excludeOwnerId = q.excludeOwnerId || (req.user && req.user._id);
-    if (excludeOwnerId) match.owner = { $ne: new Types.ObjectId(excludeOwnerId) };
+    if (excludeOwnerId)
+      match.owner = { $ne: new Types.ObjectId(excludeOwnerId) };
 
     // DATE filter
     if (q.date) {
@@ -343,7 +348,11 @@ exports.getServices = async (req, res) => {
 
     if (req.user?.lastLocation?.coords?.coordinates) {
       const coords = req.user.lastLocation.coords.coordinates;
-      if (Array.isArray(coords) && coords.length === 2 && !(coords[0] === 0 && coords[1] === 0)) {
+      if (
+        Array.isArray(coords) &&
+        coords.length === 2 &&
+        !(coords[0] === 0 && coords[1] === 0)
+      ) {
         refLon = coords[0];
         refLat = coords[1];
       }
@@ -380,20 +389,39 @@ exports.getServices = async (req, res) => {
 
     // LOOKUP CATEGORY
     pipeline.push(
-      { $lookup: { from: "categories", localField: "category", foreignField: "_id", as: "category" } },
+      {
+        $lookup: {
+          from: "categories",
+          localField: "category",
+          foreignField: "_id",
+          as: "category",
+        },
+      },
       { $unwind: "$category" }
     );
 
     // LOOKUP OWNER (only _id + profile_image)
     pipeline.push(
-      { $lookup: { from: "users", localField: "owner", foreignField: "_id", as: "owner" } },
+      {
+        $lookup: {
+          from: "users",
+          localField: "owner",
+          foreignField: "_id",
+          as: "owner",
+        },
+      },
       { $unwind: "$owner" },
       {
         $replaceRoot: {
           newRoot: {
             $mergeObjects: [
               "$$ROOT",
-              { owner: { _id: "$owner._id", profile_image: "$owner.profile_image" } },
+              {
+                owner: {
+                  _id: "$owner._id",
+                  profile_image: "$owner.profile_image",
+                },
+              },
             ],
           },
         },
@@ -408,7 +436,14 @@ exports.getServices = async (req, res) => {
           let: { serviceId: "$_id" },
           pipeline: [
             { $match: { $expr: { $eq: ["$service", "$$serviceId"] } } },
-            { $lookup: { from: "users", localField: "user", foreignField: "_id", as: "user" } },
+            {
+              $lookup: {
+                from: "users",
+                localField: "user",
+                foreignField: "_id",
+                as: "user",
+              },
+            },
             { $unwind: "$user" },
             {
               $project: {
@@ -425,20 +460,30 @@ exports.getServices = async (req, res) => {
           as: "reviews",
         },
       },
-      { $addFields: { averageRating: { $avg: "$reviews.rating" }, totalReviews: { $size: "$reviews" } } }
+      {
+        $addFields: {
+          averageRating: { $avg: "$reviews.rating" },
+          totalReviews: { $size: "$reviews" },
+        },
+      }
     );
 
     // PAGINATION
     pipeline.push({ $skip: skip }, { $limit: limit });
 
-    console.log("Final aggregation pipeline:", JSON.stringify(pipeline, null, 2));
+    console.log(
+      "Final aggregation pipeline:",
+      JSON.stringify(pipeline, null, 2)
+    );
 
     // FETCH SERVICES
     const services = await Service.aggregate(pipeline);
     console.log("Fetched services:", services.length);
 
     // TOTAL COUNT (without skip & limit)
-    const totalCountPipeline = pipeline.filter((stage) => !stage.$skip && !stage.$limit);
+    const totalCountPipeline = pipeline.filter(
+      (stage) => !stage.$skip && !stage.$limit
+    );
     const totalCountResult = await Service.aggregate([
       ...totalCountPipeline,
       { $count: "total" },
@@ -460,7 +505,6 @@ exports.getServices = async (req, res) => {
     });
   }
 };
-
 
 exports.getInterestedUsers = async (req, res) => {
   try {
@@ -531,9 +575,12 @@ exports.getInterestedUsers = async (req, res) => {
     }
 
     // ---------- Step 4: Age filter ----------
-    if (age !== undefined && age !== null) {
-      query.age = age;
-      console.log("Applying age filter:", age);
+    const validAge = Number(age);
+    if (!isNaN(validAge) && age !== "" && age !== null && age !== undefined) {
+      query.age = validAge;
+      console.log("Applying age filter:", validAge);
+    } else {
+      console.log("Skipping age filter — invalid or empty age:", age);
     }
 
     // ---------- Step 5: Location filter ----------
@@ -604,7 +651,6 @@ exports.getInterestedUsers = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
-
 
 // ----------- Get All Services -------------
 exports.getAllServices = async (req, res) => {
@@ -820,31 +866,44 @@ exports.getservicbyId = async (req, res) => {
     console.log("🚀 getservicbyId called with", { serviceId, viewerId });
 
     if (!serviceId) {
-      return res.status(400).json({ isSuccess: false, message: "serviceId is required" });
+      return res
+        .status(400)
+        .json({ isSuccess: false, message: "serviceId is required" });
     }
 
     if (!mongoose.Types.ObjectId.isValid(serviceId)) {
-      return res.status(400).json({ isSuccess: false, message: "Invalid serviceId" });
+      return res
+        .status(400)
+        .json({ isSuccess: false, message: "Invalid serviceId" });
     }
 
     const service = await Service.findById(serviceId);
     if (!service) {
-      return res.status(404).json({ isSuccess: false, message: "Service not found" });
+      return res
+        .status(404)
+        .json({ isSuccess: false, message: "Service not found" });
     }
 
     // Populate owner and category
-    await service.populate("owner", "name profile_image notifyOnProfileView fcmToken");
+    await service.populate(
+      "owner",
+      "name profile_image notifyOnProfileView fcmToken"
+    );
     await service.populate("category", "name");
 
     console.log(`✅ Service found: ${service.title}`);
-    console.log(`📌 Owner: ${service.owner.name}, notifyOnProfileView: ${service.owner.notifyOnProfileView}`);
+    console.log(
+      `📌 Owner: ${service.owner.name}, notifyOnProfileView: ${service.owner.notifyOnProfileView}`
+    );
 
     // Notify owner if viewerId is provided
     if (viewerId) {
       const viewer = await User.findById(viewerId).select("name profile_image");
       if (viewer) {
-        console.log(`🚀 Sending view notification to owner for viewer ${viewerId}`);
-        notifyOnServiceView(service, viewer).catch(err =>
+        console.log(
+          `🚀 Sending view notification to owner for viewer ${viewerId}`
+        );
+        notifyOnServiceView(service, viewer).catch((err) =>
           console.error("Notification error:", err)
         );
       } else {
@@ -870,7 +929,9 @@ exports.getservicbyId = async (req, res) => {
       const total = reviews.reduce((sum, r) => sum + r.rating, 0);
       avgRating = Number((total / reviews.length).toFixed(1));
     }
-    console.log(`⭐ Reviews fetched: ${reviews.length}, averageRating: ${avgRating}`);
+    console.log(
+      `⭐ Reviews fetched: ${reviews.length}, averageRating: ${avgRating}`
+    );
 
     return res.json({
       isSuccess: true,
@@ -883,7 +944,6 @@ exports.getservicbyId = async (req, res) => {
         distance_km,
       },
     });
-
   } catch (err) {
     console.error("getservicbyId error:", err);
     return res.status(500).json({

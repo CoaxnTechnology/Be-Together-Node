@@ -223,7 +223,7 @@ exports.updateCategory = async (req, res) => {
   }
 };
 
-//-------------------------------------DELETE CATEGROY--------------------------
+//-------------------------------------DELETE CATEGROY from admin--------------------------
 exports.deleteCategory = async (req, res) => {
   try {
     const { id } = req.params;

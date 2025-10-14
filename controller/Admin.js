@@ -120,12 +120,12 @@ exports.createCategory = async (req, res) => {
   }
 };
 // ---------------------------------GET ALL CATEGORY With Pagination-------------------------------
+// controller/Admin.js (or wherever your function is)
+
 exports.getAllCategories = async (req, res) => {
   try {
-    // Ensure req.body exists
+    // Read page and limit from request body (default to 1 and 10)
     const body = req.body || {};
-
-    // Read page and limit from body with defaults
     const page = parseInt(body.page) || 1;
     const limit = parseInt(body.limit) || 10;
     const skip = (page - 1) * limit;
@@ -133,12 +133,27 @@ exports.getAllCategories = async (req, res) => {
     // Count total categories
     const total = await Category.countDocuments();
 
-    // Fetch paginated categories
+    // Fetch paginated categories, sorted by creation date
     const categories = await Category.find()
       .sort({ created_at: -1 })
       .skip(skip)
       .limit(limit);
 
+    // Format categories to remove unwanted fields
+    const formattedCategories = categories.map(cat => ({
+      _id: cat._id,
+      name: cat.name,
+      image: cat.image,
+      tags: cat.tags || [],
+      imagePublicId: cat.imagePublicId || null,
+      created_at: cat.created_at,
+      categoryId: cat.categoryId,
+      provider_share: cat.provider_share || 0,
+      seeker_share: cat.seeker_share || 0,
+      discount_percentage: cat.discount_percentage || 0,
+    }));
+
+    // Send response
     return res.status(200).json({
       isSuccess: true,
       message: "Categories fetched successfully",
@@ -146,8 +161,9 @@ exports.getAllCategories = async (req, res) => {
       page,
       limit,
       totalPages: Math.ceil(total / limit),
-      data: categories,
+      data: formattedCategories,
     });
+
   } catch (err) {
     console.error("getAllCategories error:", err);
     return res.status(500).json({

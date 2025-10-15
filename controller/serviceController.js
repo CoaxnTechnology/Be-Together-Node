@@ -746,6 +746,10 @@ exports.updateService = async (req, res) => {
 
     // Description
     if (body.description) updatePayload.description = body.description;
+    if (body.isDoorstepService !== undefined) {
+      updatePayload.isDoorstepService =
+        body.isDoorstepService === true || body.isDoorstepService === "true";
+    }
 
     // Price & Free
     if (body.isFree !== undefined)

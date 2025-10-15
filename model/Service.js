@@ -30,6 +30,7 @@ const serviceSchema = new mongoose.Schema({
     },
   },
   city: { type: String, default: null },
+  isDoorstepService: { type: Boolean, default: false },
 
   // Who created this service
   owner: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },

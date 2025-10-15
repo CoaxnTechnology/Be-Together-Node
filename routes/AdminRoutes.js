@@ -15,6 +15,8 @@ const {
   deleteFakeUser,
   getFakeUserById,
   editProfile,
+  createService,
+  getAITags,
 } = require("../controller/Admin");
 //const { getAllServices } = require("../controller/serviceController");
 const storage = multer.memoryStorage();
@@ -35,6 +37,8 @@ router.put(
 );
 
 //-------------------category-------------------
+router.post("/category/ai-tags", getAITags);
+
 router.post("/category/create", upload.single("image"), createCategory);
 router.put("/category/update/:id", upload.single("image"), updateCategory);
 router.delete("/category/delete/:id", deleteCategory);
@@ -42,7 +46,7 @@ router.post("/generate-fake-users", async (req, res, next) => {
   return generateFakeUsers(req, res, next);
 });
 router.get("/fake-users", getFakeUsers);
-
+router.post("/create",  createService);
 router.delete("/fake-users/:id", deleteFakeUser);
 router.get("/:id", getUserById);
 router.post("/category/all", getAllCategories);

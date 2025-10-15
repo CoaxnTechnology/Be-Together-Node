@@ -67,6 +67,8 @@ exports.createService = async (req, res) => {
 
     const location = tryParse(body.location);
     const city = body.city;
+    const isDoorstepService =
+      body.isDoorstepService === true || body.isDoorstepService === "true";
     const service_type = body.service_type || "one_time";
     const date = body.date;
     const start_time = body.start_time;
@@ -134,6 +136,7 @@ exports.createService = async (req, res) => {
       price,
       location_name: location.name, // ✅ save location name
       city, // ✅ save city
+      isDoorstepService,
       location: {
         type: "Point",
         coordinates: [Number(location.longitude), Number(location.latitude)],

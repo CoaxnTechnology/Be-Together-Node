@@ -5,35 +5,112 @@ const Category = require("../model/Category");
 const User = require("../model/User");
 const Service = require("../model/Service");
 const { getFullImageUrl } = require("../utils/image");
+const Review = require("../model/review");
+const moment = require("moment");
 require("dotenv").config();
-// Helper to upload buffer to Cloudinary
 
-//--------------------------create the category ---------------------
+// ------------------ Cloudinary Config ------------------
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
+// 📤 Upload buffer to Cloudinary
+const uploadFromBuffer = (buffer) =>
+  new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      { folder: "categories" },
+      (err, result) => {
+        if (err) reject(err);
+        else resolve(result);
+      }
+    );
+    streamifier.createReadStream(buffer).pipe(stream);
+  });
+
+// 🧠 Deduplicate tags with similarity check
+function deduplicateSimilarTags(tags) {
+  const unique = [];
+  for (const tag of tags) {
+    const normalized = tag.toLowerCase().trim();
+    if (
+      !unique.some(
+        (t) =>
+          t === normalized ||
+          t.startsWith(normalized.slice(0, 5)) ||
+          normalized.startsWith(t.slice(0, 5))
+      )
+    ) {
+      unique.push(normalized);
+    }
+  }
+  return unique;
+}
+
+// 🤖 Fetch AI tags from HrFlow
+// 🤖 Fetch AI tags from HrFlow
+const getHrFlowTags = async (text) => {
+  if (!process.env.HRFLOW_API_KEY) {
+    console.warn("⚠️ HRFLOW_API_KEY not set");
+    return [];
+  }
+
+  console.log("➡️ Sending text to HrFlow for tags:", text);
+
+  try {
+    const response = await axios.post(
+      "https://api.hrflow.ai/v1/text/linking",
+      {
+        algorithm_key: "tagger-rome-family",
+        text,
+        top_n: 10,
+        output_lang: "en",
+      },
+      {
+        headers: {
+          "X-API-KEY": process.env.HRFLOW_API_KEY,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    console.log("⬅️ HrFlow raw response:", response.data);
+
+    const arr = response.data?.data || [];
+    const tags = arr.map((t) => t[0]?.trim().toLowerCase()).filter(Boolean);
+    console.log("✅ Extracted AI tags:", tags);
+
+    return [...new Set(tags)];
+  } catch (err) {
+    console.error("❌ HrFlow tagging error:", err.response?.data || err.message);
+    return [];
+  }
+};
+
+
+// ------------------ CREATE CATEGORY ------------------
 exports.createCategory = async (req, res) => {
   try {
     const { name, tags } = req.body;
-    if (!name) {
-      return res.status(400).json({
-        isSuccess: false,
-        message: "Category name is required",
-      });
-    }
 
-    // 🧱 Prevent duplicate category names
+    if (!name?.trim())
+      return res
+        .status(400)
+        .json({ isSuccess: false, message: "Category name is required" });
+
+    // Prevent duplicate names
     const existing = await Category.findOne({
-      name: { $regex: new RegExp(`^${name}$`, "i") },
+      name: { $regex: `^${name}$`, $options: "i" },
     });
-    if (existing) {
-      return res.status(400).json({
-        isSuccess: false,
-        message: "Category with this name already exists",
-      });
-    }
+    if (existing)
+      return res
+        .status(400)
+        .json({ isSuccess: false, message: "Category already exists" });
 
-    // ✅ Upload image if provided
-    let imageUrl = null;
-    let imagePublicId = null;
-
+    // Upload image if provided
+    let imageUrl = null,
+      imagePublicId = null;
     if (req.file) {
       try {
         const uploadResult = await uploadFromBuffer(req.file.buffer);
@@ -47,41 +124,10 @@ exports.createCategory = async (req, res) => {
       }
     }
 
-    // ✅ Fetch AI tags from HrFlow
-    // Fetch AI tags
-    const getHrFlowTags = async (text) => {
-      try {
-        const response = await axios.post(
-          "https://api.hrflow.ai/v1/text/tagging",
-          {
-            algorithm_key: "tagger-rome-family",
-            text: text,
-            top_n: 10,
-            output_lang: "en",
-          },
-          {
-            headers: {
-              "X-API-KEY": process.env.HRFLOW_API_KEY,
-              "Content-Type": "application/json",
-            },
-          }
-        );
-        console.log("HrFlow tagging response:", response.data);
-        return response.data.data?.tags?.map((t) => t.name) || [];
-      } catch (err) {
-        console.error(
-          "HrFlow tagging error:",
-          err.response?.data || err.message
-        );
-        return [];
-      }
-    };
+    // AI tags
+    const autoTags = await getHrFlowTags(name);
 
-    // ✅ Actually call it
-    let autoTags = await getHrFlowTags(name);
-    console.log("Auto tags fetched:", autoTags);
-
-    // ✅ Merge manual + AI tags
+    // Manual tags
     let userTags = [];
     if (Array.isArray(tags)) userTags = tags;
     else if (typeof tags === "string") {
@@ -92,36 +138,71 @@ exports.createCategory = async (req, res) => {
       }
     }
 
-    const finalTags = [...new Set([...autoTags, ...userTags])].filter(Boolean);
-    console.log("✅ Final Tags to Save:", finalTags);
+    // Merge & deduplicate
+    let finalTags = [
+      ...new Set(
+        [...autoTags, ...userTags.map((t) => t.trim().toLowerCase())].filter(
+          Boolean
+        )
+      ),
+    ];
+    finalTags = deduplicateSimilarTags(finalTags);
 
-    // ✅ Save the new category
+    // Save category
     const newCategory = new Category({
       name,
       image: imageUrl,
       imagePublicId,
       tags: finalTags,
     });
+    try {
+      await newCategory.save();
+    } catch (err) {
+      // Rollback image if DB fails
+      if (imagePublicId) await cloudinary.uploader.destroy(imagePublicId);
+      throw err;
+    }
 
-    await newCategory.save();
-
-    return res.status(201).json({
-      isSuccess: true,
-      message: "Category created successfully",
-      data: newCategory,
-    });
+    return res
+      .status(201)
+      .json({
+        isSuccess: true,
+        message: "Category created successfully",
+        data: newCategory,
+        autoTags,
+      });
   } catch (err) {
     console.error("❌ createCategory error:", err);
-    return res.status(500).json({
-      isSuccess: false,
-      message: "Internal server error",
-      error: err.message,
-    });
+    return res
+      .status(500)
+      .json({
+        isSuccess: false,
+        message: "Internal server error",
+        error: err.message,
+      });
   }
 };
-// ---------------------------------GET ALL CATEGORY With Pagination-------------------------------
-// controller/Admin.js (or wherever your function is)
 
+// ------------------ GET AI TAGS ------------------
+exports.getAITags = async (req, res) => {
+  try {
+    const { text } = req.body;
+    if (!text?.trim())
+      return res
+        .status(400)
+        .json({ isSuccess: false, message: "Text is required" });
+
+    const tags = await getHrFlowTags(text);
+    return res.status(200).json({ isSuccess: true, tags });
+  } catch (err) {
+    console.error("AI tag generation error:", err);
+    return res
+      .status(500)
+      .json({ isSuccess: false, message: "Failed to generate tags" });
+  }
+};
+
+// ---------------------------------GET ALL CATEGORY With Pagination-------------------------------
 exports.getAllCategories = async (req, res) => {
   try {
     // Read page and limit from request body (default to 1 and 10)
@@ -140,7 +221,7 @@ exports.getAllCategories = async (req, res) => {
       .limit(limit);
 
     // Format categories to remove unwanted fields
-    const formattedCategories = categories.map(cat => ({
+    const formattedCategories = categories.map((cat) => ({
       _id: cat._id,
       name: cat.name,
       image: cat.image,
@@ -163,7 +244,6 @@ exports.getAllCategories = async (req, res) => {
       totalPages: Math.ceil(total / limit),
       data: formattedCategories,
     });
-
   } catch (err) {
     console.error("getAllCategories error:", err);
     return res.status(500).json({
@@ -545,6 +625,9 @@ exports.getFakeUsers = async (req, res) => {
   }
 };
 //--------------------Delete Fake Users-------------------
+//const User = require("../models/User");
+//const Service = require("../models/Service");
+
 exports.deleteFakeUser = async (req, res) => {
   try {
     const { id } = req.params;
@@ -562,14 +645,30 @@ exports.deleteFakeUser = async (req, res) => {
         .json({ success: false, message: "Cannot delete real user" });
     }
 
+    // ====== Find all services owned by this user ======
+    const services = await Service.find({ owner: id });
+    const serviceIds = services.map((s) => s._id);
+
+    // ====== Delete related reviews ======
+    await Review.deleteMany({
+      $or: [
+        { user: id }, // reviews written by this user
+        { service: { $in: serviceIds } }, // reviews on the user’s services
+      ],
+    });
+
+    // ====== Delete services owned by the user ======
+    await Service.deleteMany({ owner: id });
+
+    // ====== Delete the user itself ======
     await User.findByIdAndDelete(id);
 
     return res.json({
       success: true,
-      message: "Fake user deleted successfully",
+      message: "Fake user, related services, and reviews deleted successfully",
     });
   } catch (err) {
-    console.error(err);
+    console.error("Delete Fake User Error:", err);
     res
       .status(500)
       .json({ success: false, message: "Server error", error: err.message });
@@ -627,7 +726,7 @@ function escapeRegExp(str) {
 
 exports.editProfile = async (req, res) => {
   try {
-   // console.log("req.body:", req.body);
+    // console.log("req.body:", req.body);
     //console.log("req.file:", req.file);
 
     let {
@@ -773,5 +872,225 @@ exports.getFakeUserById = async (req, res) => {
     return res
       .status(500)
       .json({ success: false, message: "Server error", error: err.message });
+  }
+};
+//---------------------create service-------------------
+function tryParse(val) {
+  if (val === undefined || val === null) return val;
+  if (typeof val !== "string") return val;
+  try {
+    return JSON.parse(val);
+  } catch (e) {
+    return val;
+  }
+}
+
+// Simple date/time validators
+function isValidTime(t) {
+  return typeof t === "string" && /^\d{2}:\d{2}(\s?(AM|PM))?$/i.test(t);
+}
+
+function isValidDateISO(d) {
+  return typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d);
+}
+
+// Helper to format time to AM/PM
+function formatTimeToAMPM(timeStr) {
+  if (!timeStr) return null;
+  const m = moment(timeStr, ["HH:mm", "hh:mm A"], true);
+  if (!m.isValid()) return null;
+  return m.format("hh:mm A");
+}
+
+// Create service API
+exports.createService = async (req, res) => {
+  try {
+    console.log("===== createService called =====");
+
+    const userId = req.body.userId || (req.user && req.user.id);
+    if (!userId)
+      return res
+        .status(400)
+        .json({ isSuccess: false, message: "userId is required" });
+
+    const user = await User.findById(userId);
+    if (!user)
+      return res
+        .status(404)
+        .json({ isSuccess: false, message: "User not found" });
+    if (!user.is_active)
+      return res
+        .status(403)
+        .json({ isSuccess: false, message: "User is not active" });
+
+    const body = req.body;
+    const title = body.title && String(body.title).trim();
+    const description = body.description || "";
+    const language = body.language || body.Language || "English";
+    const isFree = body.isFree === true || body.isFree === "true";
+    const price = isFree ? 0 : Number(body.price || 0);
+
+    const location = tryParse(body.location);
+    const city = body.city;
+    const isDoorstepService =
+      body.isDoorstepService === true || body.isDoorstepService === "true"; // ✅ new field
+    const service_type = body.service_type || "one_time";
+    const date = body.date;
+    const start_time = body.start_time;
+    const end_time = body.end_time;
+    const max_participants = Number(body.max_participants || 1);
+    const categoryId = body.categoryId;
+    const selectedTags = tryParse(body.selectedTags) || [];
+
+    // ---- Validation ----
+    if (!title)
+      return res
+        .status(400)
+        .json({ isSuccess: false, message: "Title is required" });
+
+    if (
+      !location ||
+      !location.name ||
+      location.latitude == null ||
+      location.longitude == null
+    ) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Location (name, latitude, longitude) is required",
+      });
+    }
+
+    if (!city)
+      return res
+        .status(400)
+        .json({ isSuccess: false, message: "City is required" });
+
+    if (!categoryId)
+      return res
+        .status(400)
+        .json({ isSuccess: false, message: "categoryId is required" });
+
+    const category = await Category.findById(categoryId);
+    if (!category)
+      return res
+        .status(404)
+        .json({ isSuccess: false, message: "Category not found" });
+
+    if (!Array.isArray(selectedTags) || !selectedTags.length) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "selectedTags must be a non-empty array",
+      });
+    }
+
+    const validTags = category.tags.filter((tag) =>
+      selectedTags.map((t) => t.toLowerCase()).includes(tag.toLowerCase())
+    );
+    if (!validTags.length)
+      return res.status(400).json({
+        isSuccess: false,
+        message: "No valid tags selected from this category",
+      });
+
+    // ---- Build payload ----
+    const servicePayload = {
+      title,
+      description,
+      Language: language,
+      isFree,
+      price,
+      location_name: location.name,
+      city,
+      isDoorstepService, // ✅ save new field
+      location: {
+        type: "Point",
+        coordinates: [Number(location.longitude), Number(location.latitude)],
+      },
+      category: category._id,
+      tags: validTags,
+      max_participants,
+      service_type,
+      owner: user._id,
+    };
+
+    // One-time service
+    if (service_type === "one_time") {
+      const formattedStart = formatTimeToAMPM(start_time);
+      const formattedEnd = formatTimeToAMPM(end_time);
+
+      if (!formattedStart || !formattedEnd) {
+        return res.status(400).json({
+          isSuccess: false,
+          message:
+            "Invalid start_time or end_time (must be HH:mm or hh:mm AM/PM)",
+        });
+      }
+
+      if (!isValidDateISO(date)) {
+        return res.status(400).json({
+          isSuccess: false,
+          message: "Valid date (YYYY-MM-DD) required for one_time",
+        });
+      }
+
+      servicePayload.date = date;
+      servicePayload.start_time = formattedStart;
+      servicePayload.end_time = formattedEnd;
+    }
+
+    // Recurring service
+    if (service_type === "recurring") {
+      const recurring_schedule = tryParse(body.recurring_schedule) || [];
+      if (!Array.isArray(recurring_schedule) || !recurring_schedule.length) {
+        return res.status(400).json({
+          isSuccess: false,
+          message: "Recurring schedule is required for recurring services",
+        });
+      }
+
+      servicePayload.recurring_schedule = recurring_schedule.map((item) => {
+        const formattedStart = formatTimeToAMPM(item.start_time);
+        const formattedEnd = formatTimeToAMPM(item.end_time);
+
+        if (
+          !item.day ||
+          !isValidDateISO(item.date) ||
+          !formattedStart ||
+          !formattedEnd
+        ) {
+          throw new Error(
+            "Each recurring schedule item must include day, date, start_time, end_time in HH:mm or hh:mm AM/PM format"
+          );
+        }
+
+        return {
+          day: item.day,
+          date: item.date,
+          start_time: formattedStart,
+          end_time: formattedEnd,
+        };
+      });
+    }
+
+    // ---- Save service ----
+    const createdService = new Service(servicePayload);
+    await createdService.save();
+
+    // Link service to user
+    user.services.push(createdService._id);
+    await user.save();
+
+    console.log("Service created successfully:", createdService._id);
+
+    return res.json({
+      isSuccess: true,
+      message: "Service created successfully",
+      data: createdService,
+    });
+  } catch (err) {
+    console.error("createService error:", err);
+    return res
+      .status(500)
+      .json({ isSuccess: false, message: "Server error", error: err.message });
   }
 };

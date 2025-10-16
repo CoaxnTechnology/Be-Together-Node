@@ -29,7 +29,11 @@ exports.getStats = async (req, res) => {
 
     // Inactive users (no location update in last 7 days)
     const inactiveUsers = await User.countDocuments({
-      "lastLocation.recordedAt": { $lte: sevenDaysAgo },
+      $or: [
+        { "lastLocation.updatedAt": { $lt: sevenDaysAgo } },
+        { "lastLocation.updatedAt": { $exists: false } },
+        { "lastLocation.coords.coordinates": [0, 0] },
+      ],
     });
 
     // Active users = total - inactive

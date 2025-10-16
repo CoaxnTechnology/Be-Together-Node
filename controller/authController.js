@@ -375,6 +375,8 @@ exports.login = async (req, res) => {
         return res.status(401).json({ IsSucces: false, message: "Invalid password" });
       }
 
+      // ✅ Manual login doesn’t use name/profile_image — so we ignore them safely
+
       // Generate OTP
       const { otp, expiry } = generateOTP();
       user.otp_code = otp;
@@ -498,6 +500,7 @@ exports.login = async (req, res) => {
     return res.status(500).json({ IsSucces: false, message: "Server error" });
   }
 };
+
 
 
 // ---------------- VERIFY OTP (LOGIN) ----------------

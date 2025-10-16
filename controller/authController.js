@@ -353,7 +353,7 @@ exports.login = async (req, res) => {
     let user = await User.findOne({ email: emailLower });
     console.log("🔍 Fetched user from DB:", user);
 
-    // -------------------- MANUAL LOGIN --------------------
+    // -------------------- MANUAL LOGIN -----------------------
     if (login_type === "manual") {
       console.log("💻 Attempting manual login");
 

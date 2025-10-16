@@ -345,6 +345,9 @@ exports.login = async (req, res) => {
       profile_image,
     } = body;
 
+
+
+    
     if (!email) {
       console.log("❌ Email missing in request");
       return res.status(400).json({ IsSucces: false, message: "Email required" });

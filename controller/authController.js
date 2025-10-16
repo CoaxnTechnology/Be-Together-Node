@@ -137,12 +137,10 @@ exports.register = async (req, res) => {
 
     if (register_type === "manual") {
       if (!password) {
-        return res
-          .status(400)
-          .json({
-            IsSucces: false,
-            message: "Password required for manual registration.",
-          });
+        return res.status(400).json({
+          IsSucces: false,
+          message: "Password required for manual registration.",
+        });
       }
       hashedPassword = await bcrypt.hash(String(password), 10);
       const otpObj = generateOTP();
@@ -373,7 +371,10 @@ exports.login = async (req, res) => {
           .json({ IsSucces: false, message: "Password required" });
       }
 
-      const valid = await bcrypt.compare(String(password), user.hashed_password);
+      const valid = await bcrypt.compare(
+        String(password),
+        user.hashed_password
+      );
       console.log("🔑 Password valid?", valid);
 
       if (!valid) {
@@ -417,18 +418,24 @@ exports.login = async (req, res) => {
 
       if (!user) {
         console.log("🆕 User not found, creating new Google user");
+        const userName = name?.trim() || "No Name";
         user = new User({
           email: email.toLowerCase(),
-          name: name || "No Name",
+          name: userName,
           register_type: "google_auth",
-          provider_id,
-          provider_uid,
+          provider_id:provider_id || null,
+          provider_uid: provider_uid || null,
           otp_verified: true,
-          fcmTokens: fcmToken ? [fcmToken] : [],
+          fcmTokens:  [],
         });
 
         await user.save();
         console.log("✅ New Google user created:", user._id);
+        if (fcmToken) {
+          await user.addFcmToken(fcmToken);
+          await user.save(); // save after adding token
+          console.log("📲 FCM token added for new Google user:", fcmToken);
+        }
       } else {
         console.log("🔄 Existing user found:", user._id);
 
@@ -488,7 +495,6 @@ exports.login = async (req, res) => {
     return res.status(500).json({ IsSucces: false, message: "Server error" });
   }
 };
-
 
 // ---------------- VERIFY OTP (LOGIN) ----------------
 exports.verifyOtpLogin = async (req, res) => {
@@ -671,7 +677,6 @@ exports.resendOtp = async (req, res) => {
  * 1) Request reset link: body: { email }
  * 2) Perform reset:     body: { email, token, new_password }
  */
-
 
 exports.forgotOrResetPassword = async (req, res) => {
   try {

@@ -331,7 +331,9 @@ exports.verifyOtpRegister = async (req, res) => {
 // ---------------- LOGIN ----------------
 exports.login = async (req, res) => {
   try {
-    console.log("📥 Login request body:", req.body);
+    // 🔹 Safety: fallback to empty object if req.body is undefined
+    const body = req.body || {};
+    console.log("📥 Login request body:", body);
 
     const {
       email,
@@ -342,7 +344,7 @@ exports.login = async (req, res) => {
       fcmToken,
       name,
       profile_image,
-    } = req.body;
+    } = body;
 
     if (!email) {
       console.log("❌ Email missing in request");
@@ -375,9 +377,8 @@ exports.login = async (req, res) => {
         return res.status(401).json({ IsSucces: false, message: "Invalid password" });
       }
 
-      // ✅ Manual login doesn’t use name/profile_image — so we ignore them safely
+      // ✅ Manual login ignores name/profile_image
 
-      // Generate OTP
       const { otp, expiry } = generateOTP();
       user.otp_code = otp;
       user.otp_expiry = expiry;
@@ -500,7 +501,6 @@ exports.login = async (req, res) => {
     return res.status(500).json({ IsSucces: false, message: "Server error" });
   }
 };
-
 
 
 // ---------------- VERIFY OTP (LOGIN) ----------------

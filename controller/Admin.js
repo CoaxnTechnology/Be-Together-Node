@@ -68,7 +68,7 @@ const getHrFlowTags = async (text) => {
       {
         algorithm_key: "tagger-rome-family",
         text,
-        top_n: 10,
+        top_n: 30,
         output_lang: "en",
       },
       {
@@ -197,6 +197,7 @@ exports.getAITags = async (req, res) => {
         .json({ isSuccess: false, message: "Text is required" });
 
     const tags = await getHrFlowTags(text);
+    console.log("AI tags generated:", tags);
     return res.status(200).json({ isSuccess: true, tags });
   } catch (err) {
     console.error("AI tag generation error:", err);

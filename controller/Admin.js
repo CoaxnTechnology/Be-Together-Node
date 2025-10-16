@@ -471,7 +471,7 @@ async function getFakerForCountry(country) {
     case "Germany":
       return fakerDE;
     case "Portugal":
-      return fakerPT;
+      return fakerEN;
     default:
       return fakerEN;
   }

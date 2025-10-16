@@ -17,6 +17,7 @@ const {
   editProfile,
   createService,
   getAITags,
+  loginAdmin,
 } = require("../controller/Admin");
 //const { getAllServices } = require("../controller/serviceController");
 const storage = multer.memoryStorage();
@@ -46,9 +47,10 @@ router.post("/generate-fake-users", async (req, res, next) => {
   return generateFakeUsers(req, res, next);
 });
 router.get("/fake-users", getFakeUsers);
-router.post("/create",  createService);
+router.post("/create", createService);
 router.delete("/fake-users/:id", deleteFakeUser);
 router.get("/:id", getUserById);
 router.post("/category/all", getAllCategories);
+router.post("/auth/login", loginAdmin);
 
 module.exports = router;

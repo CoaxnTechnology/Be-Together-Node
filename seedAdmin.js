@@ -9,7 +9,7 @@ mongoose.connect(DB_URI, { useNewUrlParser: true, useUnifiedTopology: true })
   .then(async () => {
     console.log("Connected to MongoDB");
 
-    const existingAdmin = await Admin.findOne({ email: "admin01" });
+    const existingAdmin = await Admin.findOne({ email: "admin01@gmail.com" });
     if (existingAdmin) {
       console.log("Admin already exists");
       process.exit(0);
@@ -18,7 +18,7 @@ mongoose.connect(DB_URI, { useNewUrlParser: true, useUnifiedTopology: true })
     const hashedPassword = await bcrypt.hash("admin@1212", 10);
 
     const admin = new Admin({
-      name: "Admin User",
+      name: "Betogether",
       email: "admin01@gmail.com",
       hashed_password: hashedPassword,
       is_active: true,

@@ -12,6 +12,7 @@ const locationRoutes = require("./routes/location");
 const ReviewRoutes = require("./routes/ReviewRoutes");
 const notificationRoutes= require("./routes/notificationRoutes")
 const AdminRoutes = require("./routes/AdminRoutes");
+const statsRoutes = require("./routes/statsRoutes");
 const app = express();
 
 // Middleware
@@ -43,7 +44,7 @@ app.use("/api",ReviewRoutes)
 //----------------------Admin API ROutes
 app.use("/api/admin", AdminRoutes);
 
-
+app.use("/api/stats", statsRoutes);
 //new chnages addes
 // Connect to MongoDB (live Atlas)
 mongoose

@@ -331,7 +331,6 @@ exports.verifyOtpRegister = async (req, res) => {
 // ---------------- LOGIN ----------------
 exports.login = async (req, res) => {
   try {
-    // 🔹 Safety: fallback to empty object if req.body is undefined
     const body = req.body || {};
     console.log("📥 Login request body:", body);
 
@@ -351,8 +350,8 @@ exports.login = async (req, res) => {
       return res.status(400).json({ IsSucces: false, message: "Email required" });
     }
 
-    const emailLower = String(email).toLowerCase();
-    let user = await User.findOne({ email: emailLower });
+    // Use email directly without converting to lowercase
+    let user = await User.findOne({ email });
     console.log("🔍 Fetched user from DB:", user);
 
     // -------------------- MANUAL LOGIN -----------------------
@@ -376,8 +375,6 @@ exports.login = async (req, res) => {
         console.log("❌ Manual login failed: invalid password");
         return res.status(401).json({ IsSucces: false, message: "Invalid password" });
       }
-
-      // ✅ Manual login ignores name/profile_image
 
       const { otp, expiry } = generateOTP();
       user.otp_code = otp;
@@ -418,7 +415,7 @@ exports.login = async (req, res) => {
         console.log("🆕 User not found, creating new Google user");
 
         user = new User({
-          email: emailLower,
+          email,
           name: userName,
           register_type: "google_auth",
           provider_id: provider_id || null,
@@ -444,7 +441,6 @@ exports.login = async (req, res) => {
           });
         }
 
-        // Update missing name or profile image
         if (!user.name || user.name === "No Name") {
           console.log(`✏️ Updating user name from '${user.name}' to '${userName}'`);
           user.name = userName;
@@ -461,7 +457,6 @@ exports.login = async (req, res) => {
         }
       }
 
-      // Create session & access token
       const session_id = randomUUID();
       const access_token = createAccessToken({ id: user._id, session_id });
 
@@ -492,7 +487,6 @@ exports.login = async (req, res) => {
       });
     }
 
-    // -------------------- INVALID LOGIN TYPE --------------------
     console.log("❌ Invalid login_type:", login_type);
     return res.status(400).json({ IsSucces: false, message: "Invalid login_type" });
 
@@ -501,6 +495,7 @@ exports.login = async (req, res) => {
     return res.status(500).json({ IsSucces: false, message: "Server error" });
   }
 };
+
 
 
 // ---------------- VERIFY OTP (LOGIN) ----------------

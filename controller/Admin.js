@@ -504,7 +504,7 @@ function generateMobileForCountry(country) {
       return `9${randDigits(9)}`;
   }
 }
-
+//
 // Predefined Indian names
 const indianFirstNames = [
   "Amit",

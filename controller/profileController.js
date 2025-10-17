@@ -452,6 +452,7 @@ exports.getUserProfileByEmail = async (req, res) => {
         bio: user.bio || "",
         city: user.city || "",
         languages: user.languages || [],
+        age: user.age || null,
         interests: user.interests || [],
         offeredTags: user.offeredTags || [],
 

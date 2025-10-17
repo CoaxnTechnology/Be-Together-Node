@@ -13,6 +13,7 @@ const ReviewRoutes = require("./routes/ReviewRoutes");
 const notificationRoutes= require("./routes/notificationRoutes")
 const AdminRoutes = require("./routes/AdminRoutes");
 const statsRoutes = require("./routes/statsRoutes");
+const connectDB = require("./utils/connect");
 const app = express();
 
 // Middleware
@@ -26,6 +27,7 @@ app.use(
     credentials: true,
   })
 );
+connectDB();
 
 // Route to serve terms_and_conditions.html
 app.get("/api/terms", (req, res) => {
@@ -47,13 +49,6 @@ app.use("/api/admin", AdminRoutes);
 app.use("/api/stats", statsRoutes);
 //new chnages addes
 // Connect to MongoDB (live Atlas)
-mongoose
-  .connect(process.env.MONGO_URI, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-  })
-  .then(() => console.log("✅ MongoDB Connected"))
-  .catch((err) => console.error("❌ MongoDB Connection Error:", err));
 
 // Start server
 const PORT = process.env.PORT || 5000;

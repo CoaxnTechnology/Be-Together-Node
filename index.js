@@ -31,6 +31,13 @@ app.use(
 app.get("/api/terms", (req, res) => {
   res.sendFile(path.join(__dirname, "templates", "terms_and_conditions.html"));
 });
+const startServer = async () => {
+  try {
+    await mongoose.connect(process.env.MONGO_URI, {
+      useNewUrlParser: true,
+      useUnifiedTopology: true,
+    });
+    console.log("✅ MongoDB Connected");
 
 // API routes
 app.use("/api/auth", authRoutes);
@@ -45,18 +52,13 @@ app.use("/api",ReviewRoutes)
 app.use("/api/admin", AdminRoutes);
 
 app.use("/api/stats", statsRoutes);
-//new chnages addes
-// Connect to MongoDB (live Atlas)
-mongoose
-  .connect(process.env.MONGO_URI, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-  })
-  .then(() => console.log("✅ MongoDB Connected"))
-  .catch((err) => console.error("❌ MongoDB Connection Error:", err));
+ const PORT = process.env.PORT || 5000;
+    app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+  } catch (err) {
+    console.error("❌ MongoDB Connection Error:", err);
+    process.exit(1); // Stop server if DB fails
+  }
+};
 
-// Start server
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
-
+startServer();
 module.exports = app;

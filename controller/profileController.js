@@ -525,7 +525,7 @@ exports.getProfileById = async (req, res) => {
         languages: user.languages || [],
         interests: user.interests || [],
         offeredTags: user.offeredTags || [],
-
+        age: user.age || null,
         servicesCount: user.services.length,
         services: user.services || [],
         servicesCount: servicesWithRating.length, // total services

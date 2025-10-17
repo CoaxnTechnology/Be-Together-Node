@@ -19,11 +19,21 @@ const app = express();
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
+
 app.use(
   cors({
-    origin: "*", // Allow all origins (not recommended for production)
+    origin: function (origin, callback) {
+      // allow requests with no origin (mobile apps, Postman, curl)
+      if (!origin) return callback(null, true);
+
+      // allow requests from your admin frontend
+      if (origin === "https://betogether-admin.vercel.app") return callback(null, true);
+
+      // block all other unknown origins
+      return callback(new Error("CORS policy does not allow this origin"), false);
+    },
     methods: ["GET", "POST", "PUT", "DELETE"],
-    credentials: true,
+    credentials: true, // keep true if using cookies or auth headers
   })
 );
 

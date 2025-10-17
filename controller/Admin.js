@@ -476,7 +476,7 @@ async function getFakerForCountry(country) {
       return fakerEN;
   }
 }
-
+//
 function generateMobileForCountry(country) {
   function randDigits(n) {
     return Array.from({ length: n }, () => Math.floor(Math.random() * 10)).join(

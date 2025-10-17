@@ -19,21 +19,11 @@ const app = express();
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
-
 app.use(
   cors({
-    origin: function (origin, callback) {
-      // allow requests with no origin (mobile apps, Postman, curl)
-      if (!origin) return callback(null, true);
-
-      // allow requests from your admin frontend
-      if (origin === "https://betogether-admin.vercel.app") return callback(null, true);
-
-      // block all other unknown origins
-      return callback(new Error("CORS policy does not allow this origin"), false);
-    },
+    origin: "*", // Allow all origins (not recommended for production)
     methods: ["GET", "POST", "PUT", "DELETE"],
-    credentials: true, // keep true if using cookies or auth headers
+    credentials: true,
   })
 );
 
@@ -41,13 +31,6 @@ app.use(
 app.get("/api/terms", (req, res) => {
   res.sendFile(path.join(__dirname, "templates", "terms_and_conditions.html"));
 });
-const startServer = async () => {
-  try {
-    await mongoose.connect(process.env.MONGO_URI, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-    });
-    console.log("✅ MongoDB Connected");
 
 // API routes
 app.use("/api/auth", authRoutes);
@@ -62,13 +45,18 @@ app.use("/api",ReviewRoutes)
 app.use("/api/admin", AdminRoutes);
 
 app.use("/api/stats", statsRoutes);
- const PORT = process.env.PORT || 5000;
-    app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
-  } catch (err) {
-    console.error("❌ MongoDB Connection Error:", err);
-    process.exit(1); // Stop server if DB fails
-  }
-};
+//new chnages addes
+// Connect to MongoDB (live Atlas)
+mongoose
+  .connect(process.env.MONGO_URI, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+  })
+  .then(() => console.log("✅ MongoDB Connected"))
+  .catch((err) => console.error("❌ MongoDB Connection Error:", err));
 
-startServer();
+// Start server
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+
 module.exports = app;

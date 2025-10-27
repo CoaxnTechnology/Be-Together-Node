@@ -11,7 +11,8 @@ require("dotenv").config();
 const Admin = require("../model/Admin");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
-
+const fs = require("fs");
+const csv = require("csv-parser");
 
 // ------------------ Cloudinary Config ------------------
 cloudinary.config({
@@ -87,11 +88,13 @@ const getHrFlowTags = async (text) => {
 
     return [...new Set(tags)];
   } catch (err) {
-    console.error("❌ HrFlow tagging error:", err.response?.data || err.message);
+    console.error(
+      "❌ HrFlow tagging error:",
+      err.response?.data || err.message
+    );
     return [];
   }
 };
-
 
 // ------------------ CREATE CATEGORY ------------------
 exports.createCategory = async (req, res) => {
@@ -167,23 +170,19 @@ exports.createCategory = async (req, res) => {
       throw err;
     }
 
-    return res
-      .status(201)
-      .json({
-        isSuccess: true,
-        message: "Category created successfully",
-        data: newCategory,
-        autoTags,
-      });
+    return res.status(201).json({
+      isSuccess: true,
+      message: "Category created successfully",
+      data: newCategory,
+      autoTags,
+    });
   } catch (err) {
     console.error("❌ createCategory error:", err);
-    return res
-      .status(500)
-      .json({
-        isSuccess: false,
-        message: "Internal server error",
-        error: err.message,
-      });
+    return res.status(500).json({
+      isSuccess: false,
+      message: "Internal server error",
+      error: err.message,
+    });
   }
 };
 
@@ -607,6 +606,163 @@ exports.generateFakeUsers = async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 };
+
+//--------------------Generate Users from CSV-------------------
+//const csv = require("csv-parser");
+const { Readable } = require("stream");
+
+exports.generateUsersFromCSV = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: "No CSV file uploaded",
+      });
+    }
+
+    // ✅ Convert multer buffer to stream
+    const bufferStream = new Readable();
+    bufferStream.push(req.file.buffer);
+    bufferStream.push(null);
+
+    const usersData = [];
+
+    bufferStream
+      .pipe(csv())
+      .on("data", (row) => usersData.push(row))
+      .on("end", async () => {
+        const createdUsers = [];
+
+        for (const row of usersData) {
+          try {
+            const user = new User({
+              name: row.name,
+              email: row.email,
+              mobile: row.mobile || null,
+              profile_image: row.profile_image || null,
+              bio: row.bio || null,
+              city: row.city || null,
+              age: row.age ? Number(row.age) : null,
+              is_fake: String(row.is_fake).trim().toLowerCase() === "true",
+              languages: row.languages
+                ? row.languages.split(",").map((l) => l.trim())
+                : [],
+              interests: row.interests
+                ? row.interests.split(",").map((i) => i.trim())
+                : [],
+              offeredTags: row.offeredTags
+                ? row.offeredTags.split(",").map((t) => t.trim())
+                : [],
+              lastLocation: {
+                coords: {
+                  type: "Point",
+                  coordinates: [
+                    parseFloat(row.lastLocation_longitude) || 0,
+                    parseFloat(row.lastLocation_latitude) || 0,
+                  ],
+                },
+                provider: row.lastLocation_type || null,
+              },
+              is_active: true,
+              register_type: "manual",
+              login_type: "manual",
+            });
+
+            const savedUser = await user.save();
+
+            // ✅ Parse JSON Services
+            const services = JSON.parse(row.services);
+            const createdServices = [];
+
+            for (const s of services) {
+              const serviceData = {
+                title: s.title || "Untitled Service",
+                Language: s.Language || "English",
+                city: s.city || savedUser.city || "Unknown",
+                isFree: s.isFree === "true" || s.isFree === true,
+                price: s.price ? Number(s.price) : 0,
+                description: s.description || "No description",
+                category: s.categoryId,
+                tags: s.selectedTags || [],
+                max_participants: s.max_participants
+                  ? Number(s.max_participants)
+                  : 1,
+                service_type: s.service_type || "one_time",
+                owner: savedUser._id,
+                location_name: s.location?.name || "Unknown",
+                location: {
+                  type: "Point",
+                  coordinates: [
+                    parseFloat(s.location?.longitude) || 0,
+                    parseFloat(s.location?.latitude) || 0,
+                  ],
+                },
+              };
+
+              // ✅ One Time Slot
+              if (s.service_type === "one_time" && s.date) {
+                serviceData.date = s.date;
+                serviceData.start_time = s.start_time;
+                serviceData.end_time = s.end_time;
+              }
+
+              // ✅ Multiple recurring slots
+              if (s.service_type === "recurring" && Array.isArray(s.schedule)) {
+                serviceData.recurring_schedule = s.schedule.map((slot) => ({
+                  day: new Date(slot.date).toLocaleDateString("en-US", {
+                    weekday: "long",
+                  }),
+                  start_time: slot.start_time,
+                  end_time: slot.end_time,
+                  date: slot.date,
+                }));
+              }
+
+              // ✅ Single recurring slot
+              else if (s.service_type === "recurring" && s.date) {
+                serviceData.recurring_schedule = [
+                  {
+                    day: new Date(s.date).toLocaleDateString("en-US", {
+                      weekday: "long",
+                    }),
+                    start_time: s.start_time,
+                    end_time: s.end_time,
+                    date: s.date,
+                  },
+                ];
+              }
+
+              const service = new Service(serviceData);
+              const savedService = await service.save();
+              createdServices.push(savedService._id);
+            }
+
+            savedUser.services = createdServices;
+            await savedUser.save();
+
+            createdUsers.push({
+              user: { id: savedUser._id, name: savedUser.name },
+              services: createdServices.length,
+            });
+          } catch (err) {
+            console.error("Error creating user/service:", err.message);
+          }
+        }
+
+        res.json({
+          success: true,
+          message: `${createdUsers.length} users & services created successfully ✅`,
+          data: createdUsers,
+        });
+      });
+  } catch (err) {
+    console.error("generateUsersFromCSV error:", err);
+    res
+      .status(500)
+      .json({ success: false, error: err.message });
+  }
+};
+
 
 // ✅ Get all fake users
 exports.getFakeUsers = async (req, res) => {
@@ -1107,22 +1263,32 @@ exports.loginAdmin = async (req, res) => {
   const { email, password } = req.body;
 
   if (!email || !password)
-    return res.status(400).json({ success: false, error: "Email and password required" });
+    return res
+      .status(400)
+      .json({ success: false, error: "Email and password required" });
 
   try {
     const admin = await Admin.findOne({ email });
     if (!admin)
-      return res.status(401).json({ success: false, error: "Invalid credentials" });
+      return res
+        .status(401)
+        .json({ success: false, error: "Invalid credentials" });
 
     if (!admin.is_active)
-      return res.status(403).json({ success: false, error: "Admin account inactive" });
+      return res
+        .status(403)
+        .json({ success: false, error: "Admin account inactive" });
 
     const isMatch = await bcrypt.compare(password, admin.hashed_password);
     if (!isMatch)
-      return res.status(401).json({ success: false, error: "Invalid credentials" });
+      return res
+        .status(401)
+        .json({ success: false, error: "Invalid credentials" });
 
     // Generate JWT Token
-    const token = jwt.sign({ id: admin._id, email: admin.email }, JWT_SECRET, { expiresIn: "7d" });
+    const token = jwt.sign({ id: admin._id, email: admin.email }, JWT_SECRET, {
+      expiresIn: "7d",
+    });
 
     res.json({
       success: true,
@@ -1135,4 +1301,3 @@ exports.loginAdmin = async (req, res) => {
     res.status(500).json({ success: false, error: "Server error" });
   }
 };
- 

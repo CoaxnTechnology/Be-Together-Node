@@ -1,6 +1,9 @@
 const express = require("express");
 const router = express.Router();
 const multer = require("multer");
+//const multer = require("multer");
+const csv = require("csv-parser");
+const fs = require("fs");
 const {
   createCategory,
   getAllCategories,
@@ -18,11 +21,11 @@ const {
   createService,
   getAITags,
   loginAdmin,
+  generateUsersFromCSV
 } = require("../controller/Admin");
 //const { getAllServices } = require("../controller/serviceController");
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
-
 //------------------------USer Details---------------------
 router.get("/alluser", getAllUsers);
 router.get("/allservice", getAllService);
@@ -46,6 +49,15 @@ router.delete("/category/delete/:id", deleteCategory);
 router.post("/generate-fake-users", async (req, res, next) => {
   return generateFakeUsers(req, res, next);
 });
+
+//const { generateFakeUsers, generateUsersFromCSV } = require("../controller/Admin");
+
+// Old route (keep it)
+router.post("/generate-fake-users", generateFakeUsers);
+
+// New CSV route
+router.post("/upload-users-csv", upload.single("file"), generateUsersFromCSV);
+
 router.get("/fake-users", getFakeUsers);
 router.post("/create", createService);
 router.delete("/fake-users/:id", deleteFakeUser);

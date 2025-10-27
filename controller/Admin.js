@@ -620,21 +620,31 @@ exports.generateUsersFromCSV = async (req, res) => {
       });
     }
 
-    // ✅ Convert multer buffer to stream
     const bufferStream = new Readable();
     bufferStream.push(req.file.buffer);
     bufferStream.push(null);
 
     const usersData = [];
+    const createdUsers = [];
+    const skippedUsers = [];
 
     bufferStream
       .pipe(csv())
       .on("data", (row) => usersData.push(row))
       .on("end", async () => {
-        const createdUsers = [];
-
         for (const row of usersData) {
           try {
+            // ✅ Check Email Duplicate
+            const existingUser = await User.findOne({ email: row.email });
+            if (existingUser) {
+              console.warn(`⚠️ Email exists: ${row.email}`);
+              skippedUsers.push({
+                email: row.email,
+                reason: "Duplicate Email",
+              });
+              continue; // Skip this user
+            }
+
             const user = new User({
               name: row.name,
               email: row.email,
@@ -670,8 +680,7 @@ exports.generateUsersFromCSV = async (req, res) => {
 
             const savedUser = await user.save();
 
-            // ✅ Parse JSON Services
-            const services = JSON.parse(row.services);
+            const services = JSON.parse(row.services || "[]");
             const createdServices = [];
 
             for (const s of services) {
@@ -699,14 +708,12 @@ exports.generateUsersFromCSV = async (req, res) => {
                 },
               };
 
-              // ✅ One Time Slot
               if (s.service_type === "one_time" && s.date) {
                 serviceData.date = s.date;
                 serviceData.start_time = s.start_time;
                 serviceData.end_time = s.end_time;
               }
 
-              // ✅ Multiple recurring slots
               if (s.service_type === "recurring" && Array.isArray(s.schedule)) {
                 serviceData.recurring_schedule = s.schedule.map((slot) => ({
                   day: new Date(slot.date).toLocaleDateString("en-US", {
@@ -716,10 +723,7 @@ exports.generateUsersFromCSV = async (req, res) => {
                   end_time: slot.end_time,
                   date: slot.date,
                 }));
-              }
-
-              // ✅ Single recurring slot
-              else if (s.service_type === "recurring" && s.date) {
+              } else if (s.service_type === "recurring" && s.date) {
                 serviceData.recurring_schedule = [
                   {
                     day: new Date(s.date).toLocaleDateString("en-US", {
@@ -745,21 +749,26 @@ exports.generateUsersFromCSV = async (req, res) => {
               services: createdServices.length,
             });
           } catch (err) {
-            console.error("Error creating user/service:", err.message);
+            console.error("❌ Error:", err.message);
+            skippedUsers.push({
+              email: row.email,
+              reason: "Error in saving user/service",
+            });
           }
         }
 
         res.json({
           success: true,
-          message: `${createdUsers.length} users & services created successfully ✅`,
-          data: createdUsers,
+          message: "CSV processed ✅",
+          createdCount: createdUsers.length,
+          skippedCount: skippedUsers.length,
+          createdUsers,
+          skippedUsers,
         });
       });
   } catch (err) {
     console.error("generateUsersFromCSV error:", err);
-    res
-      .status(500)
-      .json({ success: false, error: err.message });
+    res.status(500).json({ success: false, error: err.message });
   }
 };
 

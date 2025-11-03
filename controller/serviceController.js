@@ -484,20 +484,20 @@ exports.getServices = async (req, res) => {
     console.log("Fetched services:", services.length);
 
     // TOTAL COUNT (without skip & limit)
-    // const totalCountPipeline = pipeline.filter(
-    //   (stage) => !stage.$skip && !stage.$limit
-    // );
-    // const totalCountResult = await Service.aggregate([
-    //   ...totalCountPipeline,
-    //   { $count: "total" },
-    // ]);
-    // const totalCount = totalCountResult[0] ? totalCountResult[0].total : 0;
-    // console.log("Total count:", totalCount);
+    const totalCountPipeline = pipeline.filter(
+      (stage) => !stage.$skip && !stage.$limit
+    );
+    const totalCountResult = await Service.aggregate([
+      ...totalCountPipeline,
+      { $count: "total" },
+    ]);
+    const totalCount = totalCountResult[0] ? totalCountResult[0].total : 0;
+    console.log("Total count:", totalCount);
 
     return res.json({
       isSuccess: true,
       message: "Services fetched successfully",
-      data:  services ,
+      data:  {totalCount,services} ,
     });
   } catch (err) {
     console.error("getServices error:", err);
@@ -605,17 +605,24 @@ exports.getInterestedUsers = async (req, res) => {
 
     console.log("MongoDB user query:", JSON.stringify(query, null, 2));
 
-    // ---------- Step 6: Fetch users ----------
-    let users = await User.find(query)
+    // ---------- Step 6A: Map Users (no pagination) ----------
+    const mapUsers = await User.find(query)
+      .select("name email profile_image interests languages age lastLocation")
+      .lean();
+
+    // ---------- Step 6B: List Users (with pagination) ----------
+    const listUsers = await User.find(query)
       .select("name email profile_image interests languages age lastLocation")
       .skip(skip)
       .limit(parseInt(limit))
       .lean();
 
     // ---------- Step 7: Distance calculation ----------
-    if (calculateDistance) {
+    const addDistance = (userList) => {
+      if (!calculateDistance) return userList;
       const toRad = (v) => (v * Math.PI) / 180;
-      users.forEach((u) => {
+
+      return userList.map((u) => {
         if (u.lastLocation?.coords?.coordinates) {
           const [lon2, lat2] = u.lastLocation.coords.coordinates;
           const lat1 = parseFloat(latitude),
@@ -633,10 +640,12 @@ exports.getInterestedUsers = async (req, res) => {
         } else {
           u.distance_km = null;
         }
-      });
+        return u;
+      }).sort((a, b) => (a.distance_km || 9999) - (b.distance_km || 9999));
+    };
 
-      users.sort((a, b) => (a.distance_km || 9999) - (b.distance_km || 9999));
-    }
+    const finalMapUsers = addDistance(mapUsers);
+    const finalListUsers = addDistance(listUsers);
 
     // ---------- Step 8: Total count ----------
     const total = await User.countDocuments(query);
@@ -647,13 +656,15 @@ exports.getInterestedUsers = async (req, res) => {
       total,
       page: parseInt(page),
       limit: parseInt(limit),
-      users,
+      mapUsers: finalMapUsers,
+      listUsers: finalListUsers,
     });
   } catch (err) {
     console.error("getInterestedUsers error:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 };
+
 
 // ----------- Get All Services -------------
 exports.getAllServices = async (req, res) => {

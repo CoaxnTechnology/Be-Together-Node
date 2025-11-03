@@ -294,16 +294,14 @@ exports.getServices = async (req, res) => {
         // keep string as-is
       }
     }
-    console.log("Parsed categoryId:", categoryId);
 
     // ----- TAGS -----
     const tags = Array.isArray(q.tags) ? q.tags : q.tags ? [q.tags] : [];
-    console.log("Parsed tags:", tags);
 
     // ----- PAGINATION -----
-    // const page = Math.max(1, Number(q.page || 1));
-    // const limit = Math.min(100, Number(q.limit || 20));
-    // const skip = (page - 1) * limit;
+    const page = Math.max(1, Number(q.page || 1));
+    const limit = Math.min(100, Number(q.limit || 20));
+    const skip = (page - 1) * limit;
 
     // ----- RADIUS -----
     const radiusKm = q.radius_km !== undefined ? Number(q.radius_km) : 10;
@@ -311,7 +309,6 @@ exports.getServices = async (req, res) => {
     // ----- MATCH FILTER -----
     const match = {};
 
-    // CATEGORY filter (convert string to ObjectId if needed)
     if (Array.isArray(categoryId) && categoryId.length > 0) {
       match.category = { $in: categoryId.map((id) => new Types.ObjectId(id)) };
     } else if (
@@ -322,19 +319,15 @@ exports.getServices = async (req, res) => {
       match.category = new Types.ObjectId(categoryId);
     }
 
-    // TAGS filter
     if (tags.length) match.tags = { $in: tags };
 
-    // FREE / PAID filter
     if (q.isFree === true || q.isFree === "true") match.isFree = true;
     else if (q.isFree === false || q.isFree === "false") match.isFree = false;
 
-    // EXCLUDE OWNER
     let excludeOwnerId = q.excludeOwnerId || (req.user && req.user._id);
     if (excludeOwnerId)
       match.owner = { $ne: new Types.ObjectId(excludeOwnerId) };
 
-    // DATE filter
     if (q.date) {
       const queryDate = new Date(q.date);
       match.$or = [
@@ -343,19 +336,12 @@ exports.getServices = async (req, res) => {
       ];
     }
 
-    console.log("Match object:", match);
-
     // ----- LOCATION -----
     let refLat = null;
     let refLon = null;
-
     if (req.user?.lastLocation?.coords?.coordinates) {
       const coords = req.user.lastLocation.coords.coordinates;
-      if (
-        Array.isArray(coords) &&
-        coords.length === 2 &&
-        !(coords[0] === 0 && coords[1] === 0)
-      ) {
+      if (Array.isArray(coords) && coords.length === 2) {
         refLon = coords[0];
         refLat = coords[1];
       }
@@ -364,140 +350,126 @@ exports.getServices = async (req, res) => {
       refLat = Number(q.latitude);
       refLon = Number(q.longitude);
     }
-    console.log("Reference coordinates:", refLat, refLon);
 
-    // ----- AGGREGATION PIPELINE -----
-    const pipeline = [];
+    // ---------- PIPELINE BASE ----------
+    const buildPipeline = (withPagination = false) => {
+      const pipeline = [];
 
-    // Geo filter only if coordinates exist
-    if (refLat != null && refLon != null) {
-      pipeline.push({
-        $geoNear: {
-          near: { type: "Point", coordinates: [refLon, refLat] },
-          distanceField: "distance_km",
-          spherical: true,
-          maxDistance: radiusKm * 1000,
-          distanceMultiplier: 0.001,
+      if (refLat != null && refLon != null) {
+        pipeline.push({
+          $geoNear: {
+            near: { type: "Point", coordinates: [refLon, refLat] },
+            distanceField: "distance_km",
+            spherical: true,
+            maxDistance: radiusKm * 1000,
+            distanceMultiplier: 0.001,
+          },
+        });
+        pipeline.push({
+          $addFields: { distance_km: { $round: ["$distance_km", 2] } },
+        });
+      }
+
+      pipeline.push({ $match: match });
+
+      pipeline.push(
+        {
+          $lookup: {
+            from: "categories",
+            localField: "category",
+            foreignField: "_id",
+            as: "category",
+          },
         },
-      });
-
-      // Round distance
-      pipeline.push({
-        $addFields: { distance_km: { $round: ["$distance_km", 2] } },
-      });
-    }
-
-    // MATCH
-    pipeline.push({ $match: match });
-
-    // LOOKUP CATEGORY
-    pipeline.push(
-      {
-        $lookup: {
-          from: "categories",
-          localField: "category",
-          foreignField: "_id",
-          as: "category",
+        { $unwind: "$category" },
+        {
+          $lookup: {
+            from: "users",
+            localField: "owner",
+            foreignField: "_id",
+            as: "owner",
+          },
         },
-      },
-      { $unwind: "$category" }
-    );
-
-    // LOOKUP OWNER (only _id + profile_image)
-    pipeline.push(
-      {
-        $lookup: {
-          from: "users",
-          localField: "owner",
-          foreignField: "_id",
-          as: "owner",
+        { $unwind: "$owner" },
+        {
+          $replaceRoot: {
+            newRoot: {
+              $mergeObjects: [
+                "$$ROOT",
+                {
+                  owner: {
+                    _id: "$owner._id",
+                    profile_image: "$owner.profile_image",
+                    name: "$owner.name",
+                  },
+                },
+              ],
+            },
+          },
         },
-      },
-      { $unwind: "$owner" },
-      {
-        $replaceRoot: {
-          newRoot: {
-            $mergeObjects: [
-              "$$ROOT",
+        {
+          $lookup: {
+            from: "reviews",
+            let: { serviceId: "$_id" },
+            pipeline: [
+              { $match: { $expr: { $eq: ["$service", "$$serviceId"] } } },
               {
-                owner: {
-                  _id: "$owner._id",
-                  profile_image: "$owner.profile_image",
+                $lookup: {
+                  from: "users",
+                  localField: "user",
+                  foreignField: "_id",
+                  as: "user",
+                },
+              },
+              { $unwind: "$user" },
+              {
+                $project: {
+                  _id: 1,
+                  rating: 1,
+                  text: 1,
+                  created_at: 1,
+                  "user.name": 1,
+                  "user.email": 1,
+                  "user.profile_image": 1,
                 },
               },
             ],
+            as: "reviews",
           },
         },
+        {
+          $addFields: {
+            averageRating: { $avg: "$reviews.rating" },
+            totalReviews: { $size: "$reviews" },
+          },
+        }
+      );
+
+      if (withPagination) {
+        pipeline.push({ $skip: skip }, { $limit: limit });
       }
-    );
 
-    // LOOKUP REVIEWS
-    pipeline.push(
-      {
-        $lookup: {
-          from: "reviews",
-          let: { serviceId: "$_id" },
-          pipeline: [
-            { $match: { $expr: { $eq: ["$service", "$$serviceId"] } } },
-            {
-              $lookup: {
-                from: "users",
-                localField: "user",
-                foreignField: "_id",
-                as: "user",
-              },
-            },
-            { $unwind: "$user" },
-            {
-              $project: {
-                _id: 1,
-                rating: 1,
-                text: 1,
-                created_at: 1,
-                "user.name": 1,
-                "user.email": 1,
-                "user.profile_image": 1,
-              },
-            },
-          ],
-          as: "reviews",
-        },
-      },
-      {
-        $addFields: {
-          averageRating: { $avg: "$reviews.rating" },
-          totalReviews: { $size: "$reviews" },
-        },
-      }
-    );
+      return pipeline;
+    };
 
-    // PAGINATION
-    // pipeline.push({ $skip: skip }, { $limit: limit });
+    // ---------- Fetch Services ----------
+    const listServices = await Service.aggregate(buildPipeline(true));
+    const mapServices = await Service.aggregate(buildPipeline(false));
 
-    console.log(
-      "Final aggregation pipeline:",
-      JSON.stringify(pipeline, null, 2)
-    );
-
-    // FETCH SERVICES
-    const services = await Service.aggregate(pipeline);
-    console.log("Fetched services:", services.length);
-
-    // TOTAL COUNT (without skip & limit)
-    const totalCountPipeline = pipeline.filter(
-      (stage) => !stage.$skip && !stage.$limit
-    );
-    const totalCountResult = await Service.aggregate([
-      ...totalCountPipeline,
-      { $count: "total" },
-    ]);
-    const totalCount = totalCountResult[0] ? totalCountResult[0].total : 0;
-    console.log("Total count:", totalCount);
+    // ---------- Total Count ----------
+    const totalCountPipeline = buildPipeline(false);
+    totalCountPipeline.push({ $count: "total" });
+    const totalCountResult = await Service.aggregate(totalCountPipeline);
+    const totalCount = totalCountResult[0]?.total || 0;
 
     return res.json({
       isSuccess: true,
       message: "Services fetched successfully",
-      data:  {totalCount,services} ,
+      total: totalCount,
+      page,
+      limit,
+      listServices, // for list with pagination
+      mapServices, // for map without pagination
     });
   } catch (err) {
     console.error("getServices error:", err);
@@ -508,6 +480,7 @@ exports.getServices = async (req, res) => {
     });
   }
 };
+
 
 exports.getInterestedUsers = async (req, res) => {
   try {

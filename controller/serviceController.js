@@ -301,9 +301,9 @@ exports.getServices = async (req, res) => {
     console.log("Parsed tags:", tags);
 
     // ----- PAGINATION -----
-    const page = Math.max(1, Number(q.page || 1));
-    const limit = Math.min(100, Number(q.limit || 20));
-    const skip = (page - 1) * limit;
+    // const page = Math.max(1, Number(q.page || 1));
+    // const limit = Math.min(100, Number(q.limit || 20));
+    // const skip = (page - 1) * limit;
 
     // ----- RADIUS -----
     const radiusKm = q.radius_km !== undefined ? Number(q.radius_km) : 10;
@@ -472,7 +472,7 @@ exports.getServices = async (req, res) => {
     );
 
     // PAGINATION
-    pipeline.push({ $skip: skip }, { $limit: limit });
+    // pipeline.push({ $skip: skip }, { $limit: limit });
 
     console.log(
       "Final aggregation pipeline:",
@@ -484,20 +484,20 @@ exports.getServices = async (req, res) => {
     console.log("Fetched services:", services.length);
 
     // TOTAL COUNT (without skip & limit)
-    const totalCountPipeline = pipeline.filter(
-      (stage) => !stage.$skip && !stage.$limit
-    );
-    const totalCountResult = await Service.aggregate([
-      ...totalCountPipeline,
-      { $count: "total" },
-    ]);
-    const totalCount = totalCountResult[0] ? totalCountResult[0].total : 0;
-    console.log("Total count:", totalCount);
+    // const totalCountPipeline = pipeline.filter(
+    //   (stage) => !stage.$skip && !stage.$limit
+    // );
+    // const totalCountResult = await Service.aggregate([
+    //   ...totalCountPipeline,
+    //   { $count: "total" },
+    // ]);
+    // const totalCount = totalCountResult[0] ? totalCountResult[0].total : 0;
+    // console.log("Total count:", totalCount);
 
     return res.json({
       isSuccess: true,
       message: "Services fetched successfully",
-      data: { totalCount, page, limit, services },
+      data:  services ,
     });
   } catch (err) {
     console.error("getServices error:", err);

@@ -10,7 +10,7 @@ const serviceRoutes = require("./routes/serviceRoutes");
 const userTags = require("./routes/userTags");
 const locationRoutes = require("./routes/location");
 const ReviewRoutes = require("./routes/ReviewRoutes");
-const notificationRoutes= require("./routes/notificationRoutes")
+const notificationRoutes = require("./routes/notificationRoutes");
 const AdminRoutes = require("./routes/AdminRoutes");
 const statsRoutes = require("./routes/statsRoutes");
 const connectDB = require("./utils/connect");
@@ -40,18 +40,33 @@ app.use("/api", profileRoutes);
 //app.use("/api/admin/categories", categoryRoutes);
 app.use("/api/service", serviceRoutes);
 app.use("/api/onbording", userTags);
- app.use("/api/user", locationRoutes);
-app.use("/api",ReviewRoutes)
+app.use("/api/user", locationRoutes);
+app.use("/api", ReviewRoutes);
 //app.use("/api/notifications", notificationRoutes);
 //----------------------Admin API ROutes
-app.use("/api/admin", AdminRoutes);
 
 app.use("/api/stats", statsRoutes);
-//new chnages addes
-// Connect to MongoDB (live Atlas)
+//payment routes
+// app.use((req, res, next) => {
+//   if (req.originalUrl === "/api/stripe/webhook") {
+//     next();
+//   } else {
+//     express.json()(req, res, next);
+//   }
+// });
 
+ app.use("/api/admin/commission", require("./routes/adminCommissionRoutes"));
+app.use("/api/admin/cancellation", require("./routes/adminCancellationRoutes"));
+
+app.use("/api/stripe/connect", require("./routes/stripeConnectRoutes"));
+app.use("/api/payments", require("./routes/paymentRoutes"));
+app.use("/api/payment/violation", require("./routes/paymentViolationRoutes"));
+
+// Connect to MongoDB (live Atlas)
+app.use("/api/admin", AdminRoutes);
 // Start server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
 
 module.exports = app;
+//new changes

@@ -69,6 +69,8 @@ const userSchema = new mongoose.Schema(
       recordedAt: { type: Date, default: null },
       updatedAt: { type: Date, default: Date.now },
     },
+    stripeCustomerId: { type: String, default: null },
+    stripeAccountId: { type: String, default: null },
 
     reset_password_token: { type: String, default: null }, // store hashed token
     reset_password_expiry: { type: Date, default: null },

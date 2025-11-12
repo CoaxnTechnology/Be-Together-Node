@@ -360,14 +360,17 @@ exports.deleteCategory = async (req, res) => {
   }
 };
 //---------------------USer Details----------------------------
+const mongoose = require("mongoose");
+
 exports.getUserById = async (req, res) => {
   try {
     const { id } = req.params;
 
-    if (!id) {
-      return res
-        .status(400)
-        .json({ success: false, message: "User ID is required" });
+     if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid user id: ${id}`,
+      });
     }
 
     const user = await User.findById(id)

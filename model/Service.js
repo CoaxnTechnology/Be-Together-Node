@@ -59,6 +59,16 @@ const serviceSchema = new mongoose.Schema({
     ],
     default: [],
   },
+  isPromoted: { type: Boolean, default: false },
+  promotionStart: { type: Date, default: null },
+  promotionEnd: { type: Date, default: null },
+  promotionBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "User",
+    default: null,
+  },
+  promotionAmount: { type: Number, default: 0 },
+  promotionPaymentId: { type: String, default: null },
 
   created_at: { type: Date, default: Date.now },
   updated_at: { type: Date, default: Date.now },

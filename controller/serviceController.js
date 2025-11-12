@@ -6,6 +6,7 @@ const mongoose = require("mongoose");
 const notificationController = require("./notificationController");
 const { notifyOnNewService } = require("./notificationController");
 const { notifyOnServiceView } = require("./notificationController");
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 
 const { Types } = mongoose;
 const Review = require("../model/review");
@@ -37,26 +38,31 @@ function formatTimeToAMPM(timeStr) {
   return m.format("hh:mm A");
 }
 
-// Create service API
+
+// Main createService function
 exports.createService = async (req, res) => {
   try {
     console.log("===== createService called =====");
 
     const userId = req.body.userId || (req.user && req.user.id);
-    if (!userId)
-      return res
-        .status(400)
-        .json({ isSuccess: false, message: "userId is required" });
+    if (!userId) return res.status(400).json({ isSuccess: false, message: "userId is required" });
 
     const user = await User.findById(userId);
-    if (!user)
-      return res
-        .status(404)
-        .json({ isSuccess: false, message: "User not found" });
-    if (!user.is_active)
-      return res
-        .status(403)
-        .json({ isSuccess: false, message: "User is not active" });
+    if (!user) return res.status(404).json({ isSuccess: false, message: "User not found" });
+    if (!user.is_active) return res.status(403).json({ isSuccess: false, message: "User is not active" });
+
+    // --- Debug Stripe info ---
+    console.log("User Stripe Customer ID:", user.stripeCustomerId);
+    if (user.stripeCustomerId) {
+      const paymentMethods = await stripe.paymentMethods.list({
+        customer: user.stripeCustomerId,
+        type: "card",
+      });
+      console.log("Attached Payment Methods:", paymentMethods.data);
+      if (!paymentMethods.data.length) console.log("User has no payment methods attached!");
+    } else {
+      console.log("User is not registered in Stripe yet.");
+    }
 
     const body = req.body;
     const title = body.title && String(body.title).trim();
@@ -64,11 +70,9 @@ exports.createService = async (req, res) => {
     const language = body.language || body.Language || "English";
     const isFree = body.isFree === true || body.isFree === "true";
     const price = isFree ? 0 : Number(body.price || 0);
-
     const location = tryParse(body.location);
     const city = body.city;
-    const isDoorstepService =
-      body.isDoorstepService === true || body.isDoorstepService === "true";
+    const isDoorstepService = body.isDoorstepService === true || body.isDoorstepService === "true";
     const service_type = body.service_type || "one_time";
     const date = body.date;
     const start_time = body.start_time;
@@ -76,71 +80,37 @@ exports.createService = async (req, res) => {
     const max_participants = Number(body.max_participants || 1);
     const categoryId = body.categoryId;
     const selectedTags = tryParse(body.selectedTags) || [];
+    const promoteService = body.promoteService === true || body.promoteService === "true";
+    const promotionAmount = Number(body.amount || 0);
+    const paymentMethodId = body.paymentMethodId;
 
-    // ---- Validation ----
-    if (!title)
-      return res
-        .status(400)
-        .json({ isSuccess: false, message: "Title is required" });
-
-    if (
-      !location ||
-      !location.name ||
-      location.latitude == null ||
-      location.longitude == null
-    ) {
-      return res.status(400).json({
-        isSuccess: false,
-        message: "Location (name, latitude, longitude) is required",
-      });
-    }
-
-    if (!city)
-      return res
-        .status(400)
-        .json({ isSuccess: false, message: "City is required" });
-
-    if (!categoryId)
-      return res
-        .status(400)
-        .json({ isSuccess: false, message: "categoryId is required" });
+    // Validations
+    if (!title) return res.status(400).json({ isSuccess: false, message: "Title is required" });
+    if (!location || !location.name || location.latitude == null || location.longitude == null)
+      return res.status(400).json({ isSuccess: false, message: "Location is required" });
+    if (!city) return res.status(400).json({ isSuccess: false, message: "City is required" });
+    if (!categoryId) return res.status(400).json({ isSuccess: false, message: "categoryId is required" });
 
     const category = await Category.findById(categoryId);
-    if (!category)
-      return res
-        .status(404)
-        .json({ isSuccess: false, message: "Category not found" });
+    if (!category) return res.status(404).json({ isSuccess: false, message: "Category not found" });
 
-    if (!Array.isArray(selectedTags) || !selectedTags.length) {
-      return res.status(400).json({
-        isSuccess: false,
-        message: "selectedTags must be a non-empty array",
-      });
-    }
+    if (!Array.isArray(selectedTags) || !selectedTags.length)
+      return res.status(400).json({ isSuccess: false, message: "selectedTags must be a non-empty array" });
 
-    const validTags = category.tags.filter((tag) =>
-      selectedTags.map((t) => t.toLowerCase()).includes(tag.toLowerCase())
-    );
-    if (!validTags.length)
-      return res.status(400).json({
-        isSuccess: false,
-        message: "No valid tags selected from this category",
-      });
+    const validTags = category.tags.filter(tag => selectedTags.map(t => t.toLowerCase()).includes(tag.toLowerCase()));
+    if (!validTags.length) return res.status(400).json({ isSuccess: false, message: "No valid tags selected from this category" });
 
-    // ---- Build payload ----
+    // Build service payload
     const servicePayload = {
       title,
       description,
       Language: language,
       isFree,
       price,
-      location_name: location.name, // ✅ save location name
-      city, // ✅ save city
+      location_name: location.name,
+      city,
       isDoorstepService,
-      location: {
-        type: "Point",
-        coordinates: [Number(location.longitude), Number(location.latitude)],
-      },
+      location: { type: "Point", coordinates: [Number(location.longitude), Number(location.latitude)] },
       category: category._id,
       tags: validTags,
       max_participants,
@@ -148,93 +118,105 @@ exports.createService = async (req, res) => {
       owner: user._id,
     };
 
-    // One-time service
+    // Handle time/date for one-time service
     if (service_type === "one_time") {
       const formattedStart = formatTimeToAMPM(start_time);
       const formattedEnd = formatTimeToAMPM(end_time);
-
-      if (!formattedStart || !formattedEnd) {
-        return res.status(400).json({
-          isSuccess: false,
-          message:
-            "Invalid start_time or end_time (must be HH:mm or hh:mm AM/PM)",
-        });
-      }
-
-      if (!isValidDateISO(date)) {
-        return res.status(400).json({
-          isSuccess: false,
-          message: "Valid date (YYYY-MM-DD) required for one_time",
-        });
-      }
-
+      if (!formattedStart || !formattedEnd) return res.status(400).json({ isSuccess: false, message: "Invalid start_time or end_time" });
+      if (!isValidDateISO(date)) return res.status(400).json({ isSuccess: false, message: "Valid date (YYYY-MM-DD) required" });
       servicePayload.date = date;
       servicePayload.start_time = formattedStart;
       servicePayload.end_time = formattedEnd;
     }
 
-    // Recurring service
-    if (service_type === "recurring") {
-      const recurring_schedule = tryParse(body.recurring_schedule) || [];
-      if (!Array.isArray(recurring_schedule) || !recurring_schedule.length) {
-        return res.status(400).json({
-          isSuccess: false,
-          message: "Recurring schedule is required for recurring services",
-        });
+    // Save base service
+    const createdService = new Service(servicePayload);
+
+    // ---- Promotion Stripe flow ----
+    if (promoteService && promotionAmount > 0) {
+      let customerId = user.stripeCustomerId;
+
+      // Create customer in Stripe if not exists
+      if (!customerId) {
+        const customer = await stripe.customers.create({ email: user.email, name: user.name });
+        user.stripeCustomerId = customer.id;
+        await user.save();
+        customerId = customer.id;
+        console.log("Created new Stripe customer:", customerId);
       }
 
-      servicePayload.recurring_schedule = recurring_schedule.map((item) => {
-        const formattedStart = formatTimeToAMPM(item.start_time);
-        const formattedEnd = formatTimeToAMPM(item.end_time);
+      // Ensure payment method is attached
+      if (paymentMethodId) {
+        const existingPMs = await stripe.paymentMethods.list({ customer: customerId, type: "card" });
+        console.log("Existing Payment Methods before attach:", existingPMs.data.map(pm => pm.id));
 
-        if (
-          !item.day ||
-          !isValidDateISO(item.date) ||
-          !formattedStart ||
-          !formattedEnd
-        ) {
-          throw new Error(
-            "Each recurring schedule item must include day, date, start_time, end_time in HH:mm or hh:mm AM/PM format"
-          );
+        const isAttached = existingPMs.data.some(pm => pm.id === paymentMethodId);
+
+        if (!isAttached) {
+          try {
+            await stripe.paymentMethods.attach(paymentMethodId, { customer: customerId });
+            console.log("Payment method attached successfully:", paymentMethodId);
+          } catch (err) {
+            console.error("Failed to attach payment method:", err);
+            return res.status(400).json({ isSuccess: false, message: "Failed to attach payment method", error: err.message });
+          }
+        } else {
+          console.log("Payment method already attached:", paymentMethodId);
         }
 
-        return {
-          day: item.day,
-          date: item.date,
-          start_time: formattedStart,
-          end_time: formattedEnd,
-        };
-      });
+        // Set default payment method
+        await stripe.customers.update(customerId, { invoice_settings: { default_payment_method: paymentMethodId } });
+        console.log("Set default payment method:", paymentMethodId);
+
+        // Create PaymentIntent
+        const paymentIntent = await stripe.paymentIntents.create({
+          amount: Math.round(promotionAmount * 100),
+          currency: "inr",
+          customer: customerId,
+          payment_method: paymentMethodId,
+          confirm: true,
+          off_session: true,
+          description: `Promotion payment for service: ${title}`,
+        });
+        console.log("PaymentIntent created:", paymentIntent.id);
+
+        // Mark service as promoted
+        const start = new Date();
+        const end = new Date();
+        end.setDate(start.getDate() + 30);
+
+        createdService.isPromoted = true;
+        createdService.promotionStart = start;
+        createdService.promotionEnd = end;
+        createdService.promotionBy = user._id;
+        createdService.promotionAmount = promotionAmount;
+        createdService.promotionPaymentId = paymentIntent.id;
+      }
     }
 
-    // ---- Save service ----
-    const createdService = new Service(servicePayload);
+    // Save service
     await createdService.save();
 
-    // Link service to user
+    // Link to user
     user.services.push(createdService._id);
     await user.save();
 
-    console.log("Service created successfully:", createdService._id);
-    console.log("Sending notification...");
+    // Send notifications
     const notifiedCount = await notifyOnNewService(createdService);
-    console.log("Notification triggered");
-    console.log(
-      `📣 Total users notified for service "${createdService.title}": ${notifiedCount}`
-    );
-    console.log("Notification process completed no errors ✅");
+    console.log(`📣 Notified ${notifiedCount} users`);
+
     return res.json({
       isSuccess: true,
-      message: "Service created successfully",
+      message: promoteService ? "Service created & promoted successfully 🎉" : "Service created successfully ✅",
       data: createdService,
     });
+
   } catch (err) {
     console.error("createService error:", err);
-    return res
-      .status(500)
-      .json({ isSuccess: false, message: "Server error", error: err.message });
+    return res.status(500).json({ isSuccess: false, message: "Server error", error: err.message });
   }
 };
+
 
 function looksLikeObjectId(id) {
   return mongoose.Types.ObjectId.isValid(id);
@@ -481,7 +463,6 @@ exports.getServices = async (req, res) => {
   }
 };
 
-
 exports.getInterestedUsers = async (req, res) => {
   try {
     const {
@@ -595,26 +576,28 @@ exports.getInterestedUsers = async (req, res) => {
       if (!calculateDistance) return userList;
       const toRad = (v) => (v * Math.PI) / 180;
 
-      return userList.map((u) => {
-        if (u.lastLocation?.coords?.coordinates) {
-          const [lon2, lat2] = u.lastLocation.coords.coordinates;
-          const lat1 = parseFloat(latitude),
-            lon1 = parseFloat(longitude);
-          const R = 6371;
-          const dLat = toRad(lat2 - lat1);
-          const dLon = toRad(lon2 - lon1);
-          const a =
-            Math.sin(dLat / 2) ** 2 +
-            Math.cos(toRad(lat1)) *
-              Math.cos(toRad(lat2)) *
-              Math.sin(dLon / 2) ** 2;
-          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-          u.distance_km = Math.round(R * c * 100) / 100;
-        } else {
-          u.distance_km = null;
-        }
-        return u;
-      }).sort((a, b) => (a.distance_km || 9999) - (b.distance_km || 9999));
+      return userList
+        .map((u) => {
+          if (u.lastLocation?.coords?.coordinates) {
+            const [lon2, lat2] = u.lastLocation.coords.coordinates;
+            const lat1 = parseFloat(latitude),
+              lon1 = parseFloat(longitude);
+            const R = 6371;
+            const dLat = toRad(lat2 - lat1);
+            const dLon = toRad(lon2 - lon1);
+            const a =
+              Math.sin(dLat / 2) ** 2 +
+              Math.cos(toRad(lat1)) *
+                Math.cos(toRad(lat2)) *
+                Math.sin(dLon / 2) ** 2;
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            u.distance_km = Math.round(R * c * 100) / 100;
+          } else {
+            u.distance_km = null;
+          }
+          return u;
+        })
+        .sort((a, b) => (a.distance_km || 9999) - (b.distance_km || 9999));
     };
 
     const finalMapUsers = addDistance(mapUsers);
@@ -637,7 +620,6 @@ exports.getInterestedUsers = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
-
 
 // ----------- Get All Services -------------
 exports.getAllServices = async (req, res) => {

@@ -56,11 +56,11 @@ app.use("/api/stats", statsRoutes);
 // });
 
  app.use("/api/admin/commission", require("./routes/adminCommissionRoutes"));
-app.use("/api/admin/cancellation", require("./routes/adminCancellationRoutes"));
+// app.use("/api/admin/cancellation", require("./routes/adminCancellationRoutes"));
 
-app.use("/api/stripe/connect", require("./routes/stripeConnectRoutes"));
-app.use("/api/payments", require("./routes/paymentRoutes"));
-app.use("/api/payment/violation", require("./routes/paymentViolationRoutes"));
+// app.use("/api/stripe/connect", require("./routes/stripeConnectRoutes"));
+// app.use("/api/payments", require("./routes/paymentRoutes"));
+// app.use("/api/payment/violation", require("./routes/paymentViolationRoutes"));
 
 // Connect to MongoDB (live Atlas)
 app.use("/api/admin", AdminRoutes);

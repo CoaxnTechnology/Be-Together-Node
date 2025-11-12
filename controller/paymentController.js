@@ -22,23 +22,26 @@ exports.createStripePayment = async (req, res) => {
 
     const provider = await User.findById(providerId);
     const customer = await User.findById(userId);
-
+    if (!provider?.stripeAccountId || !customer?.stripeCustomerId) {
+      return res
+        .status(400)
+        .json({ message: "Stripe account/customer missing" });
+    }
     const paymentIntent = await stripe.paymentIntents.create({
       amount: amount * 100,
       currency: "inr",
       customer: customer.stripeCustomerId,
       payment_method: paymentMethodId,
       confirm: true,
-      capture_method: "manual",
-      automatic_payment_methods: {
-        enabled: true,
-        allow_redirects: "never",
-      },
-      application_fee_amount: commission * 100,
-      transfer_data: { destination: provider.stripeAccountId },
-      description: `Booking ${bookingId} service ${serviceId}`,
-    });
 
+      capture_method: "manual",
+      application_fee_amount: commission * 100, // platform commission
+      transfer_data: {
+        destination: provider.stripeAccountId, // provider payout destination
+      },
+      description: `Booking ${bookingId} - Service ${serviceId}`,
+      automatic_payment_methods: { enabled: true, allow_redirects: "never" },
+    });
     const payment = await Payment.create({
       user: userId,
       provider: providerId,
@@ -78,41 +81,61 @@ exports.capturePayment = async (req, res) => {
 };
 exports.refundPayment = async (req, res) => {
   try {
-    const { paymentId } = req.body;
-
+    const { paymentId, reason } = req.body;
     const payment = await Payment.findById(paymentId);
     if (!payment) return res.status(404).json({ message: "Payment not found" });
 
+    // 🔒 Prevent double refund
+    if (payment.status === "refunded")
+      return res.status(400).json({ message: "Already refunded" });
+
     const cancellation = await CancellationSetting.findOne();
+    const cancellationPercent = cancellation?.percentage || 10; // default 10%
+    const deduction = (payment.amount * cancellationPercent) / 100;
+    const refundAmount = Math.round((payment.amount - deduction) * 100); // in paise
 
-    let refundAmount = payment.amount; // default full refund
+    // ⚙️ Case 1: Payment captured (service booked)
+    if (payment.status === "completed") {
+      const refund = await stripe.refunds.create({
+        payment_intent: payment.paymentIntentId,
+        amount: refundAmount, // partial refund (after deduction)
+      });
 
-    if (cancellation?.enabled && cancellation?.percentage > 0) {
-      const deduction = (payment.amount * cancellation.percentage) / 100;
-      refundAmount = payment.amount - deduction;
+      payment.status = "refunded";
+      payment.refundId = refund.id;
+      payment.refundReason =
+        reason || `Cancelled. ${cancellationPercent}% fee.`;
+      payment.refundedAt = new Date();
+      await payment.save();
+
+      return res.json({
+        success: true,
+        message: `Refund issued (commission ${cancellationPercent}% kept).`,
+        data: refund,
+      });
     }
 
-    const refund = await stripe.refunds.create({
-      payment_intent: payment.paymentIntentId,
-      amount: Math.round(refundAmount * 100), // convert to paise/cents
-    });
+    // ⚙️ Case 2: Payment pending (not captured yet)
+    if (payment.status === "pending") {
+      // cancel payment intent
+      await stripe.paymentIntents.cancel(payment.paymentIntentId);
 
-    payment.status = "refunded";
-    payment.refundedAt = new Date();
-    await payment.save();
+      // update DB manually
+      payment.status = "refunded";
+      payment.refundedAt = new Date();
+      payment.refundReason = `Canceled before capture. ${cancellationPercent}% kept.`;
+      payment.appCommission = deduction;
+      payment.providerAmount = 0;
+      await payment.save();
 
-    return res.json({
-      success: true,
-      message: "Refund processed ✅",
-      refundAmount,
-      cancellationCharge:
-        cancellation?.enabled && cancellation?.percentage > 0
-          ? `${cancellation.percentage}% applied`
-          : "No cancellation charge",
-      data: refund
-    });
+      return res.json({
+        success: true,
+        message: `Booking canceled. ${cancellationPercent}% cancellation fee applied.`,
+      });
+    }
 
+    res.status(400).json({ message: "Refund not possible for this status" });
   } catch (err) {
-    return res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: err.message });
   }
 };

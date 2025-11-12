@@ -14,6 +14,10 @@ const notificationRoutes = require("./routes/notificationRoutes");
 const AdminRoutes = require("./routes/AdminRoutes");
 const statsRoutes = require("./routes/statsRoutes");
 const commissionRoutes = require("./routes/adminCommissionRoutes");
+const cancellationRoutes = require("./routes/adminCancellationRoutes");
+const stripeRoutes = require("./routes/stripeConnectRoutes");
+const paymentRoutes = require("./routes/paymentRoutes")
+const paymentViolationRoutes =  require("./routes/paymentViolationRoutes")
 const connectDB = require("./utils/connect");
 const app = express();
 
@@ -57,11 +61,11 @@ app.use("/api/stats", statsRoutes);
 // });
 
  app.use("/api/admin/commission",commissionRoutes );
-// app.use("/api/admin/cancellation", require("./routes/adminCancellationRoutes"));
+ app.use("/api/admin/cancellation",cancellationRoutes );
 
-// app.use("/api/stripe/connect", require("./routes/stripeConnectRoutes"));
-// app.use("/api/payments", require("./routes/paymentRoutes"));
-// app.use("/api/payment/violation", require("./routes/paymentViolationRoutes"));
+ app.use("/api/stripe/connect",stripeRoutes );
+ app.use("/api/payments",paymentRoutes );
+ app.use("/api/payment/violation",paymentViolationRoutes);
 
 // Connect to MongoDB (live Atlas)
 app.use("/api/admin", AdminRoutes);

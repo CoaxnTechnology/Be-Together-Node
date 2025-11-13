@@ -4,87 +4,38 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>OTP Code</title>
-    <style>
-      /* RESET */
-      body,
-      table,
-      td,
-      p {
-        margin: 0;
-        padding: 0;
-      }
-
-      body {
-        font-family: "Poppins", sans-serif;
-        background: #f4f7ff;
-      }
-
-      img {
-        border: none;
-        display: block;
-        max-width: 100%;
-      }
-
-      /* RESPONSIVE */
-      @media screen and (max-width: 600px) {
-        .container {
-          width: 100% !important;
-          padding: 25px 15px !important;
-        }
-
-        .main-box {
-          padding: 40px 20px 50px !important;
-          border-radius: 20px !important;
-        }
-
-        .otp {
-          font-size: 28px !important;
-          letter-spacing: 10px !important;
-        }
-
-        header table td {
-          display: block;
-          text-align: center !important;
-        }
-
-        header img {
-          margin: 0 auto 10px;
-        }
-
-        .help-text {
-          width: 90% !important;
-          font-size: 14px !important;
-        }
-      }
-    </style>
   </head>
-  <body>
+  <body
+    style="margin: 0; font-family: 'Poppins', sans-serif; background: #ffffff"
+  >
     <div
-      class="container"
       style="
-        max-width: 600px;
-        margin: 30px auto;
-        padding: 35px 25px 45px;
+        max-width: 680px;
+        margin: 0 auto;
+        padding: 45px 30px 60px;
         background: #f4f7ff;
         background-image: url('https://archisketch-resources.s3.ap-northeast-2.amazonaws.com/vrstyler/1661497957196_595865/email-template-background-banner');
         background-repeat: no-repeat;
-        background-size: contain;
+        background-size: 800px 452px;
         background-position: top center;
       "
     >
       <header>
         <table style="width: 100%">
           <tr>
-            <td style="padding: 10px; vertical-align: middle">
+            <td style="display: flex; align-items: center; padding: 10px">
               <img
                 alt="Betogether Logo"
                 src="https://be-together-node.vercel.app/logo.jpg"
-                height="40"
+                height="40px"
                 style="border-radius: 5px"
               />
             </td>
-            <td style="text-align: right; vertical-align: middle">
-              <span style="font-size: 16px; color: #ffffff">{{date}}</span>
+
+            <td style="text-align: right">
+              <span style="font-size: 16px; line-height: 30px; color: #ffffff"
+                >{{date}}</span
+              >
             </td>
           </tr>
         </table>
@@ -92,43 +43,33 @@
 
       <main>
         <div
-          class="main-box"
           style="
-            margin-top: 50px;
-            padding: 60px 30px 70px;
+            margin-top: 70px;
+            padding: 92px 30px 115px;
             background: #ffffff;
-            border-radius: 25px;
+            border-radius: 30px;
             text-align: center;
-            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
           "
         >
           <h1
-            style="margin: 0; font-size: 22px; font-weight: 600; color: #1f1f1f"
+            style="margin: 0; font-size: 24px; font-weight: 500; color: #1f1f1f"
           >
             Your OTP
           </h1>
-          <p style="margin-top: 15px; font-size: 15px; font-weight: 500">
+          <p style="margin-top: 17px; font-size: 16px; font-weight: 500">
             Hello,
           </p>
-          <p
-            style="
-              margin-top: 15px;
-              font-weight: 500;
-              color: #333;
-              line-height: 1.5;
-            "
-          >
+          <p style="margin-top: 17px; font-weight: 500; letter-spacing: 0.56px">
             Use the following OTP to complete your process. OTP is valid for
             <span style="font-weight: 600; color: #1f1f1f">2 minutes</span>. Do
             not share this code.
           </p>
           <p
-            class="otp"
             style="
-              margin-top: 50px;
-              font-size: 36px;
-              font-weight: 700;
-              letter-spacing: 12px;
+              margin-top: 60px;
+              font-size: 40px;
+              font-weight: 600;
+              letter-spacing: 25px;
               color: #ba3d4f;
               text-align: center;
             "
@@ -139,14 +80,12 @@
       </main>
 
       <p
-        class="help-text"
         style="
           max-width: 400px;
-          margin: 40px auto 0;
+          margin: 90px auto 0;
           text-align: center;
           font-weight: 500;
           color: #8c8c8c;
-          line-height: 1.5;
         "
       >
         Need help? Email us at

@@ -4,11 +4,63 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>OTP Code</title>
+    <style>
+      /* ----- RESET ----- */
+      body,
+      table,
+      td,
+      p {
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        font-family: "Poppins", sans-serif;
+        background: #ffffff;
+      }
+
+      img {
+        border: none;
+        display: block;
+        max-width: 100%;
+      }
+
+      /* ----- RESPONSIVE ----- */
+      @media screen and (max-width: 600px) {
+        .container {
+          width: 100% !important;
+          padding: 25px 15px !important;
+        }
+
+        .main-box {
+          padding: 50px 20px 70px !important;
+          border-radius: 20px !important;
+        }
+
+        .otp {
+          font-size: 30px !important;
+          letter-spacing: 15px !important;
+        }
+
+        header table td {
+          display: block;
+          text-align: center !important;
+        }
+
+        header img {
+          margin: 0 auto 10px;
+        }
+
+        .help-text {
+          width: 90% !important;
+          font-size: 14px !important;
+        }
+      }
+    </style>
   </head>
-  <body
-    style="margin: 0; font-family: 'Poppins', sans-serif; background: #ffffff"
-  >
+  <body>
     <div
+      class="container"
       style="
         max-width: 680px;
         margin: 0 auto;
@@ -16,26 +68,24 @@
         background: #f4f7ff;
         background-image: url('https://archisketch-resources.s3.ap-northeast-2.amazonaws.com/vrstyler/1661497957196_595865/email-template-background-banner');
         background-repeat: no-repeat;
-        background-size: 800px 452px;
+        background-size: cover;
         background-position: top center;
       "
     >
       <header>
         <table style="width: 100%">
           <tr>
-            <td style="display: flex; align-items: center; padding: 10px">
+            <td style="padding: 10px; vertical-align: middle">
               <img
                 alt="Betogether Logo"
                 src="https://be-together-node.vercel.app/logo.jpg"
-                height="40px"
+                height="40"
                 style="border-radius: 5px"
               />
             </td>
 
-            <td style="text-align: right">
-              <span style="font-size: 16px; line-height: 30px; color: #ffffff"
-                >{{date}}</span
-              >
+            <td style="text-align: right; vertical-align: middle">
+              <span style="font-size: 16px; color: #ffffff">{{date}}</span>
             </td>
           </tr>
         </table>
@@ -43,6 +93,7 @@
 
       <main>
         <div
+          class="main-box"
           style="
             margin-top: 70px;
             padding: 92px 30px 115px;
@@ -52,23 +103,36 @@
           "
         >
           <h1
-            style="margin: 0; font-size: 24px; font-weight: 500; color: #1f1f1f"
+            style="
+              margin: 0;
+              font-size: 24px;
+              font-weight: 600;
+              color: #1f1f1f;
+            "
           >
             Your OTP
           </h1>
           <p style="margin-top: 17px; font-size: 16px; font-weight: 500">
             Hello,
           </p>
-          <p style="margin-top: 17px; font-weight: 500; letter-spacing: 0.56px">
+          <p
+            style="
+              margin-top: 17px;
+              font-weight: 500;
+              letter-spacing: 0.56px;
+              color: #333;
+            "
+          >
             Use the following OTP to complete your process. OTP is valid for
             <span style="font-weight: 600; color: #1f1f1f">2 minutes</span>. Do
             not share this code.
           </p>
           <p
+            class="otp"
             style="
               margin-top: 60px;
               font-size: 40px;
-              font-weight: 600;
+              font-weight: 700;
               letter-spacing: 25px;
               color: #ba3d4f;
             "
@@ -79,12 +143,14 @@
       </main>
 
       <p
+        class="help-text"
         style="
           max-width: 400px;
-          margin: 90px auto 0;
+          margin: 60px auto 0;
           text-align: center;
           font-weight: 500;
           color: #8c8c8c;
+          line-height: 1.5;
         "
       >
         Need help? Email us at

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>OTP Code</title>
     <style>
-      /* ----- RESET ----- */
+      /* RESET */
       body,
       table,
       td,
@@ -16,7 +16,7 @@
 
       body {
         font-family: "Poppins", sans-serif;
-        background: #ffffff;
+        background: #f4f7ff;
       }
 
       img {
@@ -25,7 +25,7 @@
         max-width: 100%;
       }
 
-      /* ----- RESPONSIVE ----- */
+      /* RESPONSIVE */
       @media screen and (max-width: 600px) {
         .container {
           width: 100% !important;
@@ -33,13 +33,13 @@
         }
 
         .main-box {
-          padding: 50px 20px 70px !important;
+          padding: 40px 20px 50px !important;
           border-radius: 20px !important;
         }
 
         .otp {
-          font-size: 30px !important;
-          letter-spacing: 15px !important;
+          font-size: 28px !important;
+          letter-spacing: 10px !important;
         }
 
         header table td {
@@ -62,13 +62,13 @@
     <div
       class="container"
       style="
-        max-width: 680px;
-        margin: 0 auto;
-        padding: 45px 30px 60px;
+        max-width: 600px;
+        margin: 30px auto;
+        padding: 35px 25px 45px;
         background: #f4f7ff;
         background-image: url('https://archisketch-resources.s3.ap-northeast-2.amazonaws.com/vrstyler/1661497957196_595865/email-template-background-banner');
         background-repeat: no-repeat;
-        background-size: cover;
+        background-size: contain;
         background-position: top center;
       "
     >
@@ -83,7 +83,6 @@
                 style="border-radius: 5px"
               />
             </td>
-
             <td style="text-align: right; vertical-align: middle">
               <span style="font-size: 16px; color: #ffffff">{{date}}</span>
             </td>
@@ -95,27 +94,28 @@
         <div
           class="main-box"
           style="
-            margin-top: 70px;
-            padding: 92px 30px 115px;
+            margin-top: 50px;
+            padding: 60px 30px 70px;
             background: #ffffff;
-            border-radius: 30px;
+            border-radius: 25px;
             text-align: center;
+            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
           "
         >
           <h1
-            style="margin: 0; font-size: 24px; font-weight: 600; color: #1f1f1f"
+            style="margin: 0; font-size: 22px; font-weight: 600; color: #1f1f1f"
           >
             Your OTP
           </h1>
-          <p style="margin-top: 17px; font-size: 16px; font-weight: 500">
+          <p style="margin-top: 15px; font-size: 15px; font-weight: 500">
             Hello,
           </p>
           <p
             style="
-              margin-top: 17px;
+              margin-top: 15px;
               font-weight: 500;
-              letter-spacing: 0.56px;
               color: #333;
+              line-height: 1.5;
             "
           >
             Use the following OTP to complete your process. OTP is valid for
@@ -125,14 +125,12 @@
           <p
             class="otp"
             style="
-              margin-top: 60px;
-              font-size: 40px;
+              margin-top: 50px;
+              font-size: 36px;
               font-weight: 700;
-              letter-spacing: 25px;
+              letter-spacing: 12px;
               color: #ba3d4f;
               text-align: center;
-              letter-spacing: 12px;
-              white-space: nowrap;
             "
           >
             <span style="display: inline-block">{{otp_code}}</span>
@@ -144,7 +142,7 @@
         class="help-text"
         style="
           max-width: 400px;
-          margin: 60px auto 0;
+          margin: 40px auto 0;
           text-align: center;
           font-weight: 500;
           color: #8c8c8c;

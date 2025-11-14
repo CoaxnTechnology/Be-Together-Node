@@ -38,18 +38,26 @@ function formatTimeToAMPM(timeStr) {
   return m.format("hh:mm A");
 }
 
-
 // Main createService function
 exports.createService = async (req, res) => {
   try {
     console.log("===== createService called =====");
 
     const userId = req.body.userId || (req.user && req.user.id);
-    if (!userId) return res.status(400).json({ isSuccess: false, message: "userId is required" });
+    if (!userId)
+      return res
+        .status(400)
+        .json({ isSuccess: false, message: "userId is required" });
 
     const user = await User.findById(userId);
-    if (!user) return res.status(404).json({ isSuccess: false, message: "User not found" });
-    if (!user.is_active) return res.status(403).json({ isSuccess: false, message: "User is not active" });
+    if (!user)
+      return res
+        .status(404)
+        .json({ isSuccess: false, message: "User not found" });
+    if (!user.is_active)
+      return res
+        .status(403)
+        .json({ isSuccess: false, message: "User is not active" });
 
     // --- Debug Stripe info ---
     console.log("User Stripe Customer ID:", user.stripeCustomerId);
@@ -59,7 +67,8 @@ exports.createService = async (req, res) => {
         type: "card",
       });
       console.log("Attached Payment Methods:", paymentMethods.data);
-      if (!paymentMethods.data.length) console.log("User has no payment methods attached!");
+      if (!paymentMethods.data.length)
+        console.log("User has no payment methods attached!");
     } else {
       console.log("User is not registered in Stripe yet.");
     }
@@ -72,7 +81,8 @@ exports.createService = async (req, res) => {
     const price = isFree ? 0 : Number(body.price || 0);
     const location = tryParse(body.location);
     const city = body.city;
-    const isDoorstepService = body.isDoorstepService === true || body.isDoorstepService === "true";
+    const isDoorstepService =
+      body.isDoorstepService === true || body.isDoorstepService === "true";
     const service_type = body.service_type || "one_time";
     const date = body.date;
     const start_time = body.start_time;
@@ -80,25 +90,97 @@ exports.createService = async (req, res) => {
     const max_participants = Number(body.max_participants || 1);
     const categoryId = body.categoryId;
     const selectedTags = tryParse(body.selectedTags) || [];
-    const promoteService = body.promoteService === true || body.promoteService === "true";
+    const promoteService =
+      body.promoteService === true || body.promoteService === "true";
     const promotionAmount = Number(body.amount || 0);
     const paymentMethodId = body.paymentMethodId;
 
     // Validations
-    if (!title) return res.status(400).json({ isSuccess: false, message: "Title is required" });
-    if (!location || !location.name || location.latitude == null || location.longitude == null)
-      return res.status(400).json({ isSuccess: false, message: "Location is required" });
-    if (!city) return res.status(400).json({ isSuccess: false, message: "City is required" });
-    if (!categoryId) return res.status(400).json({ isSuccess: false, message: "categoryId is required" });
+    if (!title)
+      return res
+        .status(400)
+        .json({ isSuccess: false, message: "Title is required" });
+    if (
+      !location ||
+      !location.name ||
+      location.latitude == null ||
+      location.longitude == null
+    )
+      return res
+        .status(400)
+        .json({ isSuccess: false, message: "Location is required" });
+    if (!city)
+      return res
+        .status(400)
+        .json({ isSuccess: false, message: "City is required" });
+    if (!categoryId)
+      return res
+        .status(400)
+        .json({ isSuccess: false, message: "categoryId is required" });
 
     const category = await Category.findById(categoryId);
-    if (!category) return res.status(404).json({ isSuccess: false, message: "Category not found" });
+    if (!category)
+      return res
+        .status(404)
+        .json({ isSuccess: false, message: "Category not found" });
 
     if (!Array.isArray(selectedTags) || !selectedTags.length)
-      return res.status(400).json({ isSuccess: false, message: "selectedTags must be a non-empty array" });
+      return res.status(400).json({
+        isSuccess: false,
+        message: "selectedTags must be a non-empty array",
+      });
 
-    const validTags = category.tags.filter(tag => selectedTags.map(t => t.toLowerCase()).includes(tag.toLowerCase()));
-    if (!validTags.length) return res.status(400).json({ isSuccess: false, message: "No valid tags selected from this category" });
+    const validTags = category.tags.filter((tag) =>
+      selectedTags.map((t) => t.toLowerCase()).includes(tag.toLowerCase())
+    );
+    if (!validTags.length)
+      return res.status(400).json({
+        isSuccess: false,
+        message: "No valid tags selected from this category",
+      });
+    // ⭐ NEW: PAID SERVICE → CREATE CONNECTED ACCOUNT + KYC CHECK
+    // ---------------------------
+    if (!isFree) {
+      const provider = user;
+
+      // Step 1: Create account if not exists
+      if (!provider.stripeAccountId) {
+        const account = await stripe.accounts.create({
+          type: "express",
+          country: "IT",
+          email: provider.email,
+          capabilities: {
+            card_payments: { requested: true },
+            transfers: { requested: true },
+          },
+        });
+
+        provider.stripeAccountId = account.id;
+        await provider.save();
+      }
+
+      // Step 2: Check account status
+      const account = await stripe.accounts.retrieve(provider.stripeAccountId);
+
+      // Step 3: If KYC incomplete → return onboarding link
+      if (!account.charges_enabled || !account.details_submitted) {
+        const link = await stripe.accountLinks.create({
+          account: provider.stripeAccountId,
+          refresh_url: "https://example.com/refresh",
+          return_url: "https://example.com/success",
+          type: "account_onboarding",
+        });
+
+        return res.status(200).json({
+          isSuccess: false,
+          isSuccess: true,
+          message: "Please complete KYC to offer paid services.",
+          onboardingUrl: link.url,
+        });
+      }
+
+      // If KYC OK → allow service creation
+    }
 
     // Build service payload
     const servicePayload = {
@@ -110,7 +192,10 @@ exports.createService = async (req, res) => {
       location_name: location.name,
       city,
       isDoorstepService,
-      location: { type: "Point", coordinates: [Number(location.longitude), Number(location.latitude)] },
+      location: {
+        type: "Point",
+        coordinates: [Number(location.longitude), Number(location.latitude)],
+      },
       category: category._id,
       tags: validTags,
       max_participants,
@@ -122,8 +207,16 @@ exports.createService = async (req, res) => {
     if (service_type === "one_time") {
       const formattedStart = formatTimeToAMPM(start_time);
       const formattedEnd = formatTimeToAMPM(end_time);
-      if (!formattedStart || !formattedEnd) return res.status(400).json({ isSuccess: false, message: "Invalid start_time or end_time" });
-      if (!isValidDateISO(date)) return res.status(400).json({ isSuccess: false, message: "Valid date (YYYY-MM-DD) required" });
+      if (!formattedStart || !formattedEnd)
+        return res.status(400).json({
+          isSuccess: false,
+          message: "Invalid start_time or end_time",
+        });
+      if (!isValidDateISO(date))
+        return res.status(400).json({
+          isSuccess: false,
+          message: "Valid date (YYYY-MM-DD) required",
+        });
       servicePayload.date = date;
       servicePayload.start_time = formattedStart;
       servicePayload.end_time = formattedEnd;
@@ -133,66 +226,88 @@ exports.createService = async (req, res) => {
     const createdService = new Service(servicePayload);
 
     // ---- Promotion Stripe flow ----
-    if (promoteService && promotionAmount > 0) {
-      let customerId = user.stripeCustomerId;
+    // if (promoteService && promotionAmount > 0) {
+    //   let customerId = user.stripeCustomerId;
 
-      // Create customer in Stripe if not exists
-      if (!customerId) {
-        const customer = await stripe.customers.create({ email: user.email, name: user.name });
-        user.stripeCustomerId = customer.id;
-        await user.save();
-        customerId = customer.id;
-        console.log("Created new Stripe customer:", customerId);
-      }
+    //   // Create customer in Stripe if not exists
+    //   if (!customerId) {
+    //     const customer = await stripe.customers.create({
+    //       email: user.email,
+    //       name: user.name,
+    //     });
+    //     user.stripeCustomerId = customer.id;
+    //     await user.save();
+    //     customerId = customer.id;
+    //     console.log("Created new Stripe customer:", customerId);
+    //   }
 
-      // Ensure payment method is attached
-      if (paymentMethodId) {
-        const existingPMs = await stripe.paymentMethods.list({ customer: customerId, type: "card" });
-        console.log("Existing Payment Methods before attach:", existingPMs.data.map(pm => pm.id));
+    //   // Ensure payment method is attached
+    //   if (paymentMethodId) {
+    //     const existingPMs = await stripe.paymentMethods.list({
+    //       customer: customerId,
+    //       type: "card",
+    //     });
+    //     console.log(
+    //       "Existing Payment Methods before attach:",
+    //       existingPMs.data.map((pm) => pm.id)
+    //     );
 
-        const isAttached = existingPMs.data.some(pm => pm.id === paymentMethodId);
+    //     const isAttached = existingPMs.data.some(
+    //       (pm) => pm.id === paymentMethodId
+    //     );
 
-        if (!isAttached) {
-          try {
-            await stripe.paymentMethods.attach(paymentMethodId, { customer: customerId });
-            console.log("Payment method attached successfully:", paymentMethodId);
-          } catch (err) {
-            console.error("Failed to attach payment method:", err);
-            return res.status(400).json({ isSuccess: false, message: "Failed to attach payment method", error: err.message });
-          }
-        } else {
-          console.log("Payment method already attached:", paymentMethodId);
-        }
+    //     if (!isAttached) {
+    //       try {
+    //         await stripe.paymentMethods.attach(paymentMethodId, {
+    //           customer: customerId,
+    //         });
+    //         console.log(
+    //           "Payment method attached successfully:",
+    //           paymentMethodId
+    //         );
+    //       } catch (err) {
+    //         console.error("Failed to attach payment method:", err);
+    //         return res.status(400).json({
+    //           isSuccess: false,
+    //           message: "Failed to attach payment method",
+    //           error: err.message,
+    //         });
+    //       }
+    //     } else {
+    //       console.log("Payment method already attached:", paymentMethodId);
+    //     }
 
-        // Set default payment method
-        await stripe.customers.update(customerId, { invoice_settings: { default_payment_method: paymentMethodId } });
-        console.log("Set default payment method:", paymentMethodId);
+    //     // Set default payment method
+    //     await stripe.customers.update(customerId, {
+    //       invoice_settings: { default_payment_method: paymentMethodId },
+    //     });
+    //     console.log("Set default payment method:", paymentMethodId);
 
-        // Create PaymentIntent
-        const paymentIntent = await stripe.paymentIntents.create({
-          amount: Math.round(promotionAmount * 100),
-          currency: "inr",
-          customer: customerId,
-          payment_method: paymentMethodId,
-          confirm: true,
-          off_session: true,
-          description: `Promotion payment for service: ${title}`,
-        });
-        console.log("PaymentIntent created:", paymentIntent.id);
+    //     // Create PaymentIntent
+    //     const paymentIntent = await stripe.paymentIntents.create({
+    //       amount: Math.round(promotionAmount * 100),
+    //       currency: "inr",
+    //       customer: customerId,
+    //       payment_method: paymentMethodId,
+    //       confirm: true,
+    //       off_session: true,
+    //       description: `Promotion payment for service: ${title}`,
+    //     });
+    //     console.log("PaymentIntent created:", paymentIntent.id);
 
-        // Mark service as promoted
-        const start = new Date();
-        const end = new Date();
-        end.setDate(start.getDate() + 30);
+    //     // Mark service as promoted
+    //     const start = new Date();
+    //     const end = new Date();
+    //     end.setDate(start.getDate() + 30);
 
-        createdService.isPromoted = true;
-        createdService.promotionStart = start;
-        createdService.promotionEnd = end;
-        createdService.promotionBy = user._id;
-        createdService.promotionAmount = promotionAmount;
-        createdService.promotionPaymentId = paymentIntent.id;
-      }
-    }
+    //     createdService.isPromoted = true;
+    //     createdService.promotionStart = start;
+    //     createdService.promotionEnd = end;
+    //     createdService.promotionBy = user._id;
+    //     createdService.promotionAmount = promotionAmount;
+    //     createdService.promotionPaymentId = paymentIntent.id;
+    //   }
+    // }
 
     // Save service
     await createdService.save();
@@ -207,16 +322,18 @@ exports.createService = async (req, res) => {
 
     return res.json({
       isSuccess: true,
-      message: promoteService ? "Service created & promoted successfully 🎉" : "Service created successfully ✅",
+      message: promoteService
+        ? "Service created & promoted successfully 🎉"
+        : "Service created successfully ✅",
       data: createdService,
     });
-
   } catch (err) {
     console.error("createService error:", err);
-    return res.status(500).json({ isSuccess: false, message: "Server error", error: err.message });
+    return res
+      .status(500)
+      .json({ isSuccess: false, message: "Server error", error: err.message });
   }
 };
-
 
 function looksLikeObjectId(id) {
   return mongoose.Types.ObjectId.isValid(id);

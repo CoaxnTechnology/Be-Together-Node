@@ -109,10 +109,10 @@ exports.createService = async (req, res) => {
       return res
         .status(400)
         .json({ isSuccess: false, message: "Location is required" });
-    if (!city)
-      return res
-        .status(400)
-        .json({ isSuccess: false, message: "City is required" });
+    // if (!city)
+    //   return res
+    //     .status(400)
+    //     .json({ isSuccess: false, message: "City is required" });
     if (!categoryId)
       return res
         .status(400)

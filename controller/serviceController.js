@@ -1043,3 +1043,4 @@ exports.getservicbyId = async (req, res) => {
     });
   }
 };
+//------------------Delete Service------------------

@@ -80,7 +80,7 @@ exports.createService = async (req, res) => {
     const isFree = body.isFree === true || body.isFree === "true";
     const price = isFree ? 0 : Number(body.price || 0);
     const location = tryParse(body.location);
-    const city = body.city;
+   // const city = body.city;
     const isDoorstepService =
       body.isDoorstepService === true || body.isDoorstepService === "true";
     const service_type = body.service_type || "one_time";
@@ -190,7 +190,7 @@ exports.createService = async (req, res) => {
       isFree,
       price,
       location_name: location.name,
-      city,
+     // city,
       isDoorstepService,
       location: {
         type: "Point",

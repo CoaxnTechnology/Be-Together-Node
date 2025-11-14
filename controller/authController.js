@@ -49,7 +49,13 @@ function uploadBufferToCloudinary(
 // ---------------- REGISTER ----------------
 exports.register = async (req, res) => {
   let uploadedPublicId = null;
+
+  console.log("🔵 STEP 1: register() called");
+
   try {
+    console.log("🔵 STEP 2: Raw body:", req.body);
+    console.log("🔵 STEP 3: File present:", !!req.file);
+
     let {
       name,
       email,
@@ -61,29 +67,43 @@ exports.register = async (req, res) => {
       fcmToken,
     } = req.body;
 
-    console.log("--- REGISTER HIT ---");
-    console.log("body:", req.body);
-    console.log("file present:", !!req.file);
+    console.log("🔵 STEP 4: Extracted fields:", {
+      name,
+      email,
+      mobile,
+      register_type,
+      provider_id,
+      provider_uid,
+      hasPassword: !!password,
+      fcmToken,
+    });
 
     if (email) email = String(email).toLowerCase();
 
     if (!["manual", "google_auth"].includes(register_type)) {
+      console.log("❌ STEP 5: Invalid register_type");
       return res
         .status(400)
         .json({ IsSucces: false, message: "Invalid register_type." });
     }
 
     if (!email) {
+      console.log("❌ STEP 6: Email missing");
       return res
         .status(400)
         .json({ IsSucces: false, message: "Email required." });
     }
 
+    console.log("🔵 STEP 7: Checking existing user…");
     const existing = await User.findOne({ email });
+    console.log("🔵 STEP 8: Existing user:", existing ? true : false);
 
-    // If existing google_auth user, treat as login
+    // GOOGLE: If already exists → login
     if (existing && register_type === "google_auth") {
+      console.log("🔵 STEP 9: Google user exists → logging in");
+
       if (existing.register_type === "manual") {
+        console.log("❌ STEP 10: Google tries to login but manual exists");
         return res.status(409).json({
           IsSucces: false,
           message: "Email already registered with manual method.",
@@ -99,9 +119,14 @@ exports.register = async (req, res) => {
 
       if (provider_id) existing.provider_id = provider_id;
       if (provider_uid) existing.provider_uid = provider_uid;
-      if (fcmToken) await existing.addFcmToken(fcmToken); // ✅ safe FCM handling
+
+      if (fcmToken) {
+        console.log("🔵 STEP 11: Adding FCM token");
+        await existing.addFcmToken(fcmToken);
+      }
 
       await existing.save();
+      console.log("🔵 STEP 12: Google login success");
 
       return res.status(200).json({
         IsSucces: true,
@@ -109,27 +134,21 @@ exports.register = async (req, res) => {
         access_token,
         session_id,
         token_type: "bearer",
-        user: {
-          id: existing._id,
-          name: existing.name,
-          email: existing.email,
-          mobile: existing.mobile,
-          profile_image: getFullImageUrl(existing.profile_image),
-          register_type: existing.register_type,
-          otp_verified: existing.otp_verified,
-          fcmToken: existing.fcmTokens, // updated array
-        },
+        user: existing,
       });
     }
 
-    // Manual registration conflict
+    // MANUAL: email exists
     if (existing && register_type === "manual") {
+      console.log("❌ STEP 13: Manual registration but email exists");
       return res
         .status(409)
         .json({ IsSucces: false, message: "Email already registered." });
     }
 
-    // Password and OTP setup for manual registration
+    // MANUAL registration → create password + otp
+    console.log("🔵 STEP 14: Handling password + OTP");
+
     let hashedPassword = null;
     let otp = null;
     let expiry = null;
@@ -137,48 +156,67 @@ exports.register = async (req, res) => {
 
     if (register_type === "manual") {
       if (!password) {
+        console.log("❌ STEP 15: Missing password");
         return res.status(400).json({
           IsSucces: false,
           message: "Password required for manual registration.",
         });
       }
+
       hashedPassword = await bcrypt.hash(String(password), 10);
+      console.log("🔵 STEP 16: Password hashed");
+
       const otpObj = generateOTP();
       otp = otpObj.otp;
       expiry = otpObj.expiry;
+      console.log("🔵 STEP 17: OTP generated:", otp);
+
       otp_verified = false;
     } else {
-      otp_verified = true; // google_auth
+      console.log("🔵 STEP 18: Google Auth → OTP Auto Verified");
+      otp_verified = true;
     }
 
-    // Handle profile image
+    // PROFILE IMAGE
+    console.log("🔵 STEP 19: Handling profile image…");
+
     let profileImageUrl = null;
+
     if (req.body.profile_image) {
+      console.log("🔵 STEP 20: profile_image from body");
       profileImageUrl = String(req.body.profile_image).trim() || null;
     } else if (req.file && req.file.buffer) {
+      console.log("🔵 STEP 21: Uploading image to Cloudinary…");
+
       try {
         const publicId = `user_${Date.now()}_${Math.random()
           .toString(36)
           .slice(2, 8)}`;
+
         const result = await uploadBufferToCloudinary(
           req.file.buffer,
           "profile_images",
           publicId
         );
+
         uploadedPublicId = result.public_id;
-        profileImageUrl = result.secure_url || null;
+        profileImageUrl = result.secure_url;
+
+        console.log("🔵 STEP 22: Cloudinary upload success:", profileImageUrl);
       } catch (uploadErr) {
-        console.error("Cloudinary upload failed (non-fatal):", uploadErr);
+        console.log("❌ STEP 23: Image upload failed:", uploadErr);
       }
     }
 
-    // Create new user
+    // CREATE USER
+    console.log("🔵 STEP 24: Creating new user document…");
+
     const newUser = new User({
       _id: new mongoose.Types.ObjectId(),
-      name: name ? String(name) : null,
+      name: name || null,
       email,
-      mobile: mobile ? String(mobile) : null,
-      hashed_password: hashedPassword ? String(hashedPassword) : null,
+      mobile: mobile || null,
+      hashed_password: hashedPassword,
       register_type,
       otp_verified,
       otp_code: otp,
@@ -186,31 +224,45 @@ exports.register = async (req, res) => {
       profile_image: profileImageUrl,
       provider_id: provider_id || null,
       provider_uid: provider_uid || null,
-      fcmTokens: [], // always an array
+      fcmTokens: [],
     });
 
-    if (fcmToken) await newUser.addFcmToken(fcmToken); // ✅ safe addition
+    if (fcmToken) {
+      console.log("🔵 STEP 25: Adding FCM token to new user");
+      await newUser.addFcmToken(fcmToken);
+    }
 
     await newUser.save();
+    console.log("🔵 STEP 26: User saved in DB");
 
+    // SEND OTP
     if (register_type === "manual") {
+      console.log("🔵 STEP 27: Sending OTP email…");
+
       try {
         await sendOtpEmail(email, otp);
+        console.log("🔵 STEP 28: OTP sent successfully");
       } catch (emailErr) {
-        console.error("Failed to send OTP email (non-fatal):", emailErr);
+        console.log("❌ STEP 29: OTP email failed:", emailErr);
       }
+
       return res
         .status(201)
         .json({ IsSucces: true, message: "OTP sent. Please verify." });
     }
 
-    // google_auth: create session and return tokens
+    // GOOGLE AUTH RESPONSE
     if (register_type === "google_auth") {
+      console.log("🔵 STEP 30: Google registration → Creating session");
+
       const session_id = randomUUID();
       const access_token = createAccessToken({ id: newUser._id, session_id });
+
       newUser.session_id = session_id;
       newUser.access_token = access_token;
+
       await newUser.save();
+      console.log("🔵 STEP 31: Google auth user saved");
 
       return res.status(201).json({
         IsSucces: true,
@@ -218,36 +270,28 @@ exports.register = async (req, res) => {
         access_token,
         session_id,
         token_type: "bearer",
-        user: {
-          id: newUser._id,
-          name: newUser.name,
-          email: newUser.email,
-          mobile: newUser.mobile,
-          profile_image: getFullImageUrl(newUser.profile_image),
-          register_type: newUser.register_type,
-          otp_verified: newUser.otp_verified,
-          fcmToken: newUser.fcmTokens,
-        },
+        user: newUser,
       });
     }
 
+    console.log("❌ STEP 32: Unknown error");
     return res.status(500).json({ IsSucces: false, message: "Server error" });
   } catch (err) {
-    console.error("❌ Register Error:", err);
+    console.log("❌ STEP 33: Register Error:", err);
 
     if (uploadedPublicId) {
       try {
-        await cloudinary.uploader.destroy(uploadedPublicId, {
-          resource_type: "image",
-        });
+        await cloudinary.uploader.destroy(uploadedPublicId);
+        console.log("🔵 STEP 34: Cleanup success");
       } catch (e) {
-        console.error("cleanup failed", e);
+        console.log("❌ STEP 35: Cleanup failed", e);
       }
     }
 
     return res.status(500).json({ IsSucces: false, message: "Server error" });
   }
 };
+
 
 // ---------------- VERIFY OTP (REGISTER) ----------------
 exports.verifyOtpRegister = async (req, res) => {
@@ -503,44 +547,83 @@ exports.login = async (req, res) => {
 
 // ---------------- VERIFY OTP (LOGIN) ----------------
 exports.verifyOtpLogin = async (req, res) => {
+  console.log("🟦 STEP 1: verifyOtpLogin() called");
+
   try {
     const { email, otp } = req.body;
-    if (!email)
+
+    console.log("🟦 STEP 2: Received body:", req.body);
+
+    if (!email) {
+      console.log("❌ STEP 3: Email missing");
       return res
         .status(400)
         .json({ IsSucces: false, message: "Email required" });
-    if (!otp)
-      return res.status(400).json({ IsSucces: false, message: "OTP required" });
+    }
 
+    if (!otp) {
+      console.log("❌ STEP 4: OTP missing");
+      return res
+        .status(400)
+        .json({ IsSucces: false, message: "OTP required" });
+    }
+
+    console.log("🟦 STEP 5: Checking user in DB");
     const user = await User.findOne({ email: String(email).toLowerCase() });
-    if (!user)
+
+    console.log("🟦 STEP 6: User found?", !!user);
+
+    if (!user) {
+      console.log("❌ STEP 7: User not found");
       return res
         .status(404)
         .json({ IsSucces: false, message: "User not found" });
+    }
 
-    if (!user.otp_code || !user.otp_expiry)
+    console.log("🟦 STEP 8: Checking if OTP exists");
+    if (!user.otp_code || !user.otp_expiry) {
+      console.log("❌ STEP 9: User has no OTP");
       return res
         .status(400)
         .json({ IsSucces: false, message: "No OTP generated" });
+    }
 
-    if (Date.now() > new Date(user.otp_expiry).getTime())
+    console.log("🟦 STEP 10: Checking OTP expiry");
+    console.log("🟦 OTP Expiry:", user.otp_expiry);
+
+    if (Date.now() > new Date(user.otp_expiry).getTime()) {
+      console.log("❌ STEP 11: OTP expired");
       return res.status(400).json({ IsSucces: false, message: "OTP expired" });
+    }
 
-    if (String(user.otp_code) !== String(otp))
-      return res.status(400).json({ IsSucces: false, message: "Invalid OTP" });
+    console.log("🟦 STEP 12: Matching OTP");
+    console.log("🟦 Saved OTP:", user.otp_code, " | Entered OTP:", otp);
+
+    if (String(user.otp_code) !== String(otp)) {
+      console.log("❌ STEP 13: OTP not matched");
+      return res
+        .status(400)
+        .json({ IsSucces: false, message: "Invalid OTP" });
+    }
+
+    console.log("🟦 STEP 14: OTP matched successfully");
 
     user.otp_verified = true;
     user.otp_code = null;
     user.otp_expiry = null;
 
+    console.log("🟦 STEP 15: Generating session + tokens");
     const session_id = randomUUID();
     const access_token = createAccessToken({ id: user._id, session_id });
 
     user.session_id = session_id;
     user.access_token = access_token;
+
+    console.log("🟦 STEP 16: Saving user after OTP verify");
     await user.save();
 
-    res.json({
+    console.log("🟦 STEP 17: OTP login success");
+    return res.json({
       IsSucces: true,
       message: "Success",
       access_token,
@@ -556,11 +639,13 @@ exports.verifyOtpLogin = async (req, res) => {
         otp_verified: user.otp_verified,
       },
     });
+
   } catch (err) {
-    console.error("❌ Verify OTP (login) Error:", err);
+    console.log("❌ STEP 18: verifyOtpLogin Error:", err);
     return res.status(500).json({ IsSucces: false, message: "Server error" });
   }
 };
+
 // ---------------- RESEND OTP ----------------
 /**
  * POST /auth/resend-otp

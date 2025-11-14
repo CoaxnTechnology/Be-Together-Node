@@ -865,7 +865,7 @@ exports.updateService = async (req, res) => {
     }
 
     // City
-    if (body.city) updatePayload.city = body.city;
+    //if (body.city) updatePayload.city = body.city;
 
     // Category (optional now)
     if (body.categoryId) {

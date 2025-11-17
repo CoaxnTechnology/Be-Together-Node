@@ -48,8 +48,59 @@ async function sendResetEmail(to, token) {
     html,
   });
 }
+// ---------------- SERVICE START OTP EMAIL ----------------
+async function sendServiceOtpEmail(to, data) {
+  const templatePath = path.join(__dirname, "../templates/service_otp.html");
+  let html = fs.readFileSync(templatePath, "utf8");
+
+  html = html
+    .replace(/{{customerName}}/g, data.customerName)
+    .replace(/{{providerName}}/g, data.providerName)
+    .replace(/{{serviceName}}/g, data.serviceName)
+    .replace(/{{bookingId}}/g, data.bookingId)
+    .replace(/{{amount}}/g, data.amount)
+    .replace(/{{otp}}/g, data.otp)
+    .replace(/{{date}}/g, new Date().toLocaleDateString());
+
+  await transporter.sendMail({
+    from: process.env.SMTP_EMAIL,
+    to,
+    subject: "Your Service Start OTP",
+    html,
+  });
+}
+
+async function sendServiceBookedEmail(customer, service, provider, booking) {
+  if (!customer?.email) {
+    console.log("No customer email found. Skipping email for booking:", booking?._id);
+    return;
+  }
+
+  const templatePath = path.join(__dirname, "../templates/service_book.html");
+
+  let html = fs.readFileSync(templatePath, "utf-8");
+
+  html = html
+    .replace("{{customer_name}}", customer?.name || "Customer")
+    .replace("{{service_name}}", service?.title || "Service")
+    .replace("{{provider_name}}", provider?.name || "Provider")
+    .replace("{{amount}}", booking?.amount || "-")
+    .replace("{{date}}", service?.date ? new Date(service.date).toLocaleString() : "-");
+
+  await transporter.sendMail({
+    from: process.env.SMTP_EMAIL,
+    to: customer.email,
+    subject: "Your Service Has Been Booked",
+    html,
+  });
+}
+
+module.exports = { sendServiceBookedEmail };
+
 
 module.exports = {
   sendOtpEmail,
   sendResetEmail,
+  sendServiceOtpEmail,
+  sendServiceBookedEmail,
 };

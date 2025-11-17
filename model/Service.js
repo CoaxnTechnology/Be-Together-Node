@@ -69,7 +69,6 @@ const serviceSchema = new mongoose.Schema({
   },
   promotionAmount: { type: Number, default: 0 },
   promotionPaymentId: { type: String, default: null },
-
   created_at: { type: Date, default: Date.now },
   updated_at: { type: Date, default: Date.now },
 });

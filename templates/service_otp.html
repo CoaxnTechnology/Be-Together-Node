@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Service OTP</title>
+  </head>
+
+  <body
+    style="margin:0; font-family:'Poppins', sans-serif; background:#ffffff;"
+  >
+    <div
+      style="
+        max-width:680px;
+        margin:0 auto;
+        padding:45px 30px 60px;
+        background:#f4f7ff;
+        background-image:url('https://archisketch-resources.s3.ap-northeast-2.amazonaws.com/vrstyler/1661497957196_595865/email-template-background-banner');
+        background-repeat:no-repeat;
+        background-size:800px 452px;
+        background-position:top center;
+      "
+    >
+      <header>
+        <table style="width:100%;">
+          <tr>
+            <td style="display:flex; align-items:center; padding:10px;">
+              <img
+                src="https://be-together-node.vercel.app/logo.jpg"
+                alt="Logo"
+                height="40"
+                style="border-radius:5px;"
+              />
+            </td>
+
+            <td style="text-align:right;">
+              <span style="font-size:16px; color:#ffffff;">{{date}}</span>
+            </td>
+          </tr>
+        </table>
+      </header>
+
+      <main>
+        <div
+          style="
+            margin-top:70px;
+            padding:50px 30px 60px;
+            background:#ffffff;
+            border-radius:30px;
+            text-align:center;
+          "
+        >
+          <h1 style="margin:0; font-size:24px; font-weight:600; color:#1f1f1f;">
+            Service Start OTP
+          </h1>
+
+          <p style="margin-top:15px; font-size:16px; font-weight:500;">
+            Hello <strong>{{customerName}}</strong>,
+          </p>
+
+          <p style="margin-top:10px; color:#444; font-size:15px;">
+            Your service is about to begin!  
+            Please share this OTP with <strong>{{providerName}}</strong>  
+            when they arrive at your location.
+          </p>
+
+          <!-- SERVICE DETAILS CARD -->
+          <div
+            style="
+              margin-top:35px;
+              padding:20px;
+              background:#f4f7ff;
+              border-radius:20px;
+              text-align:left;
+            "
+          >
+            <h3 style="margin:0 0 10px 0; font-size:18px; color:#333;">
+              Service Details
+            </h3>
+
+            <p style="margin:5px 0; font-size:15px;">
+              <strong>Service:</strong> {{serviceName}}
+            </p>
+
+            <p style="margin:5px 0; font-size:15px;">
+              <strong>Provider:</strong> {{providerName}}
+            </p>
+
+            <p style="margin:5px 0; font-size:15px;">
+              <strong>Booking ID:</strong> {{bookingId}}
+            </p>
+
+            <p style="margin:5px 0; font-size:15px;">
+              <strong>Price:</strong> ₹{{amount}}
+            </p>
+          </div>
+
+          <!-- OTP -->
+          <p
+            style="
+              margin-top:40px;
+              font-size:16px;
+              font-weight:500;
+              color:#666;
+            "
+          >
+            Use the OTP below. Valid for  
+            <span style="font-weight:600; color:#000;">2 minutes</span>.
+          </p>
+
+          <p
+            style="
+              margin-top:30px;
+              font-size:42px;
+              font-weight:700;
+              letter-spacing:18px;
+              color:#ba3d4f;
+            "
+          >
+            {{otp}}
+          </p>
+        </div>
+      </main>
+
+      <p
+        style="
+          max-width:400px;
+          margin:80px auto 0;
+          text-align:center;
+          color:#8c8c8c;
+          font-size:14px;
+        "
+      >
+        Need help? Contact support:  
+        <a
+          href="mailto:support@betogether.com"
+          style="color:#499fb6; text-decoration:none;"
+        >
+          support@betogether.com
+        </a>
+      </p>
+    </div>
+  </body>
+</html>

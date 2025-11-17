@@ -1043,4 +1043,45 @@ exports.getservicbyId = async (req, res) => {
     });
   }
 };
-//------------------Delete Service------------------
+//------------------search Service------------------
+exports.searchServices = async (req, res) => {
+  try {
+    const keyword = req.body.keyword?.trim();
+    if (!keyword)
+      return res.status(400).json({
+        isSuccess: false,
+        message: "keyword is required in body",
+      });
+
+    const regex = new RegExp(keyword, "i"); // case-insensitive
+
+    // 1. Category match
+    const matchedCategories = await Category.find({ name: regex });
+    const matchedCategoryIds = matchedCategories.map((c) => c._id);
+
+    // 2. Search in services
+    const services = await Service.find({
+      $or: [
+        { title: regex },
+        { description: regex },
+        { tags: { $in: [regex] } }, // tags array match
+        { category: { $in: matchedCategoryIds } },
+      ],
+    })
+      .populate("category", "name")
+      .populate("owner", "name email");
+
+    return res.json({
+      isSuccess: true,
+      count: services.length,
+      data: services,
+    });
+  } catch (err) {
+    console.error("searchServices error:", err);
+    return res.status(500).json({
+      isSuccess: false,
+      message: "Server error",
+      error: err.message,
+    });
+  }
+};

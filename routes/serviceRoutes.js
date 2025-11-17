@@ -9,4 +9,6 @@ router.post("/user/search", serviceController.getInterestedUsers);
 router.get("/getall", serviceController.getAllServices);
 router.put("/update", auth, serviceController.updateService);
 router.post("/getbyId", serviceController.getservicbyId);
+router.post("/search", serviceController.searchServices);
+
 module.exports = router;

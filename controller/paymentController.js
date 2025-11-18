@@ -31,34 +31,26 @@ const transporter = nodemailer.createTransport({
 exports.bookService = async (req, res) => {
   try {
     console.log("📌 bookService called:", req.body);
-    const { userId, providerId, serviceId, amount, paymentMethodId } = req.body;
+    const { userId, providerId, serviceId, amount, paymentMethodId, currency } = req.body;
 
     // 1️⃣ Commission Settings
-    console.log("➡ Fetching commission settings");
     const commissionSetting = await CommissionSetting.findOne();
     const commissionPercent = commissionSetting?.percentage || 20;
     const commission = Math.round((amount * commissionPercent) / 100);
     const providerAmount = amount - commission;
-    console.log("✔ Commission:", commission, "Provider Amount:", providerAmount);
 
-    // 2️⃣ Fetch user, provider, service
-    console.log("➡ Fetching users & service");
+    // 2️⃣ Fetch Users & Service
     const customer = await User.findById(userId);
     const provider = await User.findById(providerId);
     const serviceDetails = await Service.findById(serviceId);
-    console.log("✔ Customer:", customer?._id);
-    console.log("✔ Provider:", provider?._id);
-    console.log("✔ Service:", serviceDetails?._id);
 
     if (!customer || !provider || !serviceDetails) {
-      console.log("❌ Missing data");
       return res.status(404).json({ message: "Data not found" });
     }
 
     // 3️⃣ Create Stripe Customer if not exists
     let customerStripeId = customer.stripeCustomerId;
     if (!customerStripeId) {
-      console.log("➡ Creating new Stripe customer");
       const newStripeCustomer = await stripe.customers.create({
         email: customer.email,
         name: customer.name,
@@ -66,43 +58,37 @@ exports.bookService = async (req, res) => {
       customerStripeId = newStripeCustomer.id;
       customer.stripeCustomerId = customerStripeId;
       await customer.save();
-      console.log("✔ Stripe Customer Created:", customerStripeId);
     }
 
     if (!provider.stripeAccountId) {
-      console.log("❌ Provider stripe missing");
       return res.status(400).json({ message: "Provider stripe account missing" });
     }
 
     // 4️⃣ Create Booking
-    console.log("➡ Creating booking...");
     const booking = await Booking.create({
       customer: userId,
       provider: providerId,
       service: serviceId,
       amount,
+      currency: currency?.toUpperCase() || "EUR", // Save currency
       status: "pending_payment",
     });
-    console.log("✔ Booking Created:", booking._id);
 
-    // 5️⃣ Stripe Payment Intent
-    console.log("➡ Creating Stripe PaymentIntent...");
+    // 5️⃣ Create PaymentIntent
     const paymentIntent = await stripe.paymentIntents.create({
-      amount: amount * 100,
-      currency: "inr",
+      amount: Math.round(amount * 100), // smallest currency unit
+      currency: (currency || "eur").toLowerCase(),
       customer: customerStripeId,
       payment_method: paymentMethodId,
       confirm: true,
-      capture_method: "manual",
+      capture_method: "manual", // capture after service completed
       application_fee_amount: commission * 100,
       transfer_data: { destination: provider.stripeAccountId },
       description: `Service Booking: ${serviceId}`,
-      automatic_payment_methods: { enabled: true, allow_redirects: "never" },
+      automatic_payment_methods: { enabled: true }, // let Stripe handle card types
     });
-    console.log("✔ PaymentIntent Created:", paymentIntent.id);
 
     // 6️⃣ Save Payment
-    console.log("➡ Saving Payment record...");
     const payment = await Payment.create({
       user: userId,
       provider: providerId,
@@ -115,53 +101,48 @@ exports.bookService = async (req, res) => {
       appCommission: commission,
       providerAmount,
       status: "pending",
+      currency: currency?.toUpperCase() || "EUR",
     });
-    console.log("✔ Payment Created:", payment._id);
 
     booking.paymentId = payment._id;
-    console.log("➡ Setting booking.paymentId:", payment._id);
-    await booking.save();
 
-    // 7️⃣ Update booking status
-    console.log("➡ Checking payment status:", paymentIntent.status);
-    if (
-      paymentIntent.status === "succeeded" ||
-      paymentIntent.status === "requires_capture"
-    ) {
+    // 7️⃣ Update booking status based on PaymentIntent
+    if (paymentIntent.status === "requires_action" || paymentIntent.status === "requires_payment_method") {
+      booking.status = "payment_pending"; // frontend must confirm payment
+      await booking.save();
+    } else if (paymentIntent.status === "requires_capture" || paymentIntent.status === "succeeded") {
       booking.status = "booked";
       await booking.save();
-      console.log("✔ Booking marked as BOOKED");
     } else {
       booking.status = "payment_failed";
       await booking.save();
-      console.log("❌ Payment failed — booking updated");
     }
 
-    // 8️⃣ Fetch updated booking
-    const updatedBooking = await Booking.findById(booking._id);
-
-    // 9️⃣ Send Email & Notification **after booking is saved**
+    // 8️⃣ Send Email & Notification asynchronously
     try {
-      await sendServiceBookedEmail(customer, serviceDetails, provider, updatedBooking);
-      await sendBookingNotification(customer, provider, serviceDetails, updatedBooking);
-      console.log("✔ Email & Notification sent successfully");
+      await sendServiceBookedEmail(customer, serviceDetails, provider, booking);
+      await sendBookingNotification(customer, provider, serviceDetails, booking);
     } catch (e) {
       console.log("⚠️ Email/Notification failed:", e.message);
     }
 
+    // 9️⃣ Return response to Flutter/web
     return res.status(200).json({
       isSuccess: true,
       message: "Booking processed",
       bookingId: booking._id,
-      clientSecret: paymentIntent.client_secret,
       paymentStatus: paymentIntent.status,
-      booking: updatedBooking,
+      clientSecret: paymentIntent.client_secret, // Flutter SDK uses this
+      booking,
     });
+
   } catch (err) {
     console.log("❌ bookService ERROR:", err.message);
     return res.status(500).json({ message: err.message });
   }
 };
+
+
 
 
 // ------------------------------

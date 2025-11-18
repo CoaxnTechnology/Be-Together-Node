@@ -103,16 +103,15 @@ exports.bookService = async (req, res) => {
       status: "pending",
     });
     booking.paymentId = payment._id;
+    console.log("Setting booking.paymentId = ", payment._id);
+
+    await booking.save();
     // 7️⃣ Update booking status based on payment
     if (
       paymentIntent.status === "succeeded" ||
       paymentIntent.status === "requires_capture"
     ) {
       booking.status = "booked";
-      booking.paymentId = payment._id;
-      // console.log("Setting booking.paymentId = ", payment._id);
-
-      await booking.save();
 
       // 8️⃣ Send Booking Email
       await sendServiceBookedEmail(customer, serviceDetails, provider, booking);

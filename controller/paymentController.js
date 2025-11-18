@@ -112,6 +112,7 @@ exports.bookService = async (req, res) => {
       paymentIntent.status === "requires_capture"
     ) {
       booking.status = "booked";
+      await booking.save();
 
       // 8️⃣ Send Booking Email
       await sendServiceBookedEmail(customer, serviceDetails, provider, booking);

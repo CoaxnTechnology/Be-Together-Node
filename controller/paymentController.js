@@ -325,10 +325,14 @@ const CancellationSetting = require("../model/CancellationSetting");
 // ------------------------------
 // CANCEL BOOKING + PARTIAL REFUND
 // ------------------------------
+// ------------------------------
+// CANCEL BOOKING + PARTIAL REFUND (ALWAYS REFUND EVEN IF NOT CAPTURED)
+// ------------------------------
 exports.refundBooking = async (req, res) => {
   try {
     const { bookingId } = req.body;
 
+    // 1️⃣ Fetch booking
     const booking = await Booking.findById(bookingId);
     if (!booking) return res.status(404).json({ message: "Booking not found" });
 
@@ -339,31 +343,45 @@ exports.refundBooking = async (req, res) => {
       });
     }
 
+    // 2️⃣ Fetch payment
     const payment = await Payment.findById(booking.paymentId);
     if (!payment)
-      return res.status(404).json({ message: "Payment record not found" });
+      return res.status(404).json({ message: "Payment not found" });
 
-    // 1️⃣ Cancellation settings fetch
-    const cancellationSetting = await CancellationSetting.findOne();
-    const cancellationPercent = cancellationSetting?.enabled
-      ? cancellationSetting.percentage
-      : 0;
-
-    // 2️⃣ Refund amount calculate
-    const totalAmount = payment.amount; // actual booking amount
-    const cancellationFee = Math.round(
-      (totalAmount * cancellationPercent) / 100
+    const paymentIntent = await stripe.paymentIntents.retrieve(
+      payment.paymentIntentId
     );
+
+    // 3️⃣ Get cancellation settings
+    const setting = await CancellationSetting.findOne();
+    const cancellationPercent = setting?.enabled ? setting.percentage : 0;
+
+    const totalAmount = payment.amount;
+    const cancellationFee = Math.round((totalAmount * cancellationPercent) / 100);
     const refundAmount = totalAmount - cancellationFee;
 
-    // 3️⃣ Refund process
+    let refundId = null;
+
+    // ---------------------------------
+    // CASE A: Payment NOT captured → FIRST CAPTURE
+    // ---------------------------------
+    if (paymentIntent.status === "requires_capture") {
+      // Capture full amount
+      await stripe.paymentIntents.capture(payment.paymentIntentId);
+    }
+
+    // ---------------------------------
+    // CASE B: Now always refund after capture
+    // ---------------------------------
     const refund = await stripe.refunds.create({
       payment_intent: payment.paymentIntentId,
-      amount: refundAmount * 100, // convert to paise
+      amount: refundAmount * 100,
       reason: "requested_by_customer",
     });
 
-    // 4️⃣ Update booking & payment status
+    refundId = refund.id;
+
+    // 4️⃣ Update booking + payment
     booking.status = "cancelled";
     await booking.save();
 
@@ -375,11 +393,12 @@ exports.refundBooking = async (req, res) => {
 
     return res.json({
       isSuccess: true,
-      message: "Booking cancelled successfully.",
+      message: "Booking cancelled & refund processed.",
       refundAmount,
       cancellationFee,
-      refundId: refund.id,
+      refundId,
     });
+
   } catch (err) {
     console.log(err);
     return res.status(500).json({ message: err.message });

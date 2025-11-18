@@ -70,19 +70,19 @@ exports.bookService = async (req, res) => {
       provider: providerId,
       service: serviceId,
       amount,
-      currency: currency?.toUpperCase() || "EUR",
+      currency: currency?.toUpperCase() || "INR",
       status: "pending_payment",
     });
 
     // 5️⃣ Create Stripe Checkout Session (manual capture)
     const session = await stripe.checkout.sessions.create({
-      payment_method_types: ["card", "upi", "netbanking"],
+      payment_method_types: ["card"], // card only; UPI/Netbanking auto-enabled for INR
       mode: "payment",
       customer: customerStripeId,
       line_items: [
         {
           price_data: {
-            currency: (currency || "eur").toLowerCase(),
+            currency: (currency || "inr").toLowerCase(),
             product_data: { name: serviceDetails.name },
             unit_amount: Math.round(amount * 100),
           },
@@ -90,7 +90,7 @@ exports.bookService = async (req, res) => {
         },
       ],
       payment_intent_data: {
-        capture_method: "manual", // ✅ Manual capture
+        capture_method: "manual", // manual capture
         application_fee_amount: commission * 100,
         transfer_data: { destination: provider.stripeAccountId },
       },
@@ -111,11 +111,10 @@ exports.bookService = async (req, res) => {
       appCommission: commission,
       providerAmount,
       status: "pending",
-      currency: currency?.toUpperCase() || "EUR",
+      currency: currency?.toUpperCase() || "INR",
     });
 
     booking.paymentId = payment._id;
-
     await booking.save();
 
     // 7️⃣ Send Email & Notification
@@ -131,7 +130,7 @@ exports.bookService = async (req, res) => {
       isSuccess: true,
       message: "Booking processed",
       bookingId: booking._id,
-      checkoutUrl: session.url, // <-- Flutter frontend will open this URL
+      checkoutUrl: session.url, // <-- Flutter frontend opens this URL
       booking,
     });
 

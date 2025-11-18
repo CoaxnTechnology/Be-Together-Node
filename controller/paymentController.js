@@ -74,20 +74,28 @@ exports.bookService = async (req, res) => {
       status: "pending_payment",
     });
 
-    // 5️⃣ Create PaymentIntent (for Flutter SDK)
-    const paymentIntent = await stripe.paymentIntents.create({
-      amount: Math.round(amount * 100), // convert to cents
-      currency: (currency || "eur").toLowerCase(),
-      customer: customerStripeId,
+    // 5️⃣ Create Stripe Checkout Session (redirect + all payment methods)
+    const session = await stripe.checkout.sessions.create({
       payment_method_types: ["card", "upi", "netbanking"],
-      capture_method: "manual", // manual capture
-      application_fee_amount: commission * 100,
-      transfer_data: { destination: provider.stripeAccountId },
-      metadata: {
-        bookingId: booking._id.toString(),
-        serviceId,
-        providerId,
+      mode: "payment",
+      customer: customerStripeId,
+      line_items: [
+        {
+          price_data: {
+            currency: (currency || "eur").toLowerCase(),
+            product_data: { name: serviceDetails.name },
+            unit_amount: Math.round(amount * 100),
+          },
+          quantity: 1,
+        },
+      ],
+      payment_intent_data: {
+        capture_method: "manual", // manual capture
+        application_fee_amount: commission * 100,
+        transfer_data: { destination: provider.stripeAccountId },
       },
+      success_url: `https://yourfrontend.com/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `https://yourfrontend.com/payment-cancel`,
     });
 
     // 6️⃣ Save Payment record
@@ -96,7 +104,7 @@ exports.bookService = async (req, res) => {
       provider: providerId,
       service: serviceId,
       bookingId: booking._id.toString(),
-      paymentIntentId: paymentIntent.id,
+      paymentIntentId: session.payment_intent,
       customerStripeId,
       providerStripeId: provider.stripeAccountId,
       amount,
@@ -117,12 +125,12 @@ exports.bookService = async (req, res) => {
       console.log("⚠️ Email/Notification failed:", e.message);
     }
 
-    // 8️⃣ Return client secret to Flutter
+    // 8️⃣ Return Checkout URL to Flutter
     return res.status(200).json({
       isSuccess: true,
       message: "Booking processed",
       bookingId: booking._id,
-      clientSecret: paymentIntent.client_secret, // Flutter will use this
+      checkoutUrl: session.url, // Flutter WebView / InAppBrowser open karega
       booking,
     });
 
@@ -131,7 +139,6 @@ exports.bookService = async (req, res) => {
     return res.status(500).json({ message: err.message });
   }
 };
-
 
 
 

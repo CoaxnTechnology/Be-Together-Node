@@ -28,43 +28,47 @@ const transporter = nodemailer.createTransport({
 // ------------------------------
 // 1) BOOK SERVICE + CREATE BOOKING
 // ------------------------------
+// 1️⃣ Book Service & create Checkout Session
+// 1️⃣ Book service & create payment
+// controllers/bookingController.js
+
+// 1️⃣ Book Service
 exports.bookService = async (req, res) => {
   try {
-    console.log("📌 bookService called:", req.body);
     const { userId, providerId, serviceId, amount, currency } = req.body;
+    console.log("📌 bookService called with:", req.body);
 
-    // 1️⃣ Commission Settings
+    // Commission
     const commissionSetting = await CommissionSetting.findOne();
     const commissionPercent = commissionSetting?.percentage || 20;
     const commission = Math.round((amount * commissionPercent) / 100);
     const providerAmount = amount - commission;
+    console.log("💰 Commission:", commission, "Provider Amount:", providerAmount);
 
-    // 2️⃣ Fetch Users & Service
+    // Fetch users & service
     const customer = await User.findById(userId);
     const provider = await User.findById(providerId);
     const serviceDetails = await Service.findById(serviceId);
-
-    if (!customer || !provider || !serviceDetails) {
+    if (!customer || !provider || !serviceDetails)
       return res.status(404).json({ message: "Data not found" });
-    }
 
-    // 3️⃣ Create Stripe Customer if not exists
+    // Stripe customer
     let customerStripeId = customer.stripeCustomerId;
     if (!customerStripeId) {
-      const newStripeCustomer = await stripe.customers.create({
+      const newCustomer = await stripe.customers.create({
         email: customer.email,
         name: customer.name,
       });
-      customerStripeId = newStripeCustomer.id;
+      customerStripeId = newCustomer.id;
       customer.stripeCustomerId = customerStripeId;
       await customer.save();
+      console.log("✅ Stripe Customer created:", customerStripeId);
     }
 
-    if (!provider.stripeAccountId) {
+    if (!provider.stripeAccountId)
       return res.status(400).json({ message: "Provider stripe account missing" });
-    }
 
-    // 4️⃣ Create Booking
+    // Create Booking
     const booking = await Booking.create({
       customer: userId,
       provider: providerId,
@@ -73,38 +77,44 @@ exports.bookService = async (req, res) => {
       currency: currency?.toUpperCase() || "EUR",
       status: "pending_payment",
     });
+    console.log("📒 Booking created:", booking._id.toString());
 
-    // 5️⃣ Create Stripe Checkout Session (redirect + all payment methods)
+    // Create Stripe Checkout Session
     const session = await stripe.checkout.sessions.create({
-      payment_method_types: ["card", "upi", "netbanking"],
+      payment_method_types: ["card"],
       mode: "payment",
       customer: customerStripeId,
       line_items: [
         {
           price_data: {
             currency: (currency || "eur").toLowerCase(),
-            product_data: { name: serviceDetails.name },
+            product_data: {
+              name: serviceDetails.title,
+              description: serviceDetails.description || "",
+            },
             unit_amount: Math.round(amount * 100),
           },
           quantity: 1,
         },
       ],
       payment_intent_data: {
-        capture_method: "manual", // manual capture
+        capture_method: "manual",
         application_fee_amount: commission * 100,
         transfer_data: { destination: provider.stripeAccountId },
+        metadata: { bookingId: booking._id.toString() },
       },
       success_url: `https://yourfrontend.com/payment-success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `https://yourfrontend.com/payment-cancel`,
     });
+    console.log("💳 Checkout Session created:", session.id);
 
-    // 6️⃣ Save Payment record
+    // Save Payment record
     const payment = await Payment.create({
       user: userId,
       provider: providerId,
       service: serviceId,
       bookingId: booking._id.toString(),
-      paymentIntentId: session.payment_intent,
+      checkoutSessionId: session.id, // save session id!
       customerStripeId,
       providerStripeId: provider.stripeAccountId,
       amount,
@@ -113,25 +123,16 @@ exports.bookService = async (req, res) => {
       status: "pending",
       currency: currency?.toUpperCase() || "EUR",
     });
+    console.log("✅ Payment record created:", payment._id.toString(), "with sessionId:", session.id);
 
     booking.paymentId = payment._id;
     await booking.save();
 
-    // 7️⃣ Send Email & Notification
-    try {
-      await sendServiceBookedEmail(customer, serviceDetails, provider, booking);
-      await sendBookingNotification(customer, provider, serviceDetails, booking);
-    } catch (e) {
-      console.log("⚠️ Email/Notification failed:", e.message);
-    }
-
-    // 8️⃣ Return Checkout URL to Flutter
     return res.status(200).json({
       isSuccess: true,
       message: "Booking processed",
       bookingId: booking._id,
-      checkoutUrl: session.url, // Flutter WebView / InAppBrowser open karega
-      booking,
+      checkoutUrl: session.url,
     });
 
   } catch (err) {
@@ -139,6 +140,53 @@ exports.bookService = async (req, res) => {
     return res.status(500).json({ message: err.message });
   }
 };
+
+// 2️⃣ Confirm Payment
+exports.confirmPayment = async (req, res) => {
+  try {
+    const { sessionId } = req.body;
+    console.log("📌 confirmPayment called with sessionId:", sessionId);
+    if (!sessionId) return res.status(400).json({ message: "sessionId required" });
+
+    // Retrieve session
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
+    console.log("💳 Stripe session retrieved:", session.id);
+
+    const paymentStatus = session.payment_status; // 'paid' or 'unpaid'
+    const paymentIntentId = session.payment_intent;
+    console.log("💳 Payment status:", paymentStatus, "PaymentIntent:", paymentIntentId);
+
+    // Find payment record by checkoutSessionId
+    const payment = await Payment.findOne({ checkoutSessionId: session.id });
+    console.log("🔹 Payment record fetched:", payment ? payment._id.toString() : null);
+    if (!payment) return res.status(404).json({ message: "Payment record not found" });
+
+    // Update if paid
+    if (paymentStatus === "paid") {
+      payment.status = "completed";
+      payment.paymentIntentId = paymentIntentId;
+      payment.completedAt = new Date();
+      await payment.save();
+
+      await Booking.findByIdAndUpdate(payment.bookingId, { status: "booked" });
+      console.log("✅ Booking updated to 'booked'");
+
+      return res.status(200).json({ message: "Payment confirmed & booking updated" });
+    } else {
+      return res.status(400).json({ message: "Payment not completed yet" });
+    }
+
+  } catch (err) {
+    console.log("❌ confirmPayment ERROR:", err.message);
+    return res.status(500).json({ message: err.message });
+  }
+};
+
+
+
+
+
+
 
 
 

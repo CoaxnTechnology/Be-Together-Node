@@ -14,8 +14,9 @@ const paymentSchema = new mongoose.Schema(
       required: true,
     },
     bookingId: { type: String, required: true },
+    checkoutSessionId: { type: String, required: true },
 
-    paymentIntentId: { type: String, required: true },
+    paymentIntentId: { type: String, default: null },
     customerStripeId: { type: String, required: true },
     providerStripeId: { type: String, required: true },
     amount: { type: Number, required: true },

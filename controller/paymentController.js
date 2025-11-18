@@ -30,27 +30,37 @@ const transporter = nodemailer.createTransport({
 // ------------------------------
 exports.bookService = async (req, res) => {
   try {
+    console.log("📌 bookService called:", req.body);
+
     const { userId, providerId, serviceId, amount, paymentMethodId } = req.body;
 
-    // 1️⃣ Fetch commission settings
+    // 1️⃣ Commission Settings
+    console.log("➡ Fetching commission settings");
     const commissionSetting = await CommissionSetting.findOne();
     const commissionPercent = commissionSetting?.percentage || 20;
     const commission = Math.round((amount * commissionPercent) / 100);
     const providerAmount = amount - commission;
+    console.log("✔ Commission:", commission, "Provider Amount:", providerAmount);
 
-    // 2️⃣ Fetch user, provider & service
+    // 2️⃣ Fetch user, provider, service
+    console.log("➡ Fetching users & service");
     const customer = await User.findById(userId);
     const provider = await User.findById(providerId);
     const serviceDetails = await Service.findById(serviceId);
-    // console.log("Customer FCM Token:", customer?.fcmToken);
-    //  console.log("Provider FCM Token:", provider?.fcmToken);
 
-    if (!customer || !provider || !serviceDetails)
+    console.log("✔ Customer:", customer?._id);
+    console.log("✔ Provider:", provider?._id);
+    console.log("✔ Service:", serviceDetails?._id);
+
+    if (!customer || !provider || !serviceDetails) {
+      console.log("❌ Missing data");
       return res.status(404).json({ message: "Data not found" });
+    }
 
     // 3️⃣ Create Stripe Customer if not exists
     let customerStripeId = customer.stripeCustomerId;
     if (!customerStripeId) {
+      console.log("➡ Creating new Stripe customer");
       const newStripeCustomer = await stripe.customers.create({
         email: customer.email,
         name: customer.name,
@@ -58,23 +68,27 @@ exports.bookService = async (req, res) => {
       customerStripeId = newStripeCustomer.id;
       customer.stripeCustomerId = customerStripeId;
       await customer.save();
+      console.log("✔ Stripe Customer Created:", customerStripeId);
     }
 
-    if (!provider.stripeAccountId)
-      return res
-        .status(400)
-        .json({ message: "Provider stripe account missing" });
+    if (!provider.stripeAccountId) {
+      console.log("❌ Provider stripe missing");
+      return res.status(400).json({ message: "Provider stripe account missing" });
+    }
 
-    // 4️⃣ Create Booking first
+    // 4️⃣ Create Booking
+    console.log("➡ Creating booking...");
     const booking = await Booking.create({
       customer: userId,
       provider: providerId,
       service: serviceId,
       amount,
-      status: "pending_payment", // temporary status
+      status: "pending_payment",
     });
+    console.log("✔ Booking Created:", booking._id);
 
-    // 5️⃣ Create Stripe Payment Intent
+    // 5️⃣ Stripe Payment Intent
+    console.log("➡ Creating Stripe PaymentIntent...");
     const paymentIntent = await stripe.paymentIntents.create({
       amount: amount * 100,
       currency: "inr",
@@ -87,8 +101,10 @@ exports.bookService = async (req, res) => {
       description: `Service Booking: ${serviceId}`,
       automatic_payment_methods: { enabled: true, allow_redirects: "never" },
     });
+    console.log("✔ PaymentIntent Created:", paymentIntent.id);
 
-    // 6️⃣ Save Payment record
+    // 6️⃣ Save Payment
+    console.log("➡ Saving Payment record...");
     const payment = await Payment.create({
       user: userId,
       provider: providerId,
@@ -102,36 +118,30 @@ exports.bookService = async (req, res) => {
       providerAmount,
       status: "pending",
     });
-    booking.paymentId = payment._id;
-    console.log("Setting booking.paymentId = ", payment._id);
+    console.log("✔ Payment Created:", payment._id);
 
+    booking.paymentId = payment._id;
+    console.log("➡ Setting booking.paymentId:", payment._id);
     await booking.save();
-    // 7️⃣ Update booking status based on payment
+
+    // 7️⃣ Update booking status
+    console.log("➡ Checking payment status:", paymentIntent.status);
     if (
       paymentIntent.status === "succeeded" ||
       paymentIntent.status === "requires_capture"
     ) {
       booking.status = "booked";
       await booking.save();
-
-      // 8️⃣ Send Booking Email
-      await sendServiceBookedEmail(customer, serviceDetails, provider, booking);
-
-      // 9️⃣ Send Push Notification
-      await sendBookingNotification(
-        customer,
-        provider,
-        serviceDetails,
-        booking
-      );
+      console.log("✔ Booking marked as BOOKED");
     } else {
       booking.status = "payment_failed";
       await booking.save();
+      console.log("❌ Payment failed — booking updated");
     }
-    //console.log("Booking AFTER SAVE →", booking);
 
-    // ⭐ NEW FIX → Fetch updated booking from DB
     const updatedBooking = await Booking.findById(booking._id);
+    console.log("📌 Final Booking:", updatedBooking);
+
     return res.status(200).json({
       isSuccess: true,
       message: "Booking processed",
@@ -141,10 +151,11 @@ exports.bookService = async (req, res) => {
       booking: updatedBooking,
     });
   } catch (err) {
-    console.log(err);
+    console.log("❌ bookService ERROR:", err.message);
     return res.status(500).json({ message: err.message });
   }
 };
+
 
 // ------------------------------
 // 2) START SERVICE → GENERATE OTP → EMAIL
@@ -330,49 +341,71 @@ const CancellationSetting = require("../model/CancellationSetting");
 // ------------------------------
 exports.refundBooking = async (req, res) => {
   try {
+    console.log("📌 refundBooking called:", req.body);
+
     const { bookingId } = req.body;
 
-    // 1️⃣ Fetch booking
+    // 1️⃣ Booking
+    console.log("➡ Fetching booking...");
     const booking = await Booking.findById(bookingId);
-    if (!booking) return res.status(404).json({ message: "Booking not found" });
+    console.log("✔ Booking:", booking);
 
+    if (!booking)
+      return res.status(404).json({ message: "Booking not found" });
+
+    console.log("➡ Checking booking status:", booking.status);
     if (booking.status !== "booked") {
+      console.log("❌ Booking is not booked");
       return res.status(400).json({
         isSuccess: false,
         message: "Only booked services can be cancelled.",
       });
     }
 
-    // 2️⃣ Fetch payment
-    const payment = await Payment.findById(booking.paymentId);
+    // 2️⃣ Payment
+    console.log("➡ Fetching Payment using booking.paymentId:", booking.paymentId);
+    let payment = await Payment.findById(booking.paymentId);
+
+    if (!payment) {
+      console.log("⚠ paymentId is wrong, trying findOne({ bookingId })");
+      payment = await Payment.findOne({ bookingId });
+    }
+
+    console.log("✔ Payment:", payment);
+
     if (!payment)
       return res.status(404).json({ message: "Payment not found" });
 
+    console.log("➡ Fetching Stripe PaymentIntent...");
     const paymentIntent = await stripe.paymentIntents.retrieve(
       payment.paymentIntentId
     );
+    console.log("✔ PaymentIntent:", paymentIntent.status);
 
-    // 3️⃣ Get cancellation settings
+    // 3️⃣ Cancellation setting
+    console.log("➡ Fetching cancellation settings...");
     const setting = await CancellationSetting.findOne();
     const cancellationPercent = setting?.enabled ? setting.percentage : 0;
+    console.log("✔ Cancellation %:", cancellationPercent);
 
     const totalAmount = payment.amount;
     const cancellationFee = Math.round((totalAmount * cancellationPercent) / 100);
     const refundAmount = totalAmount - cancellationFee;
 
+    console.log("💰 Refund Amount:", refundAmount);
+    console.log("💰 App Fee:", cancellationFee);
+
     let refundId = null;
 
-    // ---------------------------------
-    // CASE A: Payment NOT captured → FIRST CAPTURE
-    // ---------------------------------
+    // Case A: If requires_capture → capture first
     if (paymentIntent.status === "requires_capture") {
-      // Capture full amount
+      console.log("➡ Capturing PaymentIntent BEFORE refund...");
       await stripe.paymentIntents.capture(payment.paymentIntentId);
+      console.log("✔ Payment Captured");
     }
 
-    // ---------------------------------
-    // CASE B: Now always refund after capture
-    // ---------------------------------
+    // Refund
+    console.log("➡ Creating refund...");
     const refund = await stripe.refunds.create({
       payment_intent: payment.paymentIntentId,
       amount: refundAmount * 100,
@@ -380,8 +413,10 @@ exports.refundBooking = async (req, res) => {
     });
 
     refundId = refund.id;
+    console.log("✔ Refund Created:", refundId);
 
-    // 4️⃣ Update booking + payment
+    // Update records
+    console.log("➡ Updating booking & payment status...");
     booking.status = "cancelled";
     await booking.save();
 
@@ -390,6 +425,8 @@ exports.refundBooking = async (req, res) => {
     payment.cancellationFee = cancellationFee;
     payment.refundAt = new Date();
     await payment.save();
+
+    console.log("✔ Refund Booking DONE");
 
     return res.json({
       isSuccess: true,
@@ -400,7 +437,7 @@ exports.refundBooking = async (req, res) => {
     });
 
   } catch (err) {
-    console.log(err);
+    console.log("❌ refundBooking ERROR:", err.message);
     return res.status(500).json({ message: err.message });
   }
 };

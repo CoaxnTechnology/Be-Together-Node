@@ -102,7 +102,7 @@ exports.bookService = async (req, res) => {
       providerAmount,
       status: "pending",
     });
-
+    booking.paymentId = payment._id;
     // 7️⃣ Update booking status based on payment
     if (
       paymentIntent.status === "succeeded" ||
@@ -225,7 +225,6 @@ exports.verifyServiceOtp = async (req, res) => {
   }
 };
 
-
 // ------------------------------
 // 4) COMPLETE SERVICE + CAPTURE PAYMENT
 // ------------------------------
@@ -265,7 +264,6 @@ exports.completeService = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
-
 
 // GET USER BOOKINGS (Customer & Provider)
 exports.getUserBookings = async (req, res) => {
@@ -322,7 +320,6 @@ exports.getUserBookings = async (req, res) => {
   }
 };
 
-
 const CancellationSetting = require("../model/CancellationSetting");
 
 // ------------------------------
@@ -333,8 +330,7 @@ exports.refundBooking = async (req, res) => {
     const { bookingId } = req.body;
 
     const booking = await Booking.findById(bookingId);
-    if (!booking)
-      return res.status(404).json({ message: "Booking not found" });
+    if (!booking) return res.status(404).json({ message: "Booking not found" });
 
     if (booking.status !== "booked") {
       return res.status(400).json({
@@ -349,8 +345,9 @@ exports.refundBooking = async (req, res) => {
 
     // 1️⃣ Cancellation settings fetch
     const cancellationSetting = await CancellationSetting.findOne();
-    const cancellationPercent =
-      cancellationSetting?.enabled ? cancellationSetting.percentage : 0;
+    const cancellationPercent = cancellationSetting?.enabled
+      ? cancellationSetting.percentage
+      : 0;
 
     // 2️⃣ Refund amount calculate
     const totalAmount = payment.amount; // actual booking amount

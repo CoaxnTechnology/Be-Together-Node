@@ -74,31 +74,20 @@ exports.bookService = async (req, res) => {
       status: "pending_payment",
     });
 
-    // 5️⃣ Create Stripe Checkout Session
-    const session = await stripe.checkout.sessions.create({
-      mode: "payment",
-      payment_method_types: ["card"], // card only; UPI/Netbanking via PaymentIntent if needed
+    // 5️⃣ Create PaymentIntent (for Flutter SDK)
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: Math.round(amount * 100), // convert to cents
+      currency: (currency || "eur").toLowerCase(),
       customer: customerStripeId,
-      line_items: [
-        {
-          price_data: {
-            currency: (currency || "eur").toLowerCase(),
-            product_data: {
-              name: serviceDetails.name,
-              description: serviceDetails.description || "",
-            },
-            unit_amount: Math.round(amount * 100), // in smallest currency unit
-          },
-          quantity: 1,
-        },
-      ],
-      payment_intent_data: {
-        capture_method: "manual", // ✅ manual capture
-        application_fee_amount: commission * 100,
-        transfer_data: { destination: provider.stripeAccountId },
+      payment_method_types: ["card", "upi", "netbanking"],
+      capture_method: "manual", // manual capture
+      application_fee_amount: commission * 100,
+      transfer_data: { destination: provider.stripeAccountId },
+      metadata: {
+        bookingId: booking._id.toString(),
+        serviceId,
+        providerId,
       },
-      success_url: `https://yourfrontend.com/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `https://yourfrontend.com/cancel`,
     });
 
     // 6️⃣ Save Payment record
@@ -107,7 +96,7 @@ exports.bookService = async (req, res) => {
       provider: providerId,
       service: serviceId,
       bookingId: booking._id.toString(),
-      paymentIntentId: session.payment_intent,
+      paymentIntentId: paymentIntent.id,
       customerStripeId,
       providerStripeId: provider.stripeAccountId,
       amount,
@@ -120,7 +109,7 @@ exports.bookService = async (req, res) => {
     booking.paymentId = payment._id;
     await booking.save();
 
-    // 7️⃣ Send Email & Notification asynchronously
+    // 7️⃣ Send Email & Notification
     try {
       await sendServiceBookedEmail(customer, serviceDetails, provider, booking);
       await sendBookingNotification(customer, provider, serviceDetails, booking);
@@ -128,12 +117,12 @@ exports.bookService = async (req, res) => {
       console.log("⚠️ Email/Notification failed:", e.message);
     }
 
-    // 8️⃣ Return Checkout URL to frontend
+    // 8️⃣ Return client secret to Flutter
     return res.status(200).json({
       isSuccess: true,
       message: "Booking processed",
       bookingId: booking._id,
-      checkoutUrl: session.url, // <-- Flutter frontend will open this URL
+      clientSecret: paymentIntent.client_secret, // Flutter will use this
       booking,
     });
 
@@ -142,6 +131,7 @@ exports.bookService = async (req, res) => {
     return res.status(500).json({ message: err.message });
   }
 };
+
 
 
 

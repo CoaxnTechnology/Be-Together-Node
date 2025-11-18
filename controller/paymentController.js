@@ -70,27 +70,30 @@ exports.bookService = async (req, res) => {
       provider: providerId,
       service: serviceId,
       amount,
-      currency: currency?.toUpperCase() || "INR",
+      currency: currency?.toUpperCase() || "EUR",
       status: "pending_payment",
     });
 
-    // 5️⃣ Create Stripe Checkout Session (manual capture)
+    // 5️⃣ Create Stripe Checkout Session
     const session = await stripe.checkout.sessions.create({
-      payment_method_types: ["card"], // card only; UPI/Netbanking auto-enabled for INR
       mode: "payment",
+      payment_method_types: ["card"], // card only; UPI/Netbanking via PaymentIntent if needed
       customer: customerStripeId,
       line_items: [
         {
           price_data: {
-            currency: (currency || "inr").toLowerCase(),
-            product_data: { name: serviceDetails.name },
-            unit_amount: Math.round(amount * 100),
+            currency: (currency || "eur").toLowerCase(),
+            product_data: {
+              name: serviceDetails.name,
+              description: serviceDetails.description || "",
+            },
+            unit_amount: Math.round(amount * 100), // in smallest currency unit
           },
           quantity: 1,
         },
       ],
       payment_intent_data: {
-        capture_method: "manual", // manual capture
+        capture_method: "manual", // ✅ manual capture
         application_fee_amount: commission * 100,
         transfer_data: { destination: provider.stripeAccountId },
       },
@@ -111,13 +114,13 @@ exports.bookService = async (req, res) => {
       appCommission: commission,
       providerAmount,
       status: "pending",
-      currency: currency?.toUpperCase() || "INR",
+      currency: currency?.toUpperCase() || "EUR",
     });
 
     booking.paymentId = payment._id;
     await booking.save();
 
-    // 7️⃣ Send Email & Notification
+    // 7️⃣ Send Email & Notification asynchronously
     try {
       await sendServiceBookedEmail(customer, serviceDetails, provider, booking);
       await sendBookingNotification(customer, provider, serviceDetails, booking);
@@ -130,7 +133,7 @@ exports.bookService = async (req, res) => {
       isSuccess: true,
       message: "Booking processed",
       bookingId: booking._id,
-      checkoutUrl: session.url, // <-- Flutter frontend opens this URL
+      checkoutUrl: session.url, // <-- Flutter frontend will open this URL
       booking,
     });
 
@@ -139,7 +142,6 @@ exports.bookService = async (req, res) => {
     return res.status(500).json({ message: err.message });
   }
 };
-
 
 
 

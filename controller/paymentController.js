@@ -31,7 +31,6 @@ const transporter = nodemailer.createTransport({
 exports.bookService = async (req, res) => {
   try {
     console.log("📌 bookService called:", req.body);
-
     const { userId, providerId, serviceId, amount, paymentMethodId } = req.body;
 
     // 1️⃣ Commission Settings
@@ -47,7 +46,6 @@ exports.bookService = async (req, res) => {
     const customer = await User.findById(userId);
     const provider = await User.findById(providerId);
     const serviceDetails = await Service.findById(serviceId);
-
     console.log("✔ Customer:", customer?._id);
     console.log("✔ Provider:", provider?._id);
     console.log("✔ Service:", serviceDetails?._id);
@@ -139,8 +137,17 @@ exports.bookService = async (req, res) => {
       console.log("❌ Payment failed — booking updated");
     }
 
+    // 8️⃣ Fetch updated booking
     const updatedBooking = await Booking.findById(booking._id);
-    console.log("📌 Final Booking:", updatedBooking);
+
+    // 9️⃣ Send Email & Notification **after booking is saved**
+    try {
+      await sendServiceBookedEmail(customer, serviceDetails, provider, updatedBooking);
+      await sendBookingNotification(customer, provider, serviceDetails, updatedBooking);
+      console.log("✔ Email & Notification sent successfully");
+    } catch (e) {
+      console.log("⚠️ Email/Notification failed:", e.message);
+    }
 
     return res.status(200).json({
       isSuccess: true,
@@ -350,8 +357,7 @@ exports.refundBooking = async (req, res) => {
     const booking = await Booking.findById(bookingId);
     console.log("✔ Booking:", booking);
 
-    if (!booking)
-      return res.status(404).json({ message: "Booking not found" });
+    if (!booking) return res.status(404).json({ message: "Booking not found" });
 
     console.log("➡ Checking booking status:", booking.status);
     if (booking.status !== "booked") {
@@ -363,7 +369,10 @@ exports.refundBooking = async (req, res) => {
     }
 
     // 2️⃣ Payment
-    console.log("➡ Fetching Payment using booking.paymentId:", booking.paymentId);
+    console.log(
+      "➡ Fetching Payment using booking.paymentId:",
+      booking.paymentId
+    );
     let payment = await Payment.findById(booking.paymentId);
 
     if (!payment) {
@@ -373,8 +382,7 @@ exports.refundBooking = async (req, res) => {
 
     console.log("✔ Payment:", payment);
 
-    if (!payment)
-      return res.status(404).json({ message: "Payment not found" });
+    if (!payment) return res.status(404).json({ message: "Payment not found" });
 
     console.log("➡ Fetching Stripe PaymentIntent...");
     const paymentIntent = await stripe.paymentIntents.retrieve(
@@ -389,7 +397,9 @@ exports.refundBooking = async (req, res) => {
     console.log("✔ Cancellation %:", cancellationPercent);
 
     const totalAmount = payment.amount;
-    const cancellationFee = Math.round((totalAmount * cancellationPercent) / 100);
+    const cancellationFee = Math.round(
+      (totalAmount * cancellationPercent) / 100
+    );
     const refundAmount = totalAmount - cancellationFee;
 
     console.log("💰 Refund Amount:", refundAmount);
@@ -435,7 +445,6 @@ exports.refundBooking = async (req, res) => {
       cancellationFee,
       refundId,
     });
-
   } catch (err) {
     console.log("❌ refundBooking ERROR:", err.message);
     return res.status(500).json({ message: err.message });

@@ -5,6 +5,10 @@ const {
   sendServiceBookedEmail,
 } = require("../utils/email");
 const { generateOTP } = require("../utils/otp");
+const {
+  sendBookingNotification,
+  sendServiceStartedNotification,
+} = require("../controller/notificationController"); // ✅ import it
 
 const User = require("../model/User");
 const Service = require("../model/Service");
@@ -38,6 +42,8 @@ exports.bookService = async (req, res) => {
     const customer = await User.findById(userId);
     const provider = await User.findById(providerId);
     const serviceDetails = await Service.findById(serviceId);
+    // console.log("Customer FCM Token:", customer?.fcmToken);
+    //  console.log("Provider FCM Token:", provider?.fcmToken);
 
     if (!customer || !provider || !serviceDetails)
       return res.status(404).json({ message: "Data not found" });
@@ -55,7 +61,9 @@ exports.bookService = async (req, res) => {
     }
 
     if (!provider.stripeAccountId)
-      return res.status(400).json({ message: "Provider stripe account missing" });
+      return res
+        .status(400)
+        .json({ message: "Provider stripe account missing" });
 
     // 4️⃣ Create Booking first
     const booking = await Booking.create({
@@ -96,31 +104,47 @@ exports.bookService = async (req, res) => {
     });
 
     // 7️⃣ Update booking status based on payment
-    if (paymentIntent.status === "succeeded" || paymentIntent.status === "requires_capture") {
+    if (
+      paymentIntent.status === "succeeded" ||
+      paymentIntent.status === "requires_capture"
+    ) {
       booking.status = "booked";
+      booking.paymentId = payment._id;
+      // console.log("Setting booking.paymentId = ", payment._id);
+
       await booking.save();
 
       // 8️⃣ Send Booking Email
       await sendServiceBookedEmail(customer, serviceDetails, provider, booking);
+
+      // 9️⃣ Send Push Notification
+      await sendBookingNotification(
+        customer,
+        provider,
+        serviceDetails,
+        booking
+      );
     } else {
       booking.status = "payment_failed";
       await booking.save();
     }
+    //console.log("Booking AFTER SAVE →", booking);
 
+    // ⭐ NEW FIX → Fetch updated booking from DB
+    const updatedBooking = await Booking.findById(booking._id);
     return res.status(200).json({
       isSuccess: true,
       message: "Booking processed",
       bookingId: booking._id,
       clientSecret: paymentIntent.client_secret,
       paymentStatus: paymentIntent.status,
+      booking: updatedBooking,
     });
-
   } catch (err) {
     console.log(err);
     return res.status(500).json({ message: err.message });
   }
 };
-
 
 // ------------------------------
 // 2) START SERVICE → GENERATE OTP → EMAIL
@@ -167,16 +191,30 @@ exports.startService = async (req, res) => {
 exports.verifyServiceOtp = async (req, res) => {
   try {
     const { bookingId, otp } = req.body;
-    const booking = await Booking.findById(bookingId);
+
+    const booking = await Booking.findById(bookingId)
+      .populate("customer")
+      .populate("provider")
+      .populate("service");
+
     if (!booking) return res.status(404).json({ message: "Booking not found" });
 
     if (booking.otpExpiry < new Date())
       return res.status(400).json({ message: "OTP expired" });
+
     if (booking.otp != otp)
       return res.status(400).json({ message: "Invalid OTP" });
 
     booking.status = "started";
     await booking.save();
+
+    // 🎯 Only notify customer
+    await sendServiceStartedNotification(
+      booking.customer,
+      booking.provider,
+      booking.service,
+      booking
+    );
 
     return res.json({
       isSuccess: true,
@@ -187,18 +225,29 @@ exports.verifyServiceOtp = async (req, res) => {
   }
 };
 
+
 // ------------------------------
 // 4) COMPLETE SERVICE + CAPTURE PAYMENT
 // ------------------------------
 exports.completeService = async (req, res) => {
   try {
     const { bookingId } = req.body;
+
     const booking = await Booking.findById(bookingId);
     if (!booking) return res.status(404).json({ message: "Booking not found" });
+
+    // ❌ If OTP not verified → block completion
+    if (booking.status !== "started") {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Please start the service first by verifying OTP.",
+      });
+    }
 
     const payment = await Payment.findById(booking.paymentId);
     if (!payment) return res.status(404).json({ message: "Payment not found" });
 
+    // Stripe capture
     await stripe.paymentIntents.capture(payment.paymentIntentId);
 
     booking.status = "completed";
@@ -217,24 +266,28 @@ exports.completeService = async (req, res) => {
   }
 };
 
+
 // GET USER BOOKINGS (Customer & Provider)
 exports.getUserBookings = async (req, res) => {
   try {
-    const userId = req.params.userId; // logged-in user ID
+    const { userId } = req.body; // ⭐ Body se userId
 
-    // 1️⃣ Bookings jisme user customer hai
+    if (!userId) {
+      return res.status(400).json({ message: "userId is required" });
+    }
+
+    // Customer bookings
     const customerBookings = await Booking.find({ customer: userId })
       .populate("service")
       .populate("provider", "name email")
       .sort({ createdAt: -1 });
 
-    // 2️⃣ Bookings jisme user provider hai
+    // Provider bookings
     const providerBookings = await Booking.find({ provider: userId })
       .populate("service")
       .populate("customer", "name email")
       .sort({ createdAt: -1 });
 
-    // 3️⃣ Merge & format response
     const bookings = [];
 
     customerBookings.forEach((b) => {
@@ -242,7 +295,7 @@ exports.getUserBookings = async (req, res) => {
         bookingId: b._id,
         role: "customer",
         service: b.service,
-        otherUser: b.provider, // provider info
+        otherUser: b.provider,
         status: b.status,
         amount: b.amount,
         createdAt: b.createdAt,
@@ -254,17 +307,82 @@ exports.getUserBookings = async (req, res) => {
         bookingId: b._id,
         role: "provider",
         service: b.service,
-        otherUser: b.customer, // customer info
+        otherUser: b.customer,
         status: b.status,
         amount: b.amount,
         createdAt: b.createdAt,
       });
     });
 
-    // Sort all bookings by latest first
     bookings.sort((a, b) => b.createdAt - a.createdAt);
 
     return res.json({ isSuccess: true, bookings });
+  } catch (err) {
+    return res.status(500).json({ message: err.message });
+  }
+};
+
+
+const CancellationSetting = require("../model/CancellationSetting");
+
+// ------------------------------
+// CANCEL BOOKING + PARTIAL REFUND
+// ------------------------------
+exports.refundBooking = async (req, res) => {
+  try {
+    const { bookingId } = req.body;
+
+    const booking = await Booking.findById(bookingId);
+    if (!booking)
+      return res.status(404).json({ message: "Booking not found" });
+
+    if (booking.status !== "booked") {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Only booked services can be cancelled.",
+      });
+    }
+
+    const payment = await Payment.findById(booking.paymentId);
+    if (!payment)
+      return res.status(404).json({ message: "Payment record not found" });
+
+    // 1️⃣ Cancellation settings fetch
+    const cancellationSetting = await CancellationSetting.findOne();
+    const cancellationPercent =
+      cancellationSetting?.enabled ? cancellationSetting.percentage : 0;
+
+    // 2️⃣ Refund amount calculate
+    const totalAmount = payment.amount; // actual booking amount
+    const cancellationFee = Math.round(
+      (totalAmount * cancellationPercent) / 100
+    );
+    const refundAmount = totalAmount - cancellationFee;
+
+    // 3️⃣ Refund process
+    const refund = await stripe.refunds.create({
+      payment_intent: payment.paymentIntentId,
+      amount: refundAmount * 100, // convert to paise
+      reason: "requested_by_customer",
+    });
+
+    // 4️⃣ Update booking & payment status
+    booking.status = "cancelled";
+    await booking.save();
+
+    payment.status = "refunded";
+    payment.refundedAmount = refundAmount;
+    payment.cancellationFee = cancellationFee;
+    payment.refundAt = new Date();
+    await payment.save();
+
+    return res.json({
+      isSuccess: true,
+      message: "Booking cancelled successfully.",
+      refundAmount,
+      cancellationFee,
+      refundId: refund.id,
+    });
   } catch (err) {
     console.log(err);
     return res.status(500).json({ message: err.message });

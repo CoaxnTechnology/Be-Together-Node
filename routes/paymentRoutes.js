@@ -14,6 +14,9 @@ router.post("/verify-otp", paymentController.verifyServiceOtp);
 router.post("/complete", paymentController.completeService);
 
 // 5️⃣ Get all bookings for a user (customer & provider)
-router.get("/user/:userId", paymentController.getUserBookings);
+router.post("/user/", paymentController.getUserBookings);
+
+router.post("/refund", paymentController.refundBooking);
+
 
 module.exports = router;

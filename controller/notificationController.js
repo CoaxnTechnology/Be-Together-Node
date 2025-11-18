@@ -328,10 +328,83 @@ async function notifyOnServiceView(service, viewer) {
     console.error("❌ Service view notification error:", err.message);
   }
 }
+async function sendBookingNotification(customer, provider, service, booking) {
+  try {
+    console.log("Customer Tokens →", customer.fcmToken);
+    console.log("Provider Tokens →", provider.fcmToken);
+
+    // 🎉 Message for Customer
+    if (customer.fcmToken?.length > 0) {
+      await admin.messaging().sendEachForMulticast({
+        tokens: customer.fcmToken,
+        notification: {
+          title: "🎉 Service Booked Successfully!",
+          body: `You booked "${service.title}" with ${provider.name}. Amount: ₹${booking.amount}`,
+        },
+        data: {
+          type: "booking_success",
+          userType: "customer",
+          bookingId: booking._id.toString(),
+        },
+      });
+    }
+
+    // 🛎 Message for Provider
+    if (provider.fcmToken?.length > 0) {
+      await admin.messaging().sendEachForMulticast({
+        tokens: provider.fcmToken,
+        notification: {
+          title: "🛎 New Booking Received!",
+          body: `${customer.name} booked "${service.title}". Amount: ₹${booking.amount}`,
+        },
+        data: {
+          type: "booking_received",
+          userType: "provider",
+          bookingId: booking._id.toString(),
+        },
+      });
+    }
+
+    console.log("Notifications sent successfully.");
+  } catch (err) {
+    console.error("Error sending notification:", err);
+  }
+}
+async function sendServiceStartedNotification(customer, provider, service, booking) {
+  try {
+    if (!customer.fcmToken?.length) {
+      console.log("❌ Customer has no FCM token");
+      return;
+    }
+
+    console.log("📨 Sending service started notification to customer...");
+
+    await admin.messaging().sendEachForMulticast({
+      tokens: customer.fcmToken,
+      notification: {
+        title: "🚀 Service Started",
+        body: `${provider.name} has started your service "${service.title}".`,
+      },
+      data: {
+        type: "service_started",
+        userType: "customer",
+        bookingId: booking._id.toString(),
+      },
+    });
+
+    console.log("✅ Customer notified: service started");
+  } catch (err) {
+    console.error("❌ Error sending service-started notification:", err.message);
+  }
+}
+
+
 
 // Exports
 exports.notifyOnNewService = (service) => notifyUsersForService(service, "new");
 exports.notifyOnUpdate = (service) => notifyUsersForService(service, "update");
 exports.notifyOnUserInterestUpdate = notifyNearbyUsersOnInterestUpdate;
 exports.notifyOnServiceView = notifyOnServiceView;
+module .exports.sendBookingNotification = sendBookingNotification;
+module .exports.sendServiceStartedNotification = sendServiceStartedNotification;
 //notificaton addd

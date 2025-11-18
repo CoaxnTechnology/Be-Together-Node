@@ -31,7 +31,7 @@ const transporter = nodemailer.createTransport({
 exports.bookService = async (req, res) => {
   try {
     console.log("📌 bookService called:", req.body);
-    const { userId, providerId, serviceId, amount, paymentMethodId, currency } = req.body;
+    const { userId, providerId, serviceId, amount, currency } = req.body;
 
     // 1️⃣ Commission Settings
     const commissionSetting = await CommissionSetting.findOne();
@@ -70,31 +70,41 @@ exports.bookService = async (req, res) => {
       provider: providerId,
       service: serviceId,
       amount,
-      currency: currency?.toUpperCase() || "EUR", // Save currency
+      currency: currency?.toUpperCase() || "EUR",
       status: "pending_payment",
     });
 
-    // 5️⃣ Create PaymentIntent
-    const paymentIntent = await stripe.paymentIntents.create({
-      amount: Math.round(amount * 100), // smallest currency unit
-      currency: (currency || "eur").toLowerCase(),
+    // 5️⃣ Create Stripe Checkout Session (manual capture)
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ["card", "upi", "netbanking"],
+      mode: "payment",
       customer: customerStripeId,
-      payment_method: paymentMethodId,
-      confirm: true,
-      capture_method: "manual", // capture after service completed
-      application_fee_amount: commission * 100,
-      transfer_data: { destination: provider.stripeAccountId },
-      description: `Service Booking: ${serviceId}`,
-      automatic_payment_methods: { enabled: true }, // let Stripe handle card types
+      line_items: [
+        {
+          price_data: {
+            currency: (currency || "eur").toLowerCase(),
+            product_data: { name: serviceDetails.name },
+            unit_amount: Math.round(amount * 100),
+          },
+          quantity: 1,
+        },
+      ],
+      payment_intent_data: {
+        capture_method: "manual", // ✅ Manual capture
+        application_fee_amount: commission * 100,
+        transfer_data: { destination: provider.stripeAccountId },
+      },
+      success_url: `https://yourfrontend.com/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `https://yourfrontend.com/cancel`,
     });
 
-    // 6️⃣ Save Payment
+    // 6️⃣ Save Payment record
     const payment = await Payment.create({
       user: userId,
       provider: providerId,
       service: serviceId,
       bookingId: booking._id.toString(),
-      paymentIntentId: paymentIntent.id,
+      paymentIntentId: session.payment_intent,
       customerStripeId,
       providerStripeId: provider.stripeAccountId,
       amount,
@@ -106,19 +116,9 @@ exports.bookService = async (req, res) => {
 
     booking.paymentId = payment._id;
 
-    // 7️⃣ Update booking status based on PaymentIntent
-    if (paymentIntent.status === "requires_action" || paymentIntent.status === "requires_payment_method") {
-      booking.status = "payment_pending"; // frontend must confirm payment
-      await booking.save();
-    } else if (paymentIntent.status === "requires_capture" || paymentIntent.status === "succeeded") {
-      booking.status = "booked";
-      await booking.save();
-    } else {
-      booking.status = "payment_failed";
-      await booking.save();
-    }
+    await booking.save();
 
-    // 8️⃣ Send Email & Notification asynchronously
+    // 7️⃣ Send Email & Notification
     try {
       await sendServiceBookedEmail(customer, serviceDetails, provider, booking);
       await sendBookingNotification(customer, provider, serviceDetails, booking);
@@ -126,13 +126,12 @@ exports.bookService = async (req, res) => {
       console.log("⚠️ Email/Notification failed:", e.message);
     }
 
-    // 9️⃣ Return response to Flutter/web
+    // 8️⃣ Return Checkout URL to frontend
     return res.status(200).json({
       isSuccess: true,
       message: "Booking processed",
       bookingId: booking._id,
-      paymentStatus: paymentIntent.status,
-      clientSecret: paymentIntent.client_secret, // Flutter SDK uses this
+      checkoutUrl: session.url, // <-- Flutter frontend will open this URL
       booking,
     });
 
@@ -141,6 +140,8 @@ exports.bookService = async (req, res) => {
     return res.status(500).json({ message: err.message });
   }
 };
+
+
 
 
 

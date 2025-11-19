@@ -18,5 +18,5 @@ router.post("/user/", paymentController.getUserBookings);
 
 router.post("/refund", paymentController.refundBooking);
 
-router.post("/confirm-payment", paymentController.confirmPayment);
+router.post("/updateBookingStatus", paymentController.updateBookingStatus);
 module.exports = router;

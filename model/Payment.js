@@ -13,13 +13,14 @@ const paymentSchema = new mongoose.Schema(
       ref: "Service",
       required: true,
     },
-    bookingId: { type: String, required: true },
+    bookingId: { type: String, required: false },
     checkoutSessionId: { type: String, required: true },
 
     paymentIntentId: { type: String, default: null },
     customerStripeId: { type: String, required: true },
     providerStripeId: { type: String, required: true },
     amount: { type: Number, required: true },
+    
     appCommission: { type: Number, default: 0 },
     providerAmount: { type: Number, default: 0 },
     status: {

@@ -647,6 +647,68 @@ exports.generateUsersFromCSV = async (req, res) => {
               });
               continue; // Skip this user
             }
+             // 1️⃣ VALIDATE CATEGORY + TAGS BASED ON YOUR SCHEMA
+            // ---------------------------------------------------
+            let services = [];
+
+            // Try parsing services JSON
+            try {
+              services = JSON.parse(row.services || "[]");
+            } catch (err) {
+              skippedUsers.push({
+                email: row.email,
+                reason: "Invalid services JSON",
+              });
+              continue;
+            }
+
+            let isValidUser = true;
+
+            for (const s of services) {
+              // category required
+              if (!s.categoryId) {
+                isValidUser = false;
+                skippedUsers.push({
+                  email: row.email,
+                  reason: "Missing categoryId in service",
+                });
+                break;
+              }
+
+              // 🔍 Check category exists
+              const category = await Category.findOne({
+                categoryId: Number(s.categoryId),
+              });
+
+              if (!category) {
+                isValidUser = false;
+                skippedUsers.push({
+                  email: row.email,
+                  reason: `Invalid CategoryId: ${s.categoryId}`,
+                });
+                break;
+              }
+
+              // 🔍 Validate tags inside category.tags[]
+              if (Array.isArray(s.selectedTags)) {
+                for (const tag of s.selectedTags) {
+                  if (!category.tags.includes(tag)) {
+                    isValidUser = false;
+                    skippedUsers.push({
+                      email: row.email,
+                      reason: `Tag '${tag}' does not exist in Category '${category.name}'`,
+                    });
+                    break;
+                  }
+                }
+              }
+
+              if (!isValidUser) break;
+            }
+
+            // If category/tags invalid → skip user
+            if (!isValidUser) continue;
+
 
             const user = new User({
               name: row.name,
@@ -683,7 +745,7 @@ exports.generateUsersFromCSV = async (req, res) => {
 
             const savedUser = await user.save();
 
-            const services = JSON.parse(row.services || "[]");
+           services = JSON.parse(row.services || "[]");
             const createdServices = [];
 
             for (const s of services) {
@@ -798,8 +860,6 @@ exports.getFakeUsers = async (req, res) => {
   }
 };
 //--------------------Delete Fake Users-------------------
-//const User = require("../models/User");
-//const Service = require("../models/Service");
 
 exports.deleteFakeUser = async (req, res) => {
   try {
@@ -845,6 +905,55 @@ exports.deleteFakeUser = async (req, res) => {
     res
       .status(500)
       .json({ success: false, message: "Server error", error: err.message });
+  }
+};
+//---------------------DELETE ALL FAKE USERS----------------------------
+exports.deleteAllFakeUsers = async (req, res) => {
+  try {
+    // 1️⃣ Fetch all fake users
+    const fakeUsers = await User.find({ is_fake: true });
+
+    if (fakeUsers.length === 0) {
+      return res.json({
+        success: true,
+        message: "No fake users found",
+      });
+    }
+
+    // 2️⃣ Get all fake user IDs
+    const fakeUserIds = fakeUsers.map((u) => u._id);
+
+    // 3️⃣ Get all services owned by fake users
+    const services = await Service.find({ owner: { $in: fakeUserIds } });
+    const serviceIds = services.map((s) => s._id);
+
+    // 4️⃣ Delete reviews written by fake users OR on their services
+    await Review.deleteMany({
+      $or: [
+        { user: { $in: fakeUserIds } },
+        { service: { $in: serviceIds } },
+      ],
+    });
+
+    // 5️⃣ Delete services owned by fake users
+    await Service.deleteMany({ owner: { $in: fakeUserIds } });
+
+    // 6️⃣ Delete fake users
+    await User.deleteMany({ _id: { $in: fakeUserIds } });
+
+    return res.json({
+      success: true,
+      deletedFakeUsers: fakeUsers.length,
+      deletedServices: serviceIds.length,
+      message: "All fake users and their related services & reviews deleted",
+    });
+  } catch (err) {
+    console.error("Delete All Fake Users Error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: err.message,
+    });
   }
 };
 

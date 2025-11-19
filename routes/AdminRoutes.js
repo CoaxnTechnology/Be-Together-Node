@@ -21,7 +21,8 @@ const {
   createService,
   getAITags,
   loginAdmin,
-  generateUsersFromCSV
+  generateUsersFromCSV,
+  deleteAllFakeUsers
 } = require("../controller/Admin");
 //const { getAllServices } = require("../controller/serviceController");
 const storage = multer.memoryStorage();
@@ -61,6 +62,7 @@ router.post("/upload-users-csv", upload.single("file"), generateUsersFromCSV);
 router.get("/fake-users", getFakeUsers);
 router.post("/create", createService);
 router.delete("/fake-users/:id", deleteFakeUser);
+router.delete("/fake-users", deleteAllFakeUsers);
 router.get("/:id", getUserById);
 router.post("/category/all", getAllCategories);
 router.post("/auth/login", loginAdmin);

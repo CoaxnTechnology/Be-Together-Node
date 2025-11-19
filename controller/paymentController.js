@@ -9,7 +9,7 @@ const {
   sendBookingNotification,
   sendServiceStartedNotification,
 } = require("../controller/notificationController"); // ✅ import it
-
+const CancellationSetting = require("../model/CancellationSetting");
 const User = require("../model/User");
 const Service = require("../model/Service");
 const Payment = require("../model/Payment");
@@ -390,7 +390,6 @@ exports.getUserBookings = async (req, res) => {
   }
 };
 
-const CancellationSetting = require("../model/CancellationSetting");
 
 // ------------------------------
 // CANCEL BOOKING + PARTIAL REFUND

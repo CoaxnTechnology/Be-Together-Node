@@ -663,7 +663,7 @@ exports.generateUsersFromCSV = async (req, res) => {
             }
 
             let isValidUser = true;
-           // let isValidUser = true;
+            // let isValidUser = true;
 
             for (const s of services) {
               // ✅ Check categoryId exists
@@ -819,14 +819,22 @@ exports.generateUsersFromCSV = async (req, res) => {
           }
         }
 
-        res.json({
-          success: true,
-          message: "CSV processed ✅",
-          createdCount: createdUsers.length,
-          skippedCount: skippedUsers.length,
-          createdUsers,
-          skippedUsers,
-        });
+        bufferStream
+          .pipe(csv())
+          .on("data", (row) => {
+            bufferStream.pause(); // pause stream
+            processRow(row).finally(() => bufferStream.resume()); // resume after processing
+          })
+          .on("end", () => {
+            res.json({
+              success: true,
+              message: "CSV processed ✅",
+              createdCount: createdUsers.length,
+              skippedCount: skippedUsers.length,
+              createdUsers,
+              skippedUsers,
+            });
+          });
       });
   } catch (err) {
     console.error("generateUsersFromCSV error:", err);

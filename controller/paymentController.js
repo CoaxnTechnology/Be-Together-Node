@@ -90,7 +90,7 @@ exports.bookService = async (req, res) => {
             currency: "inr",
             product_data: {
               name: serviceDetails.title,
-              description: serviceDetails.description || "",
+              description: serviceDetails.description || "No description",
             },
             unit_amount: Math.round(amount * 100),
           },

@@ -118,7 +118,6 @@ exports.bookService = async (req, res) => {
   }
 };
 
-
 // -----------------------------
 // 2️⃣ Confirm Payment & Create Booking
 // -----------------------------
@@ -129,7 +128,9 @@ exports.updateBookingStatus = async (req, res) => {
     const session = await stripe.checkout.sessions.retrieve(sessionId);
 
     // 🔥 verify actual payment intent status (manual capture flow)
-    const paymentIntent = await stripe.paymentIntents.retrieve(session.payment_intent);
+    const paymentIntent = await stripe.paymentIntents.retrieve(
+      session.payment_intent
+    );
 
     if (paymentIntent.status !== "requires_capture") {
       return res.status(400).json({ message: "Payment not completed" });
@@ -156,13 +157,58 @@ exports.updateBookingStatus = async (req, res) => {
     payment.paymentIntentId = session.payment_intent;
     payment.bookingId = booking._id;
     await payment.save();
+    async function sendBookingNotification(
+      customer,
+      provider,
+      service,
+      booking
+    ) {
+      try {
+        console.log("Customer Tokens →", customer.fcmToken);
+        console.log("Provider Tokens →", provider.fcmToken);
 
+        // 🎉 Message for Customer
+        if (customer.fcmToken?.length > 0) {
+          await admin.messaging().sendEachForMulticast({
+            tokens: customer.fcmToken,
+            notification: {
+              title: "🎉 Service Booked Successfully!",
+              body: `You booked "${service.title}" with ${provider.name}. Amount: ₹${booking.amount}`,
+            },
+            data: {
+              type: "booking_success",
+              userType: "customer",
+              bookingId: booking._id.toString(),
+            },
+          });
+        }
+
+        // 🛎 Message for Provider
+        if (provider.fcmToken?.length > 0) {
+          await admin.messaging().sendEachForMulticast({
+            tokens: provider.fcmToken,
+            notification: {
+              title: "🛎 New Booking Received!",
+              body: `${customer.name} booked "${service.title}". Amount: ₹${booking.amount}`,
+            },
+            data: {
+              type: "booking_received",
+              userType: "provider",
+              bookingId: booking._id.toString(),
+            },
+          });
+        }
+
+        console.log("Notifications sent successfully.");
+      } catch (err) {
+        console.error("Error sending notification:", err);
+      }
+    }
     res.json({
       isSuccess: true,
       message: "Booking created after payment success",
       bookingId: booking._id,
     });
-
   } catch (err) {
     console.log(err);
     res.status(500).json({ message: err.message });
@@ -170,33 +216,6 @@ exports.updateBookingStatus = async (req, res) => {
 };
 
 
-//updateBookingStatus
-// -----------------------------
-// 3️⃣ Optional: Cancel Booking / Clean up pending payment
-// -----------------------------
-exports.cancelBooking = async (req, res) => {
-  try {
-    const { userId, serviceId } = req.body;
-    // Remove pending booking or payment if exists
-    const payment = await Payment.findOne({
-      user: userId,
-      service: serviceId,
-      status: "held",
-    });
-    if (payment) await payment.remove();
-    const booking = await Booking.findOne({
-      customer: userId,
-      service: serviceId,
-      status: "pending_payment",
-    });
-    if (booking) await booking.remove();
-
-    res.json({ isSuccess: true, message: "Pending booking canceled" });
-  } catch (err) {
-    console.log(err);
-    res.status(500).json({ message: err.message });
-  }
-};
 
 // ------------------------------
 // 2) START SERVICE → GENERATE OTP → EMAIL

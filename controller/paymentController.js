@@ -157,53 +157,16 @@ exports.updateBookingStatus = async (req, res) => {
     payment.paymentIntentId = session.payment_intent;
     payment.bookingId = booking._id;
     await payment.save();
-    async function sendBookingNotification(
-      customer,
-      provider,
-      service,
-      booking
-    ) {
-      try {
-        console.log("Customer Tokens →", customer.fcmToken);
-        console.log("Provider Tokens →", provider.fcmToken);
+    // ⭐ Send Email
+    sendServiceBookedEmail(customer, service, provider, booking).catch((err) =>
+      console.log("Email error:", err)
+    );
 
-        // 🎉 Message for Customer
-        if (customer.fcmToken?.length > 0) {
-          await admin.messaging().sendEachForMulticast({
-            tokens: customer.fcmToken,
-            notification: {
-              title: "🎉 Service Booked Successfully!",
-              body: `You booked "${service.title}" with ${provider.name}. Amount: ₹${booking.amount}`,
-            },
-            data: {
-              type: "booking_success",
-              userType: "customer",
-              bookingId: booking._id.toString(),
-            },
-          });
-        }
+    // ⭐ Send Notification
+    sendBookingNotification(customer, provider, service, booking).catch((err) =>
+      console.log("Notification error:", err)
+    );
 
-        // 🛎 Message for Provider
-        if (provider.fcmToken?.length > 0) {
-          await admin.messaging().sendEachForMulticast({
-            tokens: provider.fcmToken,
-            notification: {
-              title: "🛎 New Booking Received!",
-              body: `${customer.name} booked "${service.title}". Amount: ₹${booking.amount}`,
-            },
-            data: {
-              type: "booking_received",
-              userType: "provider",
-              bookingId: booking._id.toString(),
-            },
-          });
-        }
-
-        console.log("Notifications sent successfully.");
-      } catch (err) {
-        console.error("Error sending notification:", err);
-      }
-    }
     res.json({
       isSuccess: true,
       message: "Booking created after payment success",
@@ -214,8 +177,6 @@ exports.updateBookingStatus = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
-
-
 
 // ------------------------------
 // 2) START SERVICE → GENERATE OTP → EMAIL

@@ -127,7 +127,6 @@ exports.updateBookingStatus = async (req, res) => {
 
     const session = await stripe.checkout.sessions.retrieve(sessionId);
 
-    // 🔥 verify actual payment intent status (manual capture flow)
     const paymentIntent = await stripe.paymentIntents.retrieve(
       session.payment_intent
     );
@@ -136,12 +135,15 @@ exports.updateBookingStatus = async (req, res) => {
       return res.status(400).json({ message: "Payment not completed" });
     }
 
-    // Metadata
     const { userId, providerId, serviceId } = session.metadata;
 
-    // Find payment
     const payment = await Payment.findOne({ checkoutSessionId: sessionId });
     if (!payment) return res.status(404).json({ message: "Payment not found" });
+
+    // ⭐ Fetch full details for mail & notification
+    const customer = await User.findById(userId);
+    const provider = await User.findById(providerId);
+    const service = await Service.findById(serviceId);
 
     // Create booking
     const booking = await Booking.create({
@@ -157,6 +159,7 @@ exports.updateBookingStatus = async (req, res) => {
     payment.paymentIntentId = session.payment_intent;
     payment.bookingId = booking._id;
     await payment.save();
+
     // ⭐ Send Email
     sendServiceBookedEmail(customer, service, provider, booking).catch((err) =>
       console.log("Email error:", err)

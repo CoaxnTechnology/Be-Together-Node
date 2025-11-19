@@ -366,7 +366,7 @@ exports.getUserById = async (req, res) => {
   try {
     const { id } = req.params;
 
-     if (!mongoose.Types.ObjectId.isValid(id)) {
+    if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
         success: false,
         message: `Invalid user id: ${id}`,
@@ -647,7 +647,7 @@ exports.generateUsersFromCSV = async (req, res) => {
               });
               continue; // Skip this user
             }
-             // 1️⃣ VALIDATE CATEGORY + TAGS BASED ON YOUR SCHEMA
+            // 1️⃣ VALIDATE CATEGORY + TAGS BASED ON YOUR SCHEMA
             // ---------------------------------------------------
             let services = [];
 
@@ -663,9 +663,10 @@ exports.generateUsersFromCSV = async (req, res) => {
             }
 
             let isValidUser = true;
+           // let isValidUser = true;
 
             for (const s of services) {
-              // category required
+              // ✅ Check categoryId exists
               if (!s.categoryId) {
                 isValidUser = false;
                 skippedUsers.push({
@@ -675,11 +676,8 @@ exports.generateUsersFromCSV = async (req, res) => {
                 break;
               }
 
-              // 🔍 Check category exists
-              const category = await Category.findOne({
-                categoryId: Number(s.categoryId),
-              });
-
+              // 🔍 Check category exists in DB using correct type (string)
+              const category = await Category.findById(s.categoryId);
               if (!category) {
                 isValidUser = false;
                 skippedUsers.push({
@@ -708,7 +706,6 @@ exports.generateUsersFromCSV = async (req, res) => {
 
             // If category/tags invalid → skip user
             if (!isValidUser) continue;
-
 
             const user = new User({
               name: row.name,
@@ -745,7 +742,7 @@ exports.generateUsersFromCSV = async (req, res) => {
 
             const savedUser = await user.save();
 
-           services = JSON.parse(row.services || "[]");
+            services = JSON.parse(row.services || "[]");
             const createdServices = [];
 
             for (const s of services) {
@@ -836,7 +833,6 @@ exports.generateUsersFromCSV = async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 };
-
 
 // ✅ Get all fake users
 exports.getFakeUsers = async (req, res) => {
@@ -929,10 +925,7 @@ exports.deleteAllFakeUsers = async (req, res) => {
 
     // 4️⃣ Delete reviews written by fake users OR on their services
     await Review.deleteMany({
-      $or: [
-        { user: { $in: fakeUserIds } },
-        { service: { $in: serviceIds } },
-      ],
+      $or: [{ user: { $in: fakeUserIds } }, { service: { $in: serviceIds } }],
     });
 
     // 5️⃣ Delete services owned by fake users

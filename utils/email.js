@@ -71,29 +71,45 @@ async function sendServiceOtpEmail(to, data) {
 }
 
 async function sendServiceBookedEmail(customer, service, provider, booking) {
+  console.log("📧 sendServiceBookedEmail CALLED");
+
   if (!customer?.email) {
-    console.log("No customer email found. Skipping email for booking:", booking?._id);
+    console.log("❌ No email found for customer. Skipping email.");
     return;
   }
 
-  const templatePath = path.join(__dirname, "../templates/service_book.html");
+  console.log("📧 Email will be sent to:", customer.email);
 
-  let html = fs.readFileSync(templatePath, "utf-8");
+  try {
+    const templatePath = path.join(__dirname, "../templates/service_book.html");
+    console.log("📄 Template Path:", templatePath);
 
-  html = html
-    .replace("{{customer_name}}", customer?.name || "Customer")
-    .replace("{{service_name}}", service?.title || "Service")
-    .replace("{{provider_name}}", provider?.name || "Provider")
-    .replace("{{amount}}", booking?.amount || "-")
-    .replace("{{date}}", service?.date ? new Date(service.date).toLocaleString() : "-");
+    let html = fs.readFileSync(templatePath, "utf-8");
 
-  await transporter.sendMail({
-    from: process.env.SMTP_EMAIL,
-    to: customer.email,
-    subject: "Your Service Has Been Booked",
-    html,
-  });
+    console.log("📄 Template Loaded Successfully");
+
+    html = html
+      .replace("{{customer_name}}", customer?.name || "Customer")
+      .replace("{{service_name}}", service?.title || "Service")
+      .replace("{{provider_name}}", provider?.name || "Provider")
+      .replace("{{amount}}", booking?.amount || "-")
+      .replace("{{date}}", service?.date ? new Date(service.date).toLocaleString() : "-");
+
+    console.log("📧 Sending Email…");
+
+    await transporter.sendMail({
+      from: process.env.SMTP_EMAIL,
+      to: customer.email,
+      subject: "Your Service Has Been Booked",
+      html,
+    });
+
+    console.log("✅ Email Sent Successfully!");
+  } catch (err) {
+    console.log("❌ Email Sending Failed:", err);
+  }
 }
+
 
 module.exports = { sendServiceBookedEmail };
 

@@ -329,12 +329,16 @@ async function notifyOnServiceView(service, viewer) {
   }
 }
 async function sendBookingNotification(customer, provider, service, booking) {
+  console.log("🔔 sendBookingNotification CALLED");
+
   try {
     console.log("Customer Tokens →", customer.fcmToken);
     console.log("Provider Tokens →", provider.fcmToken);
 
     // 🎉 Message for Customer
     if (customer.fcmToken?.length > 0) {
+      console.log("📤 Sending Customer Notification…");
+
       await admin.messaging().sendEachForMulticast({
         tokens: customer.fcmToken,
         notification: {
@@ -347,10 +351,16 @@ async function sendBookingNotification(customer, provider, service, booking) {
           bookingId: booking._id.toString(),
         },
       });
+
+      console.log("✅ Customer Notification Sent");
+    } else {
+      console.log("⚠️ Customer has NO FCM TOKENS");
     }
 
     // 🛎 Message for Provider
     if (provider.fcmToken?.length > 0) {
+      console.log("📤 Sending Provider Notification…");
+
       await admin.messaging().sendEachForMulticast({
         tokens: provider.fcmToken,
         notification: {
@@ -363,13 +373,18 @@ async function sendBookingNotification(customer, provider, service, booking) {
           bookingId: booking._id.toString(),
         },
       });
+
+      console.log("✅ Provider Notification Sent");
+    } else {
+      console.log("⚠️ Provider has NO FCM TOKENS");
     }
 
-    console.log("Notifications sent successfully.");
+    console.log("🔔 All Notifications Sent");
   } catch (err) {
-    console.error("Error sending notification:", err);
+    console.error("❌ Notification error:", err);
   }
 }
+
 async function sendServiceStartedNotification(customer, provider, service, booking) {
   try {
     if (!customer.fcmToken?.length) {

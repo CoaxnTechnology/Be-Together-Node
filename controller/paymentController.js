@@ -123,38 +123,56 @@ exports.bookService = async (req, res) => {
 // -----------------------------
 exports.updateBookingStatus = async (req, res) => {
   try {
+    console.log("▶️ updateBookingStatus called");
+    console.log("📥 Body:", req.body);
+
     const { sessionId } = req.body;
 
+    if (!sessionId) {
+      console.log("❌ sessionId missing");
+      return res.status(400).json({ message: "sessionId is required" });
+    }
+
+    console.log("🔎 Fetching Stripe Session…");
     const session = await stripe.checkout.sessions.retrieve(sessionId);
 
+    console.log("🧾 Stripe Session Found:", session.id);
+
+    console.log("🔎 Fetching PaymentIntent…");
     const paymentIntent = await stripe.paymentIntents.retrieve(
       session.payment_intent
     );
 
+    console.log("💳 PaymentIntent Status:", paymentIntent.status);
+
     if (paymentIntent.status !== "requires_capture") {
+      console.log("❌ Payment NOT in requires_capture state.");
       return res.status(400).json({ message: "Payment not completed" });
     }
 
     const { userId, providerId, serviceId } = session.metadata;
+    console.log("🔐 Metadata:", session.metadata);
 
     const payment = await Payment.findOne({ checkoutSessionId: sessionId });
-    if (!payment) return res.status(404).json({ message: "Payment not found" });
+    console.log("💰 Payment Found:", payment?._id);
 
-    // ⭐ Fetch full details for mail & notification
+    if (!payment) {
+      console.log("❌ Payment not found in DB");
+      return res.status(404).json({ message: "Payment not found" });
+    }
+
+    console.log("🔎 Fetching Customer, Provider, Service…");
+
     const customer = await User.findById(userId);
     const provider = await User.findById(providerId);
     const service = await Service.findById(serviceId);
-    if (!customer) {
-      console.log("❌ Customer not found");
-    }
-    if (!provider) {
-      console.log("❌ Provider not found");
-    }
-    if (!service) {
-      console.log("❌ Service not found");
-    }
+
+    console.log("👤 Customer:", customer ? "FOUND" : "NOT FOUND");
+    console.log("🧑‍🔧 Provider:", provider ? "FOUND" : "NOT FOUND");
+    console.log("🛠 Service:", service ? "FOUND" : "NOT FOUND");
 
     // Create booking
+    console.log("📝 Creating booking…");
     const booking = await Booking.create({
       customer: userId,
       provider: providerId,
@@ -164,19 +182,26 @@ exports.updateBookingStatus = async (req, res) => {
       paymentId: payment._id,
     });
 
+    console.log("✅ Booking Created:", booking._id);
+
+    // Update payment
     payment.status = "held";
     payment.paymentIntentId = session.payment_intent;
     payment.bookingId = booking._id;
     await payment.save();
 
+    console.log("💾 Payment updated");
+
     // ⭐ Send Email
+    console.log("📧 Calling sendServiceBookedEmail…");
     sendServiceBookedEmail(customer, service, provider, booking).catch((err) =>
-      console.log("Email error:", err)
+      console.log("❌ Email error:", err)
     );
 
     // ⭐ Send Notification
+    console.log("🔔 Calling sendBookingNotification…");
     sendBookingNotification(customer, provider, service, booking).catch((err) =>
-      console.log("Notification error:", err)
+      console.log("❌ Notification error:", err)
     );
 
     res.json({
@@ -185,10 +210,11 @@ exports.updateBookingStatus = async (req, res) => {
       bookingId: booking._id,
     });
   } catch (err) {
-    console.log(err);
+    console.log("❌ updateBookingStatus ERROR:", err);
     res.status(500).json({ message: err.message });
   }
 };
+
 
 // ------------------------------
 // 2) START SERVICE → GENERATE OTP → EMAIL

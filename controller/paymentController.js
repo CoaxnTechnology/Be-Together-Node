@@ -144,6 +144,15 @@ exports.updateBookingStatus = async (req, res) => {
     const customer = await User.findById(userId);
     const provider = await User.findById(providerId);
     const service = await Service.findById(serviceId);
+    if (!customer) {
+      console.log("❌ Customer not found");
+    }
+    if (!provider) {
+      console.log("❌ Provider not found");
+    }
+    if (!service) {
+      console.log("❌ Service not found");
+    }
 
     // Create booking
     const booking = await Booking.create({

@@ -30,14 +30,7 @@ const transporter = nodemailer.createTransport({
 // -----------------------------
 exports.bookService = async (req, res) => {
   try {
-    const { userId, providerId, serviceId, amount } = req.body;
-
-    // Commission
-    const commissionSetting = await CommissionSetting.findOne();
-    const commissionPercent = commissionSetting?.percentage || 20;
-    const commission = Math.round((amount * commissionPercent) / 100);
-    const providerAmount = amount - commission;
-
+    const { userId, providerId, serviceId } = req.body;
     // Data
     const customer = await User.findById(userId);
     const provider = await User.findById(providerId);
@@ -46,10 +39,33 @@ exports.bookService = async (req, res) => {
     if (!customer || !provider || !serviceDetails)
       return res.status(404).json({ message: "Data not found" });
 
+    const amount = serviceDetails.isFree ? 0 : serviceDetails.price;
+    // Commission
+
+    if (serviceDetails.isFree) {
+      const booking = await Booking.create({
+        customer: userId,
+        provider: providerId,
+        service: serviceId,
+        amount: 0,
+        status: "booked", // directly booked
+      });
+
+      return res.status(200).json({
+        isSuccess: true,
+        message: "Free service booked successfully",
+        bookingId: booking._id,
+      });
+    }
+
     if (!provider.stripeAccountId)
       return res
         .status(400)
         .json({ message: "Provider stripe account missing" });
+    const commissionSetting = await CommissionSetting.findOne();
+    const commissionPercent = commissionSetting?.percentage || 20;
+    const commission = Math.round((amount * commissionPercent) / 100);
+    const providerAmount = amount - commission;
 
     // Stripe customer
     let customerStripeId = customer.stripeCustomerId;
@@ -215,7 +231,6 @@ exports.updateBookingStatus = async (req, res) => {
   }
 };
 
-
 // ------------------------------
 // 2) START SERVICE → GENERATE OTP → EMAIL
 // ------------------------------
@@ -302,10 +317,23 @@ exports.completeService = async (req, res) => {
   try {
     const { bookingId } = req.body;
 
-    const booking = await Booking.findById(bookingId);
+    const booking = await Booking.findById(bookingId).populate("service");
     if (!booking) return res.status(404).json({ message: "Booking not found" });
 
-    // ❌ If OTP not verified → block completion
+    console.log("📌 Booking loaded:", booking);
+
+    // Free service check first
+    if (booking.amount === 0 || booking.service.isFree) {
+      booking.status = "completed";
+      await booking.save();
+      console.log("✅ Free service completed:", booking._id);
+      return res.json({
+        isSuccess: true,
+        message: "Free service completed successfully",
+      });
+    }
+
+    // OTP verification for paid services
     if (booking.status !== "started") {
       return res.status(400).json({
         isSuccess: false,
@@ -313,10 +341,12 @@ exports.completeService = async (req, res) => {
       });
     }
 
+    // Paid service → capture payment
     const payment = await Payment.findById(booking.paymentId);
     if (!payment) return res.status(404).json({ message: "Payment not found" });
 
-    // Stripe capture
+    console.log("💰 Payment found:", payment._id);
+
     await stripe.paymentIntents.capture(payment.paymentIntentId);
 
     booking.status = "completed";
@@ -326,11 +356,14 @@ exports.completeService = async (req, res) => {
     payment.completedAt = new Date();
     await payment.save();
 
+    console.log("✅ Paid service completed & payment captured:", booking._id);
+
     return res.json({
       isSuccess: true,
       message: "Service completed & payment captured",
     });
   } catch (err) {
+    console.log("❌ completeService ERROR:", err);
     res.status(500).json({ message: err.message });
   }
 };
@@ -389,7 +422,6 @@ exports.getUserBookings = async (req, res) => {
     return res.status(500).json({ message: err.message });
   }
 };
-
 
 // ------------------------------
 // CANCEL BOOKING + PARTIAL REFUND

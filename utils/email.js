@@ -77,23 +77,21 @@ async function sendServiceBookedEmail(
   booking,
   type = "customer"
 ) {
-  console.log("📧 sendBookingEmail CALLED for TYPE:", type);
+  console.log("📧 sendServiceBookedEmail CALLED for:", type);
 
   try {
+    // Load Email Template
     const templatePath = path.join(__dirname, "../templates/service_book.html");
     let html = fs.readFileSync(templatePath, "utf-8");
 
     console.log("📄 Template Loaded:", templatePath);
 
-    console.log("👤 Customer Email:", customer?.email);
-    console.log("🧑‍🔧 Provider Email:", provider?.email);
-
     let toEmail;
     let replacements = {};
 
-    // ------------------------------
-    // CUSTOMER EMAIL
-    // ------------------------------
+    // ---------------------------------------------------------
+    // 📬 CUSTOMER EMAIL → Show provider details only
+    // ---------------------------------------------------------
     if (type === "customer") {
       toEmail = customer.email;
 
@@ -104,12 +102,15 @@ async function sendServiceBookedEmail(
         heading: "Your Service Has Been Booked 🎉",
         name: customer.name,
         message: "Your service has been successfully booked.",
+
         service_name: service.title,
 
         provider_name: provider.name,
-        provider_email: provider.email, // ADD THIS
-        customer_name: "-",
-        customer_email: "-",
+        provider_email: provider.email,
+
+        // Customer details hidden (empty)
+        customer_name: "",
+        customer_email: "",
 
         amount: booking.amount,
         booking_date: new Date(booking.createdAt).toLocaleString(),
@@ -119,9 +120,9 @@ async function sendServiceBookedEmail(
       };
     }
 
-    // ------------------------------
-    // PROVIDER EMAIL
-    // ------------------------------
+    // ---------------------------------------------------------
+    // 📬 PROVIDER EMAIL → Show customer details only
+    // ---------------------------------------------------------
     else {
       toEmail = provider.email;
 
@@ -145,13 +146,17 @@ async function sendServiceBookedEmail(
 
       replacements = {
         title: "New Service Booking",
-        heading: "New Service Booking Details",
+        heading: "New Booking Received",
         name: provider.name,
         message: "A customer has booked your service.",
+
         service_name: service.title,
 
-        provider_name: "-",
-        provider_email: "-",
+        // Provider details hidden (empty)
+        provider_name: "",
+        provider_email: "",
+
+        // Customer details visible
         customer_name: customer.name,
         customer_email: customer.email,
 
@@ -161,14 +166,20 @@ async function sendServiceBookedEmail(
       };
     }
 
-    // Replace placeholders
+    // ---------------------------------------------------------
+    // 🔄 Replace all placeholders in template
+    // ---------------------------------------------------------
     Object.keys(replacements).forEach((key) => {
-      const value = replacements[key] || "-";
-      html = html.replace(`{{${key}}}`, value);
+      const value = replacements[key] || "";
+      html = html.replaceAll(`{{${key}}}`, value);
     });
 
-    console.log("📝 FINAL EMAIL HTML PREVIEW:", html.substring(0, 300), "...");
+    console.log("📝 FINAL EMAIL HTML (first 300 chars):");
+    console.log(html.substring(0, 300));
 
+    // ---------------------------------------------------------
+    // ✉ SEND EMAIL
+    // ---------------------------------------------------------
     const emailResult = await transporter.sendMail({
       from: process.env.SMTP_EMAIL,
       to: toEmail,
@@ -177,7 +188,6 @@ async function sendServiceBookedEmail(
     });
 
     console.log("📤 SMTP RESPONSE:", emailResult);
-
     console.log("✅ Email Sent Successfully!");
   } catch (err) {
     console.log("❌ Email Sending Failed:", err);

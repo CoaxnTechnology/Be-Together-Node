@@ -70,7 +70,13 @@ async function sendServiceOtpEmail(to, data) {
   });
 }
 
-async function sendServiceBookedEmail(customer, service, provider, booking, type = "customer") {
+async function sendServiceBookedEmail(
+  customer,
+  service,
+  provider,
+  booking,
+  type = "customer"
+) {
   console.log("📧 sendBookingEmail CALLED for", type);
 
   try {
@@ -93,11 +99,14 @@ async function sendServiceBookedEmail(customer, service, provider, booking, type
         message: "Your service has been successfully booked.",
         service_name: service.title,
         provider_name: provider.name,
-        customer_name: customer.name,
-        customer_email: customer.email,
+        // customer_name: customer.name,
+        // customer_email: customer.email,
+        provider_email: provider.email,
         amount: booking.amount,
         booking_date: new Date(booking.createdAt).toLocaleString(),
-        service_date: service.date ? new Date(service.date).toLocaleString() : "-"
+        service_date: service.date
+          ? new Date(service.date).toLocaleString()
+          : "-",
       };
     }
 
@@ -109,13 +118,16 @@ async function sendServiceBookedEmail(customer, service, provider, booking, type
 
       let serviceDate = "-";
       if (service.service_type === "one_time") {
-        serviceDate = service.date ? new Date(service.date).toLocaleString() : "-";
+        serviceDate = service.date
+          ? new Date(service.date).toLocaleString()
+          : "-";
       } else if (service.service_type === "recurring") {
         serviceDate = service.recurring_schedule
           .map(
-            slot => `${slot.day} ${slot.start_time}-${slot.end_time} (${new Date(
-              slot.date
-            ).toLocaleDateString()})`
+            (slot) =>
+              `${slot.day} ${slot.start_time}-${slot.end_time} (${new Date(
+                slot.date
+              ).toLocaleDateString()})`
           )
           .join(", ");
       }
@@ -126,17 +138,17 @@ async function sendServiceBookedEmail(customer, service, provider, booking, type
         name: provider.name,
         message: "A customer has booked your service.",
         service_name: service.title,
-        provider_name: provider.name,
+        // provider_name: provider.name,
         customer_name: customer.name,
         customer_email: customer.email,
         amount: booking.amount,
         booking_date: new Date(booking.createdAt).toLocaleString(),
-        service_date: serviceDate
+        service_date: serviceDate,
       };
     }
 
     // Replace placeholders
-    Object.keys(replacements).forEach(key => {
+    Object.keys(replacements).forEach((key) => {
       html = html.replace(`{{${key}}}`, replacements[key] || "-");
     });
 
@@ -153,9 +165,7 @@ async function sendServiceBookedEmail(customer, service, provider, booking, type
   }
 }
 
-
 module.exports = { sendServiceBookedEmail };
-
 
 module.exports = {
   sendOtpEmail,

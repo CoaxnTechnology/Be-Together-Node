@@ -81,7 +81,10 @@ async function sendServiceBookedEmail(
 
   try {
     const templatePath = path.join(__dirname, "../templates/service_book.html");
+    console.log("📂 Template path:", templatePath);
+
     let html = fs.readFileSync(templatePath, "utf-8");
+    console.log("📄 Template loaded, length:", html.length);
 
     let toEmail;
     let replacements = {};
@@ -90,7 +93,8 @@ async function sendServiceBookedEmail(
     // CUSTOMER EMAIL
     // ------------------------------
     if (type === "customer") {
-      toEmail = customer.email;
+      toEmail = customer?.email;
+      console.log("🟢 Customer email:", toEmail);
 
       replacements = {
         title: "Service Booked",
@@ -114,7 +118,8 @@ async function sendServiceBookedEmail(
     // PROVIDER EMAIL
     // ------------------------------
     else {
-      toEmail = provider.email;
+      toEmail = provider?.email;
+      console.log("🟢 Provider email:", toEmail);
 
       let serviceDate = "-";
       if (service.service_type === "one_time") {
@@ -149,10 +154,16 @@ async function sendServiceBookedEmail(
 
     // Replace placeholders
     Object.keys(replacements).forEach((key) => {
-      html = html.replace(`{{${key}}}`, replacements[key] || "-");
+      html = html.replace(new RegExp(`{{${key}}}`, "g"), replacements[key] || "-");
     });
+    console.log("📩 Placeholders replaced");
 
-    await transporter.sendMail({
+    // ------------------------------
+    // Check transporter before sending
+    // ------------------------------
+    console.log("🛠 Sending email via transporter:", transporter.options);
+
+    const info = await transporter.sendMail({
       from: process.env.SMTP_EMAIL,
       to: toEmail,
       subject: replacements.title,
@@ -160,10 +171,14 @@ async function sendServiceBookedEmail(
     });
 
     console.log("✅ Email Sent Successfully!");
+    console.log("📬 Message ID:", info.messageId);
+    console.log("📧 Preview URL:", nodemailer.getTestMessageUrl(info));
   } catch (err) {
-    console.log("❌ Email Sending Failed:", err);
+    console.log("❌ Email Sending Failed:", err.message);
+    console.log(err);
   }
 }
+
 
 module.exports = {
   sendOtpEmail,

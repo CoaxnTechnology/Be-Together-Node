@@ -77,20 +77,27 @@ async function sendServiceBookedEmail(
   booking,
   type = "customer"
 ) {
-  console.log("📧 sendBookingEmail CALLED for", type);
+  console.log("📧 sendBookingEmail CALLED for TYPE:", type);
 
   try {
     const templatePath = path.join(__dirname, "../templates/service_book.html");
     let html = fs.readFileSync(templatePath, "utf-8");
 
+    console.log("📄 Template Loaded:", templatePath);
+
+    console.log("👤 Customer Email:", customer?.email);
+    console.log("🧑‍🔧 Provider Email:", provider?.email);
+
     let toEmail;
     let replacements = {};
 
     // ------------------------------
-    // CUSTOMER EMAIL (Provider Info)
+    // CUSTOMER EMAIL
     // ------------------------------
     if (type === "customer") {
       toEmail = customer.email;
+
+      console.log("📨 Sending EMAIL TO CUSTOMER:", toEmail);
 
       replacements = {
         title: "Service Booked",
@@ -99,8 +106,8 @@ async function sendServiceBookedEmail(
         message: "Your service has been successfully booked.",
         service_name: service.title,
 
-        // ✔ provider info only
         provider_name: provider.name,
+        provider_email: provider.email, // ADD THIS
         customer_name: "-",
         customer_email: "-",
 
@@ -113,10 +120,12 @@ async function sendServiceBookedEmail(
     }
 
     // ------------------------------
-    // PROVIDER EMAIL (Customer Info)
+    // PROVIDER EMAIL
     // ------------------------------
     else {
       toEmail = provider.email;
+
+      console.log("📨 Sending EMAIL TO PROVIDER:", toEmail);
 
       let serviceDate = "-";
       if (service.service_type === "one_time") {
@@ -141,8 +150,8 @@ async function sendServiceBookedEmail(
         message: "A customer has booked your service.",
         service_name: service.title,
 
-        // ✔ customer info only
         provider_name: "-",
+        provider_email: "-",
         customer_name: customer.name,
         customer_email: customer.email,
 
@@ -154,15 +163,20 @@ async function sendServiceBookedEmail(
 
     // Replace placeholders
     Object.keys(replacements).forEach((key) => {
-      html = html.replace(`{{${key}}}`, replacements[key] || "-");
+      const value = replacements[key] || "-";
+      html = html.replace(`{{${key}}}`, value);
     });
 
-    await transporter.sendMail({
+    console.log("📝 FINAL EMAIL HTML PREVIEW:", html.substring(0, 300), "...");
+
+    const emailResult = await transporter.sendMail({
       from: process.env.SMTP_EMAIL,
       to: toEmail,
       subject: replacements.title,
       html,
     });
+
+    console.log("📤 SMTP RESPONSE:", emailResult);
 
     console.log("✅ Email Sent Successfully!");
   } catch (err) {

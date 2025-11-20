@@ -241,7 +241,7 @@ exports.updateBookingStatus = async (req, res) => {
     // Send customer email
     sendServiceBookedEmail(
       customer,
-      serviceDetails,
+      service,
       provider,
       booking,
       "customer"
@@ -250,7 +250,7 @@ exports.updateBookingStatus = async (req, res) => {
     // Send provider email
     sendServiceBookedEmail(
       customer,
-      serviceDetails,
+      service,
       provider,
       booking,
       "provider"

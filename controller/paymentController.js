@@ -60,11 +60,22 @@ exports.bookService = async (req, res) => {
       // ⭐ Send Email
       console.log("📧 Calling sendServiceBookedEmail…");
       // Send customer email
-      sendServiceBookedEmail(customer, serviceDetails, provider, booking).catch(
-        (err) => console.log("❌ Customer Email error:", err)
-      );
+      sendServiceBookedEmail(
+        customer,
+        serviceDetails,
+        provider,
+        booking,
+        "customer"
+      ).catch((err) => console.log("❌ Customer Email error:", err));
 
       // Send provider email
+      sendServiceBookedEmail(
+        customer,
+        serviceDetails,
+        provider,
+        booking,
+        "provider"
+      ).catch((err) => console.log("❌ Provider Email error:", err));
 
       // ⭐ Send Notification
       console.log("🔔 Calling sendBookingNotification…");
@@ -235,9 +246,22 @@ exports.updateBookingStatus = async (req, res) => {
     // ⭐ Send Email
     console.log("📧 Calling sendServiceBookedEmail…");
     // Send customer email
-    sendServiceBookedEmail(customer, service, provider, booking).catch((err) =>
-      console.log("❌ Customer Email error:", err)
-    );
+    sendServiceBookedEmail(
+      customer,
+      service,
+      provider,
+      booking,
+      "customer"
+    ).catch((err) => console.log("❌ Customer Email error:", err));
+
+    // Send provider email
+    sendServiceBookedEmail(
+      customer,
+      service,
+      provider,
+      booking,
+      "provider"
+    ).catch((err) => console.log("❌ Provider Email error:", err));
 
     // ⭐ Send Notification
     console.log("🔔 Calling sendBookingNotification…");

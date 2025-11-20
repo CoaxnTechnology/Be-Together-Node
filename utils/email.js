@@ -69,45 +69,76 @@ async function sendServiceOtpEmail(to, data) {
     html,
   });
 }
-async function sendServiceBookedEmail(customer, service, provider, booking) {
-  console.log("📧 sendServiceBookedEmail CALLED");
-
-  if (!customer?.email) {
-    console.log("❌ No email found for customer. Skipping email.");
-    return;
-  }
-
-  console.log("📧 Email will be sent to:", customer.email);
+async function sendServiceBookedEmail(customer, service, provider, booking, type = "customer") {
+  console.log("📧 sendServiceBookedEmail called for:", type);
 
   try {
+    // Load template
     const templatePath = path.join(__dirname, "../templates/service_book.html");
-    console.log("📄 Template Path:", templatePath);
-
     let html = fs.readFileSync(templatePath, "utf-8");
+    console.log("📂 Template loaded, length:", html.length);
 
-    console.log("📄 Template Loaded Successfully");
+    let toEmail;
+    let replacements = {};
 
-    html = html
-      .replace("{{customer_name}}", customer?.name || "Customer")
-      .replace("{{service_name}}", service?.title || "Service")
-      .replace("{{provider_name}}", provider?.name || "Provider")
-      .replace("{{amount}}", booking?.amount || "-")
-      .replace("{{date}}", service?.date ? new Date(service.date).toLocaleString() : "-");
+    if (type === "customer") {
+      toEmail = customer.email;
 
-    console.log("📧 Sending Email…");
+      replacements = {
+        name: customer.name,
+        provider_name: provider.name,
+        provider_email: provider.email,
+        customer_name: "-",
+        customer_email: "-",
+        service_name: service.title,
+        date: service.date ? new Date(service.date).toLocaleString() : "-",
+        amount: booking.amount,
+      };
+    } else {
+      toEmail = provider.email;
 
+      replacements = {
+        name: provider.name,
+        provider_name: "-",
+        provider_email: "-",
+        customer_name: customer.name,
+        customer_email: customer.email,
+        service_name: service.title,
+        date: service.date ? new Date(service.date).toLocaleString() : "-",
+        amount: booking.amount,
+      };
+    }
+
+    // Replace placeholders globally
+    Object.keys(replacements).forEach((key) => {
+      html = html.replace(new RegExp(`{{${key}}}`, "g"), replacements[key] || "-");
+    });
+    console.log("📩 Placeholders replaced");
+
+    // --- Debug: Send plain text test email first ---
     await transporter.sendMail({
       from: process.env.SMTP_EMAIL,
-      to: customer.email,
-      subject: "Your Service Has Been Booked",
+      to: toEmail,
+      subject: "Test Service Booking Email",
+      text: `Hello ${replacements.name}, this is a test email for service booking.`
+    });
+    console.log("🛠 Test plain text email sent to:", toEmail);
+
+    // --- Send actual HTML email ---
+    const info = await transporter.sendMail({
+      from: process.env.SMTP_EMAIL,
+      to: toEmail,
+      subject: "Service Booked",
       html,
     });
+    console.log("✅ HTML Email sent successfully to:", toEmail);
+    console.log("📬 Message ID:", info.messageId);
 
-    console.log("✅ Email Sent Successfully!");
   } catch (err) {
-    console.log("❌ Email Sending Failed:", err);
+    console.log("❌ Email sending failed:", err.message);
   }
 }
+
 
 module.exports = {
   sendOtpEmail,

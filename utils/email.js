@@ -69,7 +69,6 @@ async function sendServiceOtpEmail(to, data) {
     html,
   });
 }
-
 async function sendServiceBookedEmail(
   customer,
   service,

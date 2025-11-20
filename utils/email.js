@@ -69,6 +69,7 @@ async function sendServiceOtpEmail(to, data) {
     html,
   });
 }
+
 async function sendServiceBookedEmail(
   customer,
   service,
@@ -76,41 +77,31 @@ async function sendServiceBookedEmail(
   booking,
   type = "customer"
 ) {
-  console.log("📧 sendServiceBookedEmail CALLED for:", type);
+  console.log("📧 sendBookingEmail CALLED for", type);
 
   try {
-    // Load Email Template
     const templatePath = path.join(__dirname, "../templates/service_book.html");
     let html = fs.readFileSync(templatePath, "utf-8");
-
-    console.log("📄 Template Loaded:", templatePath);
 
     let toEmail;
     let replacements = {};
 
-    // ---------------------------------------------------------
-    // 📬 CUSTOMER EMAIL → Show provider details only
-    // ---------------------------------------------------------
+    // ------------------------------
+    // CUSTOMER EMAIL
+    // ------------------------------
     if (type === "customer") {
       toEmail = customer.email;
-
-      console.log("📨 Sending EMAIL TO CUSTOMER:", toEmail);
 
       replacements = {
         title: "Service Booked",
         heading: "Your Service Has Been Booked 🎉",
         name: customer.name,
         message: "Your service has been successfully booked.",
-
         service_name: service.title,
-
         provider_name: provider.name,
+        // customer_name: customer.name,
+        // customer_email: customer.email,
         provider_email: provider.email,
-
-        // Customer details hidden (empty)
-        customer_name: "",
-        customer_email: "",
-
         amount: booking.amount,
         booking_date: new Date(booking.createdAt).toLocaleString(),
         service_date: service.date
@@ -119,13 +110,11 @@ async function sendServiceBookedEmail(
       };
     }
 
-    // ---------------------------------------------------------
-    // 📬 PROVIDER EMAIL → Show customer details only
-    // ---------------------------------------------------------
+    // ------------------------------
+    // PROVIDER EMAIL
+    // ------------------------------
     else {
       toEmail = provider.email;
-
-      console.log("📨 Sending EMAIL TO PROVIDER:", toEmail);
 
       let serviceDate = "-";
       if (service.service_type === "one_time") {
@@ -145,54 +134,36 @@ async function sendServiceBookedEmail(
 
       replacements = {
         title: "New Service Booking",
-        heading: "New Booking Received",
+        heading: "New Service Booking Details",
         name: provider.name,
         message: "A customer has booked your service.",
-
         service_name: service.title,
-
-        // Provider details hidden (empty)
-        provider_name: "",
-        provider_email: "",
-
-        // Customer details visible
+        // provider_name: provider.name,
         customer_name: customer.name,
         customer_email: customer.email,
-
         amount: booking.amount,
         booking_date: new Date(booking.createdAt).toLocaleString(),
         service_date: serviceDate,
       };
     }
 
-    // ---------------------------------------------------------
-    // 🔄 Replace all placeholders in template
-    // ---------------------------------------------------------
+    // Replace placeholders
     Object.keys(replacements).forEach((key) => {
-      const value = replacements[key] || "";
-      html = html.replaceAll(`{{${key}}}`, value);
+      html = html.replace(`{{${key}}}`, replacements[key] || "-");
     });
 
-    console.log("📝 FINAL EMAIL HTML (first 300 chars):");
-    console.log(html.substring(0, 300));
-
-    // ---------------------------------------------------------
-    // ✉ SEND EMAIL
-    // ---------------------------------------------------------
-    const emailResult = await transporter.sendMail({
+    await transporter.sendMail({
       from: process.env.SMTP_EMAIL,
       to: toEmail,
       subject: replacements.title,
       html,
     });
 
-    console.log("📤 SMTP RESPONSE:", emailResult);
     console.log("✅ Email Sent Successfully!");
   } catch (err) {
     console.log("❌ Email Sending Failed:", err);
   }
 }
-
 
 module.exports = {
   sendOtpEmail,

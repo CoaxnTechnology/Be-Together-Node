@@ -87,7 +87,7 @@ async function sendServiceBookedEmail(
     let replacements = {};
 
     // ------------------------------
-    // CUSTOMER EMAIL
+    // CUSTOMER EMAIL (Provider Info)
     // ------------------------------
     if (type === "customer") {
       toEmail = customer.email;
@@ -98,10 +98,12 @@ async function sendServiceBookedEmail(
         name: customer.name,
         message: "Your service has been successfully booked.",
         service_name: service.title,
+
+        // ✔ provider info only
         provider_name: provider.name,
-        // customer_name: customer.name,
-        // customer_email: customer.email,
-        provider_email: provider.email,
+        customer_name: "-",
+        customer_email: "-",
+
         amount: booking.amount,
         booking_date: new Date(booking.createdAt).toLocaleString(),
         service_date: service.date
@@ -111,7 +113,7 @@ async function sendServiceBookedEmail(
     }
 
     // ------------------------------
-    // PROVIDER EMAIL
+    // PROVIDER EMAIL (Customer Info)
     // ------------------------------
     else {
       toEmail = provider.email;
@@ -138,9 +140,12 @@ async function sendServiceBookedEmail(
         name: provider.name,
         message: "A customer has booked your service.",
         service_name: service.title,
-        // provider_name: provider.name,
+
+        // ✔ customer info only
+        provider_name: "-",
         customer_name: customer.name,
         customer_email: customer.email,
+
         amount: booking.amount,
         booking_date: new Date(booking.createdAt).toLocaleString(),
         service_date: serviceDate,

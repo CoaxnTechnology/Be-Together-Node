@@ -24,6 +24,13 @@ const transporter = nodemailer.createTransport({
     pass: process.env.SMTP_PASSWORD,
   },
 });
+transporter.verify((err, success) => {
+  if (err) {
+    console.log("❌ SMTP ERROR:", err);
+  } else {
+    console.log("✅ SMTP CONNECTED SUCCESSFULLY");
+  }
+});
 
 // -----------------------------
 // 1️⃣ Create Stripe Checkout Session (Booking not yet confirmed)

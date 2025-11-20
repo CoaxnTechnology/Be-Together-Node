@@ -184,7 +184,6 @@ async function sendServiceBookedEmail(
   }
 }
 
-module.exports = { sendServiceBookedEmail };
 
 module.exports = {
   sendOtpEmail,

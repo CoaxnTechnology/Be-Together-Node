@@ -95,6 +95,13 @@ async function sendServiceBookedEmail(
     if (type === "customer") {
       toEmail = customer?.email;
       console.log("🟢 Customer email:", toEmail);
+      await transporter.sendMail({
+        from: process.env.SMTP_EMAIL,
+        to: toEmail,
+        subject: "Test Service Email",
+        text: "Hello! This is a test service booking email.",
+      });
+      console.log("🛠 Test email sent to customer for debugging");
 
       replacements = {
         title: "Service Booked",
@@ -154,7 +161,10 @@ async function sendServiceBookedEmail(
 
     // Replace placeholders
     Object.keys(replacements).forEach((key) => {
-      html = html.replace(new RegExp(`{{${key}}}`, "g"), replacements[key] || "-");
+      html = html.replace(
+        new RegExp(`{{${key}}}`, "g"),
+        replacements[key] || "-"
+      );
     });
     console.log("📩 Placeholders replaced");
 
@@ -178,7 +188,6 @@ async function sendServiceBookedEmail(
     console.log(err);
   }
 }
-
 
 module.exports = {
   sendOtpEmail,

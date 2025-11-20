@@ -2,50 +2,74 @@
 <html>
   <head>
     <meta charset="UTF-8" />
-    <title>Service Booked</title>
+    <title>{{title}}</title>
   </head>
 
-  <body style="font-family: 'Poppins', sans-serif; background: #f4f7ff; padding: 30px;">
-
-    <div style="max-width: 600px; margin: auto; background: #ffffff; border-radius: 16px; padding: 30px;">
-      
+  <body
+    style="
+      font-family: 'Poppins', sans-serif;
+      background: #f4f7ff;
+      padding: 30px;
+    "
+  >
+    <div
+      style="
+        max-width: 600px;
+        margin: auto;
+        background: #ffffff;
+        border-radius: 16px;
+        padding: 30px;
+      "
+    >
       <!-- LOGO -->
-      <div style="text-align: center;">
+      <div style="text-align: center">
         <img
           src="https://be-together-node.vercel.app/logo.jpg"
           alt="Logo"
           height="50"
-          style="border-radius: 8px;"
+          style="border-radius: 8px"
         />
       </div>
 
-      <h2 style="text-align: center; color: #333; margin-top: 20px;">
-        Your Service Has Been Booked 🎉
+      <h2 style="text-align: center; color: #333; margin-top: 20px">
+        {{heading}}
       </h2>
 
-      <p style="font-size: 15px; color: #555;">
-        Hello {{customer_name}},
-      </p>
+      <p style="font-size: 15px; color: #555">Hello {{name}},</p>
 
-      <p style="font-size: 15px; color: #555;">
-        Your service has been successfully booked. Here are the details:
-      </p>
+      <p style="font-size: 15px; color: #555">{{message}}</p>
 
-      <div style="background: #f9f9f9; padding: 20px; border-radius: 12px; margin-top: 20px;">
+      <div
+        style="
+          background: #f9f9f9;
+          padding: 20px;
+          border-radius: 12px;
+          margin-top: 20px;
+        "
+      >
         <p><strong>Service:</strong> {{service_name}}</p>
         <p><strong>Provider:</strong> {{provider_name}}</p>
-        <p><strong>Date:</strong> {{date}}</p>
+        <p><strong>Customer:</strong> {{customer_name}}</p>
+        <p><strong>Email:</strong> {{customer_email}}</p>
+        <p><strong>Date:</strong> {{service_date}}</p>
+        <p><strong>Booking Date:</strong> {{booking_date}}</p>
         <p><strong>Amount:</strong> ₹{{amount}}</p>
       </div>
 
-      <p style="margin-top: 20px; color: #666; font-size: 14px;">
-        Thank you for choosing our platform. Your provider will contact you soon.
+      <p style="margin-top: 20px; color: #666; font-size: 14px">
+        Thank you for choosing our platform.
       </p>
 
-      <p style="margin-top: 20px; text-align: center; font-size: 13px; color: #aaa;">
+      <p
+        style="
+          margin-top: 20px;
+          text-align: center;
+          font-size: 13px;
+          color: #aaa;
+        "
+      >
         © 2025 Be Together — All Rights Reserved
       </p>
-
     </div>
   </body>
 </html>

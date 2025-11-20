@@ -50,6 +50,20 @@ exports.bookService = async (req, res) => {
         amount: 0,
         status: "booked", // directly booked
       });
+      // ⭐ Send Email
+      console.log("📧 Calling sendServiceBookedEmail…");
+      sendServiceBookedEmail(customer, serviceDetails, provider, booking).catch(
+        (err) => console.log("❌ Email error:", err)
+      );
+
+      // ⭐ Send Notification
+      console.log("🔔 Calling sendBookingNotification…");
+      sendBookingNotification(
+        customer,
+        provider,
+        serviceDetails,
+        booking
+      ).catch((err) => console.log("❌ Notification error:", err));
 
       return res.status(200).json({
         isSuccess: true,
@@ -533,4 +547,3 @@ exports.refundBooking = async (req, res) => {
     return res.status(500).json({ message: err.message });
   }
 };
-// End of file

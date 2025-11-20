@@ -70,37 +70,80 @@ async function sendServiceOtpEmail(to, data) {
   });
 }
 
-async function sendServiceBookedEmail(customer, service, provider, booking) {
-  console.log("📧 sendServiceBookedEmail CALLED");
-
-  if (!customer?.email) {
-    console.log("❌ No email found for customer. Skipping email.");
-    return;
-  }
-
-  console.log("📧 Email will be sent to:", customer.email);
+async function sendServiceBookedEmail(customer, service, provider, booking, type = "customer") {
+  console.log("📧 sendBookingEmail CALLED for", type);
 
   try {
     const templatePath = path.join(__dirname, "../templates/service_book.html");
-    console.log("📄 Template Path:", templatePath);
-
     let html = fs.readFileSync(templatePath, "utf-8");
 
-    console.log("📄 Template Loaded Successfully");
+    let toEmail;
+    let replacements = {};
 
-    html = html
-      .replace("{{customer_name}}", customer?.name || "Customer")
-      .replace("{{service_name}}", service?.title || "Service")
-      .replace("{{provider_name}}", provider?.name || "Provider")
-      .replace("{{amount}}", booking?.amount || "-")
-      .replace("{{date}}", service?.date ? new Date(service.date).toLocaleString() : "-");
+    // ------------------------------
+    // CUSTOMER EMAIL
+    // ------------------------------
+    if (type === "customer") {
+      toEmail = customer.email;
 
-    console.log("📧 Sending Email…");
+      replacements = {
+        title: "Service Booked",
+        heading: "Your Service Has Been Booked 🎉",
+        name: customer.name,
+        message: "Your service has been successfully booked.",
+        service_name: service.title,
+        provider_name: provider.name,
+        customer_name: customer.name,
+        customer_email: customer.email,
+        amount: booking.amount,
+        booking_date: new Date(booking.createdAt).toLocaleString(),
+        service_date: service.date ? new Date(service.date).toLocaleString() : "-"
+      };
+    }
+
+    // ------------------------------
+    // PROVIDER EMAIL
+    // ------------------------------
+    else {
+      toEmail = provider.email;
+
+      let serviceDate = "-";
+      if (service.service_type === "one_time") {
+        serviceDate = service.date ? new Date(service.date).toLocaleString() : "-";
+      } else if (service.service_type === "recurring") {
+        serviceDate = service.recurring_schedule
+          .map(
+            slot => `${slot.day} ${slot.start_time}-${slot.end_time} (${new Date(
+              slot.date
+            ).toLocaleDateString()})`
+          )
+          .join(", ");
+      }
+
+      replacements = {
+        title: "New Service Booking",
+        heading: "New Service Booking Details",
+        name: provider.name,
+        message: "A customer has booked your service.",
+        service_name: service.title,
+        provider_name: provider.name,
+        customer_name: customer.name,
+        customer_email: customer.email,
+        amount: booking.amount,
+        booking_date: new Date(booking.createdAt).toLocaleString(),
+        service_date: serviceDate
+      };
+    }
+
+    // Replace placeholders
+    Object.keys(replacements).forEach(key => {
+      html = html.replace(`{{${key}}}`, replacements[key] || "-");
+    });
 
     await transporter.sendMail({
       from: process.env.SMTP_EMAIL,
-      to: customer.email,
-      subject: "Your Service Has Been Booked",
+      to: toEmail,
+      subject: replacements.title,
       html,
     });
 

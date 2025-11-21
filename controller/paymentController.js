@@ -3,11 +3,13 @@ const nodemailer = require("nodemailer");
 const {
   sendServiceOtpEmail,
   sendServiceBookedEmail,
+  sendServiceCompletedEmail,
 } = require("../utils/email");
 const { generateOTP } = require("../utils/otp");
 const {
   sendBookingNotification,
   sendServiceStartedNotification,
+  sendServiceCompletedNotification,
 } = require("../controller/notificationController"); // ✅ import it
 const CancellationSetting = require("../model/CancellationSetting");
 const User = require("../model/User");
@@ -366,16 +368,34 @@ exports.completeService = async (req, res) => {
   try {
     const { bookingId } = req.body;
 
-    const booking = await Booking.findById(bookingId).populate("service");
+    const booking = await Booking.findById(bookingId)
+      .populate("service")
+      .populate("customer")
+      .populate("provider");
+
     if (!booking) return res.status(404).json({ message: "Booking not found" });
 
     console.log("📌 Booking loaded:", booking);
+
+    const customer = booking.customer;
+    const provider = booking.provider;
+    const service = booking.service;
 
     // Free service check first
     if (booking.amount === 0 || booking.service.isFree) {
       booking.status = "completed";
       await booking.save();
+
       console.log("✅ Free service completed:", booking._id);
+
+      // ⬇ Send notification for free service
+      await sendServiceCompletedNotification(
+        customer,
+        provider,
+        service,
+        booking
+      );
+
       return res.json({
         isSuccess: true,
         message: "Free service completed successfully",
@@ -406,6 +426,17 @@ exports.completeService = async (req, res) => {
     await payment.save();
 
     console.log("✅ Paid service completed & payment captured:", booking._id);
+
+    // ⬇ Send Email (only to customer)
+    await sendServiceCompletedEmail(customer, provider, service, booking);
+
+    // ⬇ Send Notification (customer + provider)
+    await sendServiceCompletedNotification(
+      customer,
+      provider,
+      service,
+      booking
+    );
 
     return res.json({
       isSuccess: true,

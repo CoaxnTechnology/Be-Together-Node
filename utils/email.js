@@ -69,7 +69,13 @@ async function sendServiceOtpEmail(to, data) {
     html,
   });
 }
-async function sendServiceBookedEmail(customer, service, provider, booking, type = "customer") {
+async function sendServiceBookedEmail(
+  customer,
+  service,
+  provider,
+  booking,
+  type = "customer"
+) {
   console.log("📧 sendServiceBookedEmail called for:", type);
 
   try {
@@ -107,9 +113,13 @@ async function sendServiceBookedEmail(customer, service, provider, booking, type
     }
 
     // Replace other common placeholders
-    html = html.replace(/{{service_name}}/g, service.title)
-               .replace(/{{date}}/g, service.date ? new Date(service.date).toLocaleString() : "-")
-               .replace(/{{amount}}/g, booking.amount);
+    html = html
+      .replace(/{{service_name}}/g, service.title)
+      .replace(
+        /{{date}}/g,
+        service.date ? new Date(service.date).toLocaleString() : "-"
+      )
+      .replace(/{{amount}}/g, booking.amount);
 
     console.log("📩 Placeholders replaced");
 
@@ -118,7 +128,9 @@ async function sendServiceBookedEmail(customer, service, provider, booking, type
       from: process.env.SMTP_EMAIL,
       to: toEmail,
       subject: "Test Service Booking Email",
-      text: `Hello ${type === "customer" ? customer.name : provider.name}, this is a test email for service booking.`
+      text: `Hello ${
+        type === "customer" ? customer.name : provider.name
+      }, this is a test email for service booking.`,
     });
     console.log("🛠 Test plain text email sent to:", toEmail);
 
@@ -131,9 +143,50 @@ async function sendServiceBookedEmail(customer, service, provider, booking, type
     });
     console.log("✅ HTML Email sent successfully to:", toEmail);
     console.log("📬 Message ID:", info.messageId);
-
   } catch (err) {
     console.log("❌ Email sending failed:", err.message);
+  }
+}
+async function sendServiceCompletedEmail(customer, provider, service, booking) {
+  try {
+    const templatePath = path.join(
+      __dirname,
+      "../templates/service_completed.html"
+    );
+
+    let html = fs.readFileSync(templatePath, "utf8");
+
+    // Provider section (for customer)
+    const providerHTML = `
+      <p style="margin: 6px 0; font-size: 15px">
+        <strong>Provider:</strong> ${provider.name}
+      </p>
+      <p style="margin: 6px 0; font-size: 15px">
+        <strong>Phone:</strong> ${provider.phone}
+      </p>
+    `;
+
+    // No customer section for customer email
+    const customerHTML = ``;
+
+    html = html
+      .replace("{{name}}", customer.name)
+      .replace("{{service_name}}", service.title)
+      .replace("{{provider_section}}", providerHTML)
+      .replace("{{customer_section}}", customerHTML)
+      .replace("{{date}}", booking.date)
+      .replace("{{amount}}", booking.amount);
+
+    await transporter.sendMail({
+      from: process.env.SMTP_EMAIL,
+      to: customer.email,
+      subject: "Service Completed",
+      html,
+    });
+
+    console.log("📧 Email sent to customer");
+  } catch (err) {
+    console.error("❌ Email error:", err.message);
   }
 }
 
@@ -143,4 +196,5 @@ module.exports = {
   sendResetEmail,
   sendServiceOtpEmail,
   sendServiceBookedEmail,
+  sendServiceCompletedEmail,
 };

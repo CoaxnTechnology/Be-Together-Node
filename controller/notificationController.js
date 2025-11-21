@@ -412,6 +412,62 @@ async function sendServiceStartedNotification(customer, provider, service, booki
     console.error("❌ Error sending service-started notification:", err.message);
   }
 }
+async function sendServiceCompletedNotification(customer, provider, service, booking) {
+  console.log("🔔 sendServiceCompletedNotification CALLED");
+
+  try {
+    console.log("Customer Tokens →", customer.fcmToken);
+    console.log("Provider Tokens →", provider.fcmToken);
+
+    // 🎉 Notify Customer
+    if (customer.fcmToken?.length > 0) {
+      console.log("📤 Sending Customer Notification…");
+
+      await admin.messaging().sendEachForMulticast({
+        tokens: customer.fcmToken,
+        notification: {
+          title: "✅ Service Completed",
+          body: `${provider.name} has completed your service "${service.title}".`,
+        },
+        data: {
+          type: "service_completed",
+          userType: "customer",
+          bookingId: booking._id.toString(),
+        },
+      });
+
+      console.log("✅ Customer Notification Sent");
+    } else {
+      console.log("⚠️ Customer has NO FCM TOKENS");
+    }
+
+    // 🛎 Notify Provider
+    if (provider.fcmToken?.length > 0) {
+      console.log("📤 Sending Provider Notification…");
+
+      await admin.messaging().sendEachForMulticast({
+        tokens: provider.fcmToken,
+        notification: {
+          title: "🛎 Service Completed",
+          body: `You completed "${service.title}" for ${customer.name}.`,
+        },
+        data: {
+          type: "service_completed",
+          userType: "provider",
+          bookingId: booking._id.toString(),
+        },
+      });
+
+      console.log("✅ Provider Notification Sent");
+    } else {
+      console.log("⚠️ Provider has NO FCM TOKENS");
+    }
+
+    console.log("🎉 All Service Completed Notifications Sent");
+  } catch (err) {
+    console.error("❌ Notification error:", err.message);
+  }
+}
 
 
 
@@ -422,4 +478,5 @@ exports.notifyOnUserInterestUpdate = notifyNearbyUsersOnInterestUpdate;
 exports.notifyOnServiceView = notifyOnServiceView;
 module .exports.sendBookingNotification = sendBookingNotification;
 module .exports.sendServiceStartedNotification = sendServiceStartedNotification;
+module .exports.sendServiceCompletedNotification = sendServiceCompletedNotification;
 //notificaton addd

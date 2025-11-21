@@ -155,6 +155,9 @@ async function sendServiceCompletedEmail(customer, provider, service, booking) {
     );
 
     let html = fs.readFileSync(templatePath, "utf8");
+     // 📌 Service completed time (NOW)
+    const completedTime = formatServiceCompleteTime(booking.updated_at);
+
 
     // Provider section (for customer)
     const providerHTML = `
@@ -162,7 +165,8 @@ async function sendServiceCompletedEmail(customer, provider, service, booking) {
         <strong>Provider:</strong> ${provider.name}
       </p>
       <p style="margin: 6px 0; font-size: 15px">
-        <strong>Phone:</strong> ${provider.phone}
+       <strong>Phone:</strong> ${provider.mobile || "Not available"}
+
       </p>
     `;
 
@@ -174,7 +178,7 @@ async function sendServiceCompletedEmail(customer, provider, service, booking) {
       .replace("{{service_name}}", service.title)
       .replace("{{provider_section}}", providerHTML)
       .replace("{{customer_section}}", customerHTML)
-      .replace("{{date}}", booking.date)
+      .replace("{{date}}", completedTime)
       .replace("{{amount}}", booking.amount);
 
     await transporter.sendMail({
@@ -189,8 +193,17 @@ async function sendServiceCompletedEmail(customer, provider, service, booking) {
     console.error("❌ Email error:", err.message);
   }
 }
-
-
+function formatServiceCompleteTime(date) {
+  return new Date(date).toLocaleString("en-IN", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: true,
+  });
+}
 module.exports = {
   sendOtpEmail,
   sendResetEmail,

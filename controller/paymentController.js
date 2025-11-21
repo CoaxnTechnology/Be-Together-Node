@@ -387,6 +387,8 @@ exports.completeService = async (req, res) => {
       await booking.save();
 
       console.log("✅ Free service completed:", booking._id);
+      // 1️⃣ Send Email (Customer Only)
+      await sendServiceCompletedEmail(customer, provider, service, booking);
 
       // ⬇ Send notification for free service
       await sendServiceCompletedNotification(

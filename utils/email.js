@@ -79,40 +79,38 @@ async function sendServiceBookedEmail(customer, service, provider, booking, type
     console.log("📂 Template loaded, length:", html.length);
 
     let toEmail;
-    let replacements = {};
 
     if (type === "customer") {
       toEmail = customer.email;
 
-      replacements = {
-        name: customer.name,
-        provider_name: provider.name,
-        provider_email: provider.email,
-        customer_name: "-",
-        customer_email: "-",
-        service_name: service.title,
-        date: service.date ? new Date(service.date).toLocaleString() : "-",
-        amount: booking.amount,
-      };
+      // Only show provider info
+      const providerSection = `
+        <p><strong>Provider:</strong> ${provider.name}</p>
+        <p><strong>Provider Email:</strong> ${provider.email}</p>
+      `;
+      html = html.replace("{{provider_section}}", providerSection);
+      html = html.replace("{{customer_section}}", ""); // hide customer section
+
+      html = html.replace(/{{name}}/g, customer.name);
     } else {
       toEmail = provider.email;
 
-      replacements = {
-        name: provider.name,
-        provider_name: "-",
-        provider_email: "-",
-        customer_name: customer.name,
-        customer_email: customer.email,
-        service_name: service.title,
-        date: service.date ? new Date(service.date).toLocaleString() : "-",
-        amount: booking.amount,
-      };
+      // Only show customer info
+      const customerSection = `
+        <p><strong>Customer:</strong> ${customer.name}</p>
+        <p><strong>Customer Email:</strong> ${customer.email}</p>
+      `;
+      html = html.replace("{{customer_section}}", customerSection);
+      html = html.replace("{{provider_section}}", ""); // hide provider section
+
+      html = html.replace(/{{name}}/g, provider.name);
     }
 
-    // Replace placeholders globally
-    Object.keys(replacements).forEach((key) => {
-      html = html.replace(new RegExp(`{{${key}}}`, "g"), replacements[key] || "-");
-    });
+    // Replace other common placeholders
+    html = html.replace(/{{service_name}}/g, service.title)
+               .replace(/{{date}}/g, service.date ? new Date(service.date).toLocaleString() : "-")
+               .replace(/{{amount}}/g, booking.amount);
+
     console.log("📩 Placeholders replaced");
 
     // --- Debug: Send plain text test email first ---
@@ -120,7 +118,7 @@ async function sendServiceBookedEmail(customer, service, provider, booking, type
       from: process.env.SMTP_EMAIL,
       to: toEmail,
       subject: "Test Service Booking Email",
-      text: `Hello ${replacements.name}, this is a test email for service booking.`
+      text: `Hello ${type === "customer" ? customer.name : provider.name}, this is a test email for service booking.`
     });
     console.log("🛠 Test plain text email sent to:", toEmail);
 

@@ -182,6 +182,7 @@ async function sendServiceCompletedEmail(customer, provider, service, booking) {
     console.error("❌ Email error:", err.message);
   }
 }
+//
 
 module.exports = {
   sendOtpEmail,

@@ -5,50 +5,98 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Service Booked</title>
   </head>
-  <body style="margin:0; font-family:'Poppins', sans-serif; background:#f4f7ff;">
-    <div style="max-width:680px; margin:0 auto; padding:40px 20px; background:#f4f7ff;">
 
-      <header style="text-align:center; padding-bottom:30px;">
-        <img src="https://be-together-node.vercel.app/logo.jpg" alt="Logo" height="50" style="border-radius:8px;" />
-      </header>
+  <body
+    style="
+      margin: 0;
+      padding: 0;
+      background: #f4f7ff;
+      font-family: 'Poppins', Arial, sans-serif;
+    "
+  >
+    <div style="max-width: 600px; margin: 0 auto; padding: 30px 15px">
+      <!-- LOGO -->
+      <div style="text-align: center; margin-bottom: 25px">
+        <img
+          src="https://be-together-node.vercel.app/logo.jpg"
+          alt="Logo"
+          height="55"
+          style="border-radius: 10px"
+        />
+      </div>
 
-      <main>
-        <div style="padding:40px 30px; background:#ffffff; border-radius:30px; text-align:center; box-shadow:0 4px 15px rgba(0,0,0,0.05);">
-          <h1 style="margin:0; font-size:24px; font-weight:600; color:#1f1f1f;">Your Service Has Been Booked 🎉</h1>
+      <!-- CARD -->
+      <div
+        style="
+          background: white;
+          border-radius: 28px;
+          padding: 35px 30px;
+          box-shadow: 0px 6px 20px rgba(0, 0, 0, 0.08);
+          text-align: center;
+        "
+      >
+        <h1
+          style="margin: 0; font-size: 24px; color: #1f1f1f; font-weight: 600"
+        >
+          Your Service Has Been Booked 🎉
+        </h1>
 
-          <p style="margin-top:15px; font-size:16px; color:#444;">
-            Hello <strong>{{name}}</strong>,
+        <p style="margin-top: 18px; font-size: 16px; color: #555">
+          Hello <strong>{{name}}</strong>,
+        </p>
+
+        <p style="margin-top: 10px; font-size: 15px; color: #666">
+          Your service has been successfully booked. Here's the summary:
+        </p>
+
+        <!-- SERVICE CARD -->
+        <div
+          style="
+            margin-top: 25px;
+            background: #f4f7ff;
+            border-radius: 20px;
+            padding: 22px 20px;
+            text-align: left;
+          "
+        >
+          <h3 style="margin: 0 0 15px 0; font-size: 18px; color: #333">
+            Service Details
+          </h3>
+
+          <p style="margin: 6px 0; font-size: 15px">
+            <strong>Service:</strong> {{service_name}}
           </p>
 
-          <p style="margin-top:10px; font-size:15px; color:#666;">
-            Your service has been successfully booked. Here are the details:
+          <!-- Provider section (only for customer) -->
+          {{provider_section}}
+
+          <!-- Customer section (only for provider) -->
+          {{customer_section}}
+
+          <p style="margin: 6px 0; font-size: 15px">
+            <strong>Date:</strong> {{date}}
           </p>
-
-          <!-- SERVICE DETAILS CARD -->
-          <div style="margin-top:30px; padding:20px; background:#f4f7ff; border-radius:20px; text-align:left;">
-            <h3 style="margin:0 0 15px 0; font-size:18px; color:#333;">Service Details</h3>
-
-            <p style="margin:5px 0; font-size:15px;"><strong>Service:</strong> {{service_name}}</p>
-
-            <!-- Provider section (only shown to customer) -->
-            {{provider_section}}
-
-            <!-- Customer section (only shown to provider) -->
-            {{customer_section}}
-
-            <p style="margin:5px 0; font-size:15px;"><strong>Date:</strong> {{date}}</p>
-            <p style="margin:5px 0; font-size:15px;"><strong>Amount:</strong> ₹{{amount}}</p>
-          </div>
-
-          <p style="margin-top:30px; font-size:15px; color:#666;">
-            Thank you for choosing our platform. Your provider will contact you soon.
+          <p style="margin: 6px 0; font-size: 15px">
+            <strong>Amount:</strong> ₹{{amount}}
           </p>
         </div>
-      </main>
 
-      <footer style="text-align:center; margin-top:50px; font-size:14px; color:#8c8c8c;">
+        <p style="margin-top: 25px; font-size: 15px; color: #666">
+          Thank you for choosing our platform. We appreciate your trust.
+        </p>
+      </div>
+
+      <!-- FOOTER -->
+      <div
+        style="
+          text-align: center;
+          margin-top: 35px;
+          font-size: 13px;
+          color: #999;
+        "
+      >
         © 2025 Be Together — All Rights Reserved
-      </footer>
+      </div>
     </div>
   </body>
 </html>

@@ -124,15 +124,6 @@ async function sendServiceBookedEmail(
     console.log("📩 Placeholders replaced");
 
     // --- Debug: Send plain text test email first ---
-    await transporter.sendMail({
-      from: process.env.SMTP_EMAIL,
-      to: toEmail,
-      subject: "Test Service Booking Email",
-      text: `Hello ${
-        type === "customer" ? customer.name : provider.name
-      }, this is a test email for service booking.`,
-    });
-    console.log("🛠 Test plain text email sent to:", toEmail);
 
     // --- Send actual HTML email ---
     const info = await transporter.sendMail({

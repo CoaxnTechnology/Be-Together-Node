@@ -545,7 +545,20 @@ exports.refundBooking = async (req, res) => {
         message: "Only booked services can be cancelled.",
       });
     }
+    // Agar free service hai
+    if (booking.amount === 0) {
+      booking.status = "cancelled";
+      booking.cancelledBy = cancelledBy || "customer";
+      booking.cancelReason = reason || null;
+      await booking.save();
 
+      return res.json({
+        isSuccess: true,
+        message: "Free service cancelled successfully",
+        cancelledBy: booking.cancelledBy,
+        reason: booking.cancelReason,
+      });
+    }
     // ---------------------------------------------------------
     // 2️⃣ FETCH PAYMENT
     // ---------------------------------------------------------

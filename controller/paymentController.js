@@ -605,7 +605,7 @@ exports.refundBooking = async (req, res) => {
       booking.customer,
       booking.provider,
       booking.service,
-      refundAmount,
+      booking,
       reason
     );
 

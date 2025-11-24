@@ -23,6 +23,8 @@ const paymentSchema = new mongoose.Schema(
     
     appCommission: { type: Number, default: 0 },
     providerAmount: { type: Number, default: 0 },
+    currency: { type: String, default: null },
+
     status: {
       type: String,
       enum: ["pending", "completed", "held", "failed", "refunded", "canceled"],

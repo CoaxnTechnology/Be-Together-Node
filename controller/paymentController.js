@@ -11,7 +11,7 @@ const {
   sendBookingNotification,
   sendServiceStartedNotification,
   sendServiceCompletedNotification,
-  sendServiceCancelledNotification
+  sendServiceCancelledNotification,
 } = require("../controller/notificationController"); // ✅ import it
 const CancellationSetting = require("../model/CancellationSetting");
 const User = require("../model/User");
@@ -126,7 +126,7 @@ exports.bookService = async (req, res) => {
       line_items: [
         {
           price_data: {
-            currency: "inr",
+            currency: undefined,
             product_data: {
               name: serviceDetails.title,
               description: serviceDetails.description || "No description",
@@ -239,17 +239,21 @@ exports.updateBookingStatus = async (req, res) => {
 
     console.log("✅ Booking Created:", booking._id);
 
-    // Update payment
+    // Update PAYMENT
     payment.status = "held";
     payment.paymentIntentId = session.payment_intent;
     payment.bookingId = booking._id;
+
+    // ⭐ MULTI-CURRENCY SUPPORT
+    payment.currency = paymentIntent.currency; // <-- IMPORTANT
+
     await payment.save();
 
     console.log("💾 Payment updated");
 
     // ⭐ Send Email
     console.log("📧 Calling sendServiceBookedEmail…");
-    // Send customer email
+
     sendServiceBookedEmail(
       customer,
       service,
@@ -258,7 +262,6 @@ exports.updateBookingStatus = async (req, res) => {
       "customer"
     ).catch((err) => console.log("❌ Customer Email error:", err));
 
-    // Send provider email
     sendServiceBookedEmail(
       customer,
       service,
@@ -520,6 +523,9 @@ exports.refundBooking = async (req, res) => {
   try {
     const { bookingId, cancelledBy, reason } = req.body;
 
+    // ---------------------------------------------------------
+    // 1️⃣ FETCH BOOKING
+    // ---------------------------------------------------------
     console.log("🔍 Fetching Booking…");
     const booking = await Booking.findById(bookingId)
       .populate("customer")
@@ -543,9 +549,13 @@ exports.refundBooking = async (req, res) => {
       });
     }
 
+    // ---------------------------------------------------------
+    // 2️⃣ FETCH PAYMENT
+    // ---------------------------------------------------------
     console.log("💳 Fetching Payment…");
     let payment = await Payment.findById(booking.paymentId);
     if (!payment) payment = await Payment.findOne({ bookingId });
+
     console.log("💳 Payment Found:", payment?._id);
 
     if (!payment) {
@@ -553,54 +563,87 @@ exports.refundBooking = async (req, res) => {
       return res.status(404).json({ message: "Payment not found" });
     }
 
-    // Cancellation fee logic
-    console.log("⚙️ Calculating Cancel Fee…");
+    console.log("➡ Fetching PaymentIntent from Stripe…");
+
+    const paymentIntent = await stripe.paymentIntents.retrieve(
+      payment.paymentIntentId
+    );
+
+    console.log("✔ PaymentIntent Status:", paymentIntent.status);
+
+    // ---------------------------------------------------------
+    // 3️⃣ CANCELLATION FEE LOGIC
+    // ---------------------------------------------------------
+    console.log("⚙️ Calculating Cancellation Fee…");
+
     let cancellationPercent = 0;
 
-    if (cancelledBy !== "provider") {
+    if (cancelledBy === "provider") {
+      console.log("👨‍🔧 Provider canceled → Full Refund");
+      cancellationPercent = 0;
+    } else {
       const setting = await CancellationSetting.findOne();
       cancellationPercent = setting?.enabled ? setting.percentage : 0;
+      console.log("📊 Cancellation %:", cancellationPercent);
     }
 
-    console.log("📊 Cancellation %:", cancellationPercent);
-
     const totalAmount = payment.amount;
-    const cancellationFee = Math.round((totalAmount * cancellationPercent) / 100);
+    const cancellationFee = Math.round(
+      (totalAmount * cancellationPercent) / 100
+    );
     const refundAmount = totalAmount - cancellationFee;
 
     console.log("💰 Total Amount:", totalAmount);
     console.log("💰 Cancellation Fee:", cancellationFee);
     console.log("💰 Refundable Amount:", refundAmount);
 
-    // Refund
-    console.log("🔁 Processing Refund through Stripe…");
+    // ---------------------------------------------------------
+    // 4️⃣ HANDLE CAPTURE CASE
+    // ---------------------------------------------------------
+    if (paymentIntent.status === "requires_capture") {
+      console.log("⚠️ PaymentIntent requires capture → capturing now…");
+      await stripe.paymentIntents.capture(payment.paymentIntentId);
+      console.log("✔ Payment Captured Successfully");
+    }
+
+    // ---------------------------------------------------------
+    // 5️⃣ STRIPE REFUND
+    // ---------------------------------------------------------
+    console.log("🔁 Creating Refund…");
+
     const refund = await stripe.refunds.create({
       payment_intent: payment.paymentIntentId,
       amount: refundAmount * 100,
+      reason: "requested_by_customer",
     });
 
     console.log("🔁 Stripe Refund ID:", refund.id);
 
-    // Save cancellation details
-    console.log("💾 Saving Booking Cancellation Data…");
+    // ---------------------------------------------------------
+    // 6️⃣ UPDATE DB — BOOKING + PAYMENT
+    // ---------------------------------------------------------
+    console.log("💾 Updating Booking & Payment…");
+
     booking.cancelledBy = cancelledBy || "customer";
     booking.cancelReason = reason || null;
     booking.status = "cancelled";
     await booking.save();
 
-    console.log("💾 Booking Updated");
+    console.log("✔ Booking Updated");
 
-    console.log("💾 Updating Payment Data…");
     payment.status = "refunded";
     payment.refundedAmount = refundAmount;
     payment.cancellationFee = cancellationFee;
     payment.refundAt = new Date();
     await payment.save();
 
-    console.log("💾 Payment Updated");
+    console.log("✔ Payment Updated");
 
-    // EMAIL
-    console.log("📧 Calling Email Function…");
+    // ---------------------------------------------------------
+    // 7️⃣ SEND EMAIL
+    // ---------------------------------------------------------
+    console.log("📧 Sending Cancel Email…");
+
     sendServiceCancelledEmail(
       booking.customer,
       booking.provider,
@@ -609,8 +652,11 @@ exports.refundBooking = async (req, res) => {
       reason
     );
 
-    // NOTIFICATION
-    console.log("🔔 Calling Notification Function…");
+    // ---------------------------------------------------------
+    // 8️⃣ SEND NOTIFICATIONS
+    // ---------------------------------------------------------
+    console.log("🔔 Sending Cancel Notifications…");
+
     sendServiceCancelledNotification(
       booking.customer,
       booking.provider,
@@ -619,8 +665,11 @@ exports.refundBooking = async (req, res) => {
       reason
     );
 
-    console.log("🚀 refundBooking Completed Successfully");
+    console.log("🎉 refundBooking Completed Successfully");
 
+    // ---------------------------------------------------------
+    // RESPONSE
+    // ---------------------------------------------------------
     return res.json({
       isSuccess: true,
       message: "Booking cancelled & refund processed.",

@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Service Cancelled</title>
+  </head>
+
+  <body
+    style="
+      margin: 0;
+      padding: 0;
+      background: #f4f7ff;
+      font-family: 'Poppins', Arial, sans-serif;
+    "
+  >
+    <div style="max-width: 600px; margin: 0 auto; padding: 30px 15px">
+      <!-- LOGO -->
+      <div style="text-align: center; margin-bottom: 25px">
+        <img
+          src="https://be-together-node.vercel.app/logo.jpg"
+          alt="Logo"
+          height="55"
+          style="border-radius: 10px"
+        />
+      </div>
+
+      <!-- CARD -->
+      <div
+        style="
+          background: white;
+          border-radius: 28px;
+          padding: 35px 30px;
+          box-shadow: 0px 6px 20px rgba(0, 0, 0, 0.08);
+          text-align: center;
+        "
+      >
+        <h1
+          style="margin: 0; font-size: 24px; color: #e63946; font-weight: 600"
+        >
+          Service Cancelled ❌
+        </h1>
+
+        <p style="margin-top: 18px; font-size: 16px; color: #555">
+          Hello <strong>{{name}}</strong>,
+        </p>
+
+        <p style="margin-top: 10px; font-size: 15px; color: #666">
+          We want to inform you that your service has been cancelled.
+        </p>
+
+        <!-- CANCELLED SERVICE CARD -->
+        <div
+          style="
+            margin-top: 25px;
+            background: #f4f7ff;
+            border-radius: 20px;
+            padding: 22px 20px;
+            text-align: left;
+          "
+        >
+          <h3 style="margin: 0 0 15px 0; font-size: 18px; color: #333">
+            Cancelled Service Details
+          </h3>
+
+          <p style="margin: 6px 0; font-size: 15px">
+            <strong>Service:</strong> {{service_name}}
+          </p>
+
+          <p style="margin: 6px 0; font-size: 15px">
+            <strong>Provider:</strong> {{provider_name}}
+          </p>
+
+          <p style="margin: 6px 0; font-size: 15px">
+            <strong>Date:</strong> {{date}}
+          </p>
+
+          <p style="margin: 6px 0; font-size: 15px">
+            <strong>Amount Refunded:</strong> ₹{{refund_amount}}
+          </p>
+
+          <!-- REASON (optional) -->
+          {{reason_section}}
+        </div>
+
+        <p style="margin-top: 25px; font-size: 15px; color: #666">
+          Refund has been processed successfully. Amount will reflect in your
+          account soon.
+        </p>
+      </div>
+
+      <!-- FOOTER -->
+      <div
+        style="
+          text-align: center;
+          margin-top: 35px;
+          font-size: 13px;
+          color: #999;
+        "
+      >
+        © 2025 Be Together — All Rights Reserved
+      </div>
+    </div>
+  </body>
+</html>

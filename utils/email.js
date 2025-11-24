@@ -182,7 +182,52 @@ async function sendServiceCompletedEmail(customer, provider, service, booking) {
     console.error("❌ Email error:", err.message);
   }
 }
-//
+async function sendServiceCancelledEmail(customer, provider, service, booking, reason = "") {
+  console.log("📧 [EMAIL] Function Called");
+
+  try {
+    console.log("📧 Loading Template…");
+    const templatePath = path.join(__dirname, "../templates/service_cancel.html");
+
+    let html = fs.readFileSync(templatePath, "utf8");
+    console.log("📧 Template Loaded");
+
+    // Reason
+    console.log("📧 Adding Reason:", reason);
+    const reasonSection = reason
+      ? `
+        <p style="margin: 6px 0; font-size: 15px">
+          <strong>Reason:</strong> ${reason}
+        </p>
+      `
+      : "";
+
+    console.log("📧 Replacing Variables in Template…");
+
+    html = html
+      .replace("{{name}}", customer.name)
+      .replace("{{service_name}}", service.title)
+      .replace("{{provider_name}}", provider.name)
+      .replace("{{date}}", new Date().toLocaleString("en-IN"))
+      .replace("{{refund_amount}}", booking.amount)
+      .replace("{{reason_section}}", reasonSection);
+
+    console.log("📧 Email Ready — Sending…");
+
+    await transporter.sendMail({
+      from: process.env.SMTP_EMAIL,
+      to: customer.email,
+      subject: "Service Cancelled",
+      html,
+    });
+
+    console.log("📧 Email Sent Successfully to Customer:", customer.email);
+  } catch (err) {
+    console.error("❌ Cancel Email Error:", err.message);
+  }
+}
+
+
 
 module.exports = {
   sendOtpEmail,
@@ -190,4 +235,5 @@ module.exports = {
   sendServiceOtpEmail,
   sendServiceBookedEmail,
   sendServiceCompletedEmail,
+  sendServiceCancelledEmail
 };

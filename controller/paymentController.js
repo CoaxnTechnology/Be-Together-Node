@@ -4,12 +4,14 @@ const {
   sendServiceOtpEmail,
   sendServiceBookedEmail,
   sendServiceCompletedEmail,
+  sendServiceCancelledEmail,
 } = require("../utils/email");
 const { generateOTP } = require("../utils/otp");
 const {
   sendBookingNotification,
   sendServiceStartedNotification,
   sendServiceCompletedNotification,
+  sendServiceCancelledNotification
 } = require("../controller/notificationController"); // ✅ import it
 const CancellationSetting = require("../model/CancellationSetting");
 const User = require("../model/User");
@@ -512,106 +514,124 @@ exports.getUserBookings = async (req, res) => {
 // CANCEL BOOKING + PARTIAL REFUND (ALWAYS REFUND EVEN IF NOT CAPTURED)
 // ------------------------------
 exports.refundBooking = async (req, res) => {
+  console.log("🚀 [API] refundBooking Called");
+  console.log("📥 Request Body:", req.body);
+
   try {
-    console.log("📌 refundBooking called:", req.body);
+    const { bookingId, cancelledBy, reason } = req.body;
 
-    const { bookingId } = req.body;
+    console.log("🔍 Fetching Booking…");
+    const booking = await Booking.findById(bookingId)
+      .populate("customer")
+      .populate("provider")
+      .populate("service");
 
-    // 1️⃣ Booking
-    console.log("➡ Fetching booking...");
-    const booking = await Booking.findById(bookingId);
-    console.log("✔ Booking:", booking);
+    console.log("📦 Booking Found:", booking?._id);
 
-    if (!booking) return res.status(404).json({ message: "Booking not found" });
+    if (!booking) {
+      console.log("❌ Booking Not Found");
+      return res.status(404).json({ message: "Booking not found" });
+    }
 
-    console.log("➡ Checking booking status:", booking.status);
+    console.log("📌 Booking Status:", booking.status);
+
     if (booking.status !== "booked") {
-      console.log("❌ Booking is not booked");
+      console.log("⚠️ Invalid Status — Cannot Cancel");
       return res.status(400).json({
         isSuccess: false,
         message: "Only booked services can be cancelled.",
       });
     }
 
-    // 2️⃣ Payment
-    console.log(
-      "➡ Fetching Payment using booking.paymentId:",
-      booking.paymentId
-    );
+    console.log("💳 Fetching Payment…");
     let payment = await Payment.findById(booking.paymentId);
+    if (!payment) payment = await Payment.findOne({ bookingId });
+    console.log("💳 Payment Found:", payment?._id);
 
     if (!payment) {
-      console.log("⚠ paymentId is wrong, trying findOne({ bookingId })");
-      payment = await Payment.findOne({ bookingId });
+      console.log("❌ Payment Not Found");
+      return res.status(404).json({ message: "Payment not found" });
     }
 
-    console.log("✔ Payment:", payment);
+    // Cancellation fee logic
+    console.log("⚙️ Calculating Cancel Fee…");
+    let cancellationPercent = 0;
 
-    if (!payment) return res.status(404).json({ message: "Payment not found" });
+    if (cancelledBy !== "provider") {
+      const setting = await CancellationSetting.findOne();
+      cancellationPercent = setting?.enabled ? setting.percentage : 0;
+    }
 
-    console.log("➡ Fetching Stripe PaymentIntent...");
-    const paymentIntent = await stripe.paymentIntents.retrieve(
-      payment.paymentIntentId
-    );
-    console.log("✔ PaymentIntent:", paymentIntent.status);
-
-    // 3️⃣ Cancellation setting
-    console.log("➡ Fetching cancellation settings...");
-    const setting = await CancellationSetting.findOne();
-    const cancellationPercent = setting?.enabled ? setting.percentage : 0;
-    console.log("✔ Cancellation %:", cancellationPercent);
+    console.log("📊 Cancellation %:", cancellationPercent);
 
     const totalAmount = payment.amount;
-    const cancellationFee = Math.round(
-      (totalAmount * cancellationPercent) / 100
-    );
+    const cancellationFee = Math.round((totalAmount * cancellationPercent) / 100);
     const refundAmount = totalAmount - cancellationFee;
 
-    console.log("💰 Refund Amount:", refundAmount);
-    console.log("💰 App Fee:", cancellationFee);
-
-    let refundId = null;
-
-    // Case A: If requires_capture → capture first
-    if (paymentIntent.status === "requires_capture") {
-      console.log("➡ Capturing PaymentIntent BEFORE refund...");
-      await stripe.paymentIntents.capture(payment.paymentIntentId);
-      console.log("✔ Payment Captured");
-    }
+    console.log("💰 Total Amount:", totalAmount);
+    console.log("💰 Cancellation Fee:", cancellationFee);
+    console.log("💰 Refundable Amount:", refundAmount);
 
     // Refund
-    console.log("➡ Creating refund...");
+    console.log("🔁 Processing Refund through Stripe…");
     const refund = await stripe.refunds.create({
       payment_intent: payment.paymentIntentId,
       amount: refundAmount * 100,
-      reason: "requested_by_customer",
     });
 
-    refundId = refund.id;
-    console.log("✔ Refund Created:", refundId);
+    console.log("🔁 Stripe Refund ID:", refund.id);
 
-    // Update records
-    console.log("➡ Updating booking & payment status...");
+    // Save cancellation details
+    console.log("💾 Saving Booking Cancellation Data…");
+    booking.cancelledBy = cancelledBy || "customer";
+    booking.cancelReason = reason || null;
     booking.status = "cancelled";
     await booking.save();
 
+    console.log("💾 Booking Updated");
+
+    console.log("💾 Updating Payment Data…");
     payment.status = "refunded";
     payment.refundedAmount = refundAmount;
     payment.cancellationFee = cancellationFee;
     payment.refundAt = new Date();
     await payment.save();
 
-    console.log("✔ Refund Booking DONE");
+    console.log("💾 Payment Updated");
+
+    // EMAIL
+    console.log("📧 Calling Email Function…");
+    sendServiceCancelledEmail(
+      booking.customer,
+      booking.provider,
+      booking.service,
+      refundAmount,
+      reason
+    );
+
+    // NOTIFICATION
+    console.log("🔔 Calling Notification Function…");
+    sendServiceCancelledNotification(
+      booking.customer,
+      booking.provider,
+      booking.service,
+      booking,
+      reason
+    );
+
+    console.log("🚀 refundBooking Completed Successfully");
 
     return res.json({
       isSuccess: true,
       message: "Booking cancelled & refund processed.",
       refundAmount,
       cancellationFee,
-      refundId,
+      refundId: refund.id,
+      cancelledBy: booking.cancelledBy,
+      reason: booking.cancelReason,
     });
   } catch (err) {
-    console.log("❌ refundBooking ERROR:", err.message);
+    console.error("❌ refundBooking Error:", err.message);
     return res.status(500).json({ message: err.message });
   }
 };

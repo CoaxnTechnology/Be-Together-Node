@@ -126,7 +126,7 @@ exports.bookService = async (req, res) => {
       line_items: [
         {
           price_data: {
-            currency: undefined,
+            currency: "eur",
             product_data: {
               name: serviceDetails.title,
               description: serviceDetails.description || "No description",
@@ -239,21 +239,17 @@ exports.updateBookingStatus = async (req, res) => {
 
     console.log("✅ Booking Created:", booking._id);
 
-    // Update PAYMENT
+    // Update payment
     payment.status = "held";
     payment.paymentIntentId = session.payment_intent;
     payment.bookingId = booking._id;
-
-    // ⭐ MULTI-CURRENCY SUPPORT
-    payment.currency = paymentIntent.currency; // <-- IMPORTANT
-
     await payment.save();
 
     console.log("💾 Payment updated");
 
     // ⭐ Send Email
     console.log("📧 Calling sendServiceBookedEmail…");
-
+    // Send customer email
     sendServiceBookedEmail(
       customer,
       service,
@@ -262,6 +258,7 @@ exports.updateBookingStatus = async (req, res) => {
       "customer"
     ).catch((err) => console.log("❌ Customer Email error:", err));
 
+    // Send provider email
     sendServiceBookedEmail(
       customer,
       service,

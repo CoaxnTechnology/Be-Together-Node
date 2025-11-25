@@ -19,18 +19,30 @@ module.exports = async function checkServiceRestriction(req, res, next) {
       });
     }
 
+    // ⭐ NEW: Allow NEW provider (no booking history)
+    if ((user.totalBookings || 0) === 0) {
+      console.log("✨ New provider → allowed to create service");
+      return next();
+    }
+
     // ⛔ 1. Check existing restriction
-    if (user.restrictionOnNewServiceUntil && user.restrictionOnNewServiceUntil > new Date()) {
+    if (
+      user.restrictionOnNewServiceUntil &&
+      user.restrictionOnNewServiceUntil > new Date()
+    ) {
       return res.status(403).json({
         isSuccess: false,
-        message: "You cannot create service now. You are restricted for low performance.",
+        message:
+          "You cannot create service now. You are restricted for low performance.",
         restrictedUntil: user.restrictionOnNewServiceUntil,
       });
     }
 
-    // ⛔ 2. Check current score
+    // ⛔ 2. Check current score (ONLY for providers with history)
     if ((user.performancePoints || 0) < 70) {
-      user.restrictionOnNewServiceUntil = new Date(Date.now() + 24 * 60 * 60 * 1000);
+      user.restrictionOnNewServiceUntil = new Date(
+        Date.now() + 24 * 60 * 60 * 1000
+      );
       await user.save();
 
       return res.status(403).json({
@@ -40,10 +52,9 @@ module.exports = async function checkServiceRestriction(req, res, next) {
       });
     }
 
-    // 👍 All good → Continue API
+    // 👍 All good
     req.user = user;
     next();
-    
   } catch (err) {
     return res.status(500).json({
       isSuccess: false,

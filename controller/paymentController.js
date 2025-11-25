@@ -553,12 +553,23 @@ exports.refundBooking = async (req, res) => {
         message: "Only booked services can be cancelled.",
       });
     }
-    // Agar free service hai
+
+    // ==========================================================
+    // ⭐ FREE SERVICE CANCELLATION
+    // ==========================================================
     if (booking.amount === 0) {
+      console.log("❗ Free service cancellation detected");
+
       booking.status = "cancelled";
       booking.cancelledBy = cancelledBy || "customer";
       booking.cancelReason = reason || null;
       await booking.save();
+
+      // ⭐ PERFORMANCE: Provider cancelled free service → 1 failed
+      if (cancelledBy === "provider") {
+        console.log("📉 Updating provider performance (free cancel)…");
+        await updateProviderPerformance(booking.provider._id, 0, 1);
+      }
 
       return res.json({
         isSuccess: true,
@@ -567,6 +578,7 @@ exports.refundBooking = async (req, res) => {
         reason: booking.cancelReason,
       });
     }
+
     // ---------------------------------------------------------
     // 2️⃣ FETCH PAYMENT
     // ---------------------------------------------------------
@@ -581,7 +593,7 @@ exports.refundBooking = async (req, res) => {
       return res.status(404).json({ message: "Payment not found" });
     }
 
-    console.log("➡ Fetching PaymentIntent from Stripe…");
+    console.log("➡ Retrieving PaymentIntent…");
 
     const paymentIntent = await stripe.paymentIntents.retrieve(
       payment.paymentIntentId
@@ -597,7 +609,7 @@ exports.refundBooking = async (req, res) => {
     let cancellationPercent = 0;
 
     if (cancelledBy === "provider") {
-      console.log("👨‍🔧 Provider canceled → Full Refund");
+      console.log("👨‍🔧 Provider canceled → Full Refund (0% fee)");
       cancellationPercent = 0;
     } else {
       const setting = await CancellationSetting.findOne();
@@ -619,7 +631,7 @@ exports.refundBooking = async (req, res) => {
     // 4️⃣ HANDLE CAPTURE CASE
     // ---------------------------------------------------------
     if (paymentIntent.status === "requires_capture") {
-      console.log("⚠️ PaymentIntent requires capture → capturing now…");
+      console.log("⚠️ Payment requires capture → capturing now…");
       await stripe.paymentIntents.capture(payment.paymentIntentId);
       console.log("✔ Payment Captured Successfully");
     }
@@ -658,7 +670,19 @@ exports.refundBooking = async (req, res) => {
     console.log("✔ Payment Updated");
 
     // ---------------------------------------------------------
-    // 7️⃣ SEND EMAIL
+    // ⭐ 7️⃣ PERFORMANCE UPDATE (Provider Cancel → BAD)
+    // ---------------------------------------------------------
+    if (cancelledBy === "provider") {
+      console.log("❗ Provider canceled → Performance DOWN");
+
+      // failedCount = 1
+      await updateProviderPerformance(booking.provider._id, 0, 1);
+
+      console.log("📉 Provider performance updated after cancellation");
+    }
+
+    // ---------------------------------------------------------
+    // 8️⃣ SEND EMAIL
     // ---------------------------------------------------------
     console.log("📧 Sending Cancel Email…");
 
@@ -671,7 +695,7 @@ exports.refundBooking = async (req, res) => {
     );
 
     // ---------------------------------------------------------
-    // 8️⃣ SEND NOTIFICATIONS
+    // 9️⃣ SEND NOTIFICATIONS
     // ---------------------------------------------------------
     console.log("🔔 Sending Cancel Notifications…");
 
@@ -685,9 +709,6 @@ exports.refundBooking = async (req, res) => {
 
     console.log("🎉 refundBooking Completed Successfully");
 
-    // ---------------------------------------------------------
-    // RESPONSE
-    // ---------------------------------------------------------
     return res.json({
       isSuccess: true,
       message: "Booking cancelled & refund processed.",
@@ -702,3 +723,4 @@ exports.refundBooking = async (req, res) => {
     return res.status(500).json({ message: err.message });
   }
 };
+

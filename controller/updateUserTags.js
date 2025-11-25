@@ -2,6 +2,7 @@
 const User = require("../model/User");
 const Category = require("../model/Category");
 const notificationController = require("./notificationController");
+const { getProviderPerformance } = require("../utils/performanceProfile");
 /** helper: normalize tags input (array / JSON string / comma string) */
 function normalizeTags(raw) {
   if (raw === undefined || raw === null) return [];
@@ -151,5 +152,34 @@ async function updateUserTags(req, res) {
     return res.status(500).json({ error: "server error" });
   }
 }
+async function getProviderProfile(req, res) {
+  console.log("📥 req.body:", req.body); // <-- ye check karo
+  try {
+    const { providerId } = req.body;
+    console.log("📌 providerId:", providerId);
 
-module.exports = { updateUserTags };
+    if (!providerId) return res.status(400).json({ message: "providerId is required" });
+
+    const provider = await User.findById(providerId);
+    console.log("👤 Provider fetched:", provider);
+
+    if (!provider) return res.status(404).json({ message: "Provider not found" });
+
+    const performance = getProviderPerformance(provider);
+    console.log("📊 Performance:", performance);
+
+    return res.json({
+      isSuccess: true,
+      provider: {
+        name: provider.name,
+        email: provider.email,
+      },
+      performance,
+    });
+  } catch (err) {
+    console.error("❌ Error in getProviderProfile:", err.message);
+    return res.status(500).json({ message: err.message });
+  }
+}
+
+module.exports = { updateUserTags,getProviderProfile };

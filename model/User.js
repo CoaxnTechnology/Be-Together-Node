@@ -71,7 +71,10 @@ const userSchema = new mongoose.Schema(
     },
     stripeCustomerId: { type: String, default: null },
     stripeAccountId: { type: String, default: null },
-
+    performancePoints: { type: Number, default: 0 },
+    totalBookings: { type: Number, default: 0 },
+    successfulBookings: { type: Number, default: 0 },
+    restrictionOnNewServiceUntil: { type: Date, default: null },
     reset_password_token: { type: String, default: null }, // store hashed token
     reset_password_expiry: { type: Date, default: null },
     reset_password_used: { type: Boolean, default: false },

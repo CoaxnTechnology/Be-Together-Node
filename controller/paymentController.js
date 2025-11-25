@@ -19,6 +19,8 @@ const Service = require("../model/Service");
 const Payment = require("../model/Payment");
 const Booking = require("../model/Booking");
 const CommissionSetting = require("../model/CommissionSetting");
+const updateProviderPerformance = require("../utils/providerPerformance");
+
 
 // Email transporter
 const transporter = nodemailer.createTransport({
@@ -387,6 +389,9 @@ exports.completeService = async (req, res) => {
     if (booking.amount === 0 || booking.service.isFree) {
       booking.status = "completed";
       await booking.save();
+       // 🟢 Performance update → Completed service = +1
+      console.log("📊 Updating provider performance (free service)...");
+      await updateProviderPerformance(provider._id, 1, 0);
 
       console.log("✅ Free service completed:", booking._id);
       // 1️⃣ Send Email (Customer Only)
@@ -430,6 +435,9 @@ exports.completeService = async (req, res) => {
     await payment.save();
 
     console.log("✅ Paid service completed & payment captured:", booking._id);
+    // 🟢 Performance update → Paid service completed = +1
+    console.log("📊 Updating provider performance (paid service)...");
+    await updateProviderPerformance(provider._id, 1, 0);
 
     // ⬇ Send Email (only to customer)
     await sendServiceCompletedEmail(customer, provider, service, booking);

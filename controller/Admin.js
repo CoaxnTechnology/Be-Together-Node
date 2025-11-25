@@ -13,7 +13,7 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const fs = require("fs");
 const csv = require("csv-parser");
-
+const Booking=require("../model/Booking");
 // ------------------ Cloudinary Config ------------------
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -1423,3 +1423,109 @@ exports.loginAdmin = async (req, res) => {
     res.status(500).json({ success: false, error: "Server error" });
   }
 };
+//admin booking 
+
+exports.getAllBookings = async (req, res) => {
+  try {
+    // 1️⃣ Fetch all bookings with all details
+    const bookings = await Booking.find()
+      .populate("customer") // full customer details
+      .populate("provider") // full provider details
+      .populate("service") // full service details
+      .populate("paymentId") // full payment details
+      .sort({ createdAt: -1 });
+
+    // 2️⃣ Group by service
+    const groupedByService = {};
+
+    bookings.forEach((booking) => {
+      const serviceId = booking.service._id.toString();
+      if (!groupedByService[serviceId]) {
+        groupedByService[serviceId] = {
+          service: booking.service,
+          provider: booking.provider,
+          users: [],
+        };
+      }
+
+      groupedByService[serviceId].users.push({
+        _id: booking.customer._id,
+        name: booking.customer.name,
+        email: booking.customer.email,
+        phone: booking.customer.phone,
+        profile_image: booking.customer.profile_image,
+        // Booking-specific fields
+        bookingId: booking._id,
+        status: booking.status,
+        amount: booking.amount,
+        otp: booking.otp,
+        otpExpiry: booking.otpExpiry,
+        cancelledBy: booking.cancelledBy,
+        cancelReason: booking.cancelReason,
+        cancellationFee: booking.cancellationFee,
+        refundAmount: booking.refundAmount,
+        payment: booking.paymentId || null,
+        createdAt: booking.createdAt,
+        updatedAt: booking.updatedAt,
+      });
+    });
+
+    return res.json({
+      isSuccess: true,
+      message: "All bookings grouped by service",
+      services: Object.values(groupedByService),
+    });
+  } catch (err) {
+    console.error("❌ getAllBookings Error:", err);
+    return res.status(500).json({
+      isSuccess: false,
+      message: "Internal server error",
+      error: err.message,
+    });
+  }
+};
+
+//--------------------Booking By ID----------
+exports.getBookingDetails = async (req, res) => {
+  try {
+    const { bookingId } = req.body; // 🔥 Body se id aa raha hai
+
+    if (!bookingId) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "bookingId is required",
+      });
+    }
+
+    const booking = await Booking.findById(bookingId)
+      .populate("customer", "name email phone")
+      .populate("provider", "name email phone")
+      .populate("service", "title description price isFree")
+      .populate("paymentId");
+
+    if (!booking) {
+      return res.status(404).json({
+        isSuccess: false,
+        message: "Booking not found",
+      });
+    }
+
+    // Count total times the service was booked
+    const serviceBookingsCount = await Booking.countDocuments({
+      service: booking.service._id,
+    });
+
+    return res.json({
+      isSuccess: true,
+      message: "Booking details fetched",
+      booking,
+      serviceBookingsCount,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      isSuccess: false,
+      message: err.message,
+    });
+  }
+};
+

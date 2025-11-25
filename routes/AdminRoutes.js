@@ -1,9 +1,12 @@
 const express = require("express");
 const router = express.Router();
 const multer = require("multer");
-//const multer = require("multer");
 const csv = require("csv-parser");
 const fs = require("fs");
+
+const storage = multer.memoryStorage();
+const upload = multer({ storage });
+
 const {
   createCategory,
   getAllCategories,
@@ -22,49 +25,46 @@ const {
   getAITags,
   loginAdmin,
   generateUsersFromCSV,
-  deleteAllFakeUsers
+  deleteAllFakeUsers,
+  getAllBookings,
+  getBookingDetails
 } = require("../controller/Admin");
-//const { getAllServices } = require("../controller/serviceController");
-const storage = multer.memoryStorage();
-const upload = multer({ storage });
-//------------------------USer Details---------------------
+
+// ------------------------USER DETAILS------------------------
 router.get("/alluser", getAllUsers);
+
+// ------------------------SERVICE DETAILS------------------------
 router.get("/allservice", getAllService);
-
-//------------------------Service Details---------------------
-
 router.get("/service/:id", getServiceById);
+
+// ------------------------FAKE USERS------------------------
+router.get("/fake-users", getFakeUsers);
 router.get("/fake-users/:id", getFakeUserById);
-router.put(
-  "/user/edit-profile/:userId",
-  upload.single("profile_image"),
-  editProfile
-);
+router.post("/generate-fake-users", generateFakeUsers);
+router.delete("/fake-users/:id", deleteFakeUser);
+router.delete("/fake-users", deleteAllFakeUsers);
+router.post("/upload-users-csv", upload.single("file"), generateUsersFromCSV);
 
-//-------------------category-------------------
+// ------------------------PROFILE------------------------
+router.put("/user/edit-profile/:userId", upload.single("profile_image"), editProfile);
+
+// ------------------------CATEGORY------------------------
 router.post("/category/ai-tags", getAITags);
-
 router.post("/category/create", upload.single("image"), createCategory);
 router.put("/category/update/:id", upload.single("image"), updateCategory);
 router.delete("/category/delete/:id", deleteCategory);
-router.post("/generate-fake-users", async (req, res, next) => {
-  return generateFakeUsers(req, res, next);
-});
-
-//const { generateFakeUsers, generateUsersFromCSV } = require("../controller/Admin");
-
-// Old route (keep it)
-router.post("/generate-fake-users", generateFakeUsers);
-
-// New CSV route
-router.post("/upload-users-csv", upload.single("file"), generateUsersFromCSV);
-
-router.get("/fake-users", getFakeUsers);
-router.post("/create", createService);
-router.delete("/fake-users/:id", deleteFakeUser);
-router.delete("/fake-users", deleteAllFakeUsers);
-router.get("/:id", getUserById);
 router.post("/category/all", getAllCategories);
+
+// ------------------------SERVICE CREATION------------------------
+router.post("/create", createService);
+
+// ------------------------BOOKINGS------------------------
+router.get("/allbooking", getAllBookings);      // specific route
+router.post("/booking/details", getBookingDetails); // bookingId from body
+
+// ------------------------AUTH------------------------
 router.post("/auth/login", loginAdmin);
+router.get("/:id", getUserById); // generic param route LAST
+
 
 module.exports = router;

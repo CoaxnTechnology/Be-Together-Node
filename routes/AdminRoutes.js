@@ -32,6 +32,7 @@ const {
 
 // ------------------------USER DETAILS------------------------
 router.get("/alluser", getAllUsers);
+router.get("/user/:id", getUserById); // ✅ make generic user route specific
 
 // ------------------------SERVICE DETAILS------------------------
 router.get("/allservice", getAllService);
@@ -64,7 +65,5 @@ router.post("/booking/details", getBookingDetails); // bookingId from body
 
 // ------------------------AUTH------------------------
 router.post("/auth/login", loginAdmin);
-router.get("/:id", getUserById); // generic param route LAST
-
 
 module.exports = router;

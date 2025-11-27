@@ -84,7 +84,7 @@ exports.getStats = async (req, res) => {
 
 const monthStart = new Date(Date.UTC(now.getFullYear(), now.getMonth(), 1));
 const monthEnd = new Date(Date.UTC(now.getFullYear(), now.getMonth() + 1, 1));
-
+// Total bookings this month (all statuses)
 const currentMonthBookings = await Booking.countDocuments({
   createdAt: { $gte: monthStart, $lt: monthEnd },
 });

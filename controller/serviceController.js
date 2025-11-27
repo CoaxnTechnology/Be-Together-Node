@@ -394,11 +394,13 @@ exports.getServices = async (req, res) => {
     }
 
     // ----- CATEGORY -----
-    let categoryId = q.categoryId || null;
-    if (categoryId && typeof categoryId === "string") {
+    let categoryId = q.categoryId || [];
+    if (typeof categoryId === "string" && categoryId.trim() !== "") {
       try {
         categoryId = JSON.parse(categoryId);
-      } catch {}
+      } catch {
+        categoryId = [categoryId];
+      }
     }
     console.log("Category ID filter:", categoryId);
 
@@ -412,20 +414,26 @@ exports.getServices = async (req, res) => {
     const skip = (page - 1) * limit;
 
     // ----- RADIUS -----
-    const radiusKm = q.radius_km !== undefined ? Number(q.radius_km) : 10;
+    const radiusKm = q.radius_km !== undefined && q.radius_km !== "" ? Number(q.radius_km) : 10;
 
-    // ----- EXCLUDE OWNER -----
-    let excludeOwnerId = q.excludeOwnerId || (req.user && req.user._id);
-    console.log("Exclude owner ID:", excludeOwnerId);
-
-    // ----- BUILD MATCH -----
+    // ----- MATCH FILTER -----
     const match = { $and: [] };
 
+    // Date filter
+    if (q.date) {
+      const queryDate = new Date(q.date);
+      match.$and.push({
+        $or: [
+          { service_type: "one_time", date: queryDate },
+          { service_type: "recurring", "recurring_schedule.date": queryDate },
+        ],
+      });
+      console.log("Query date filter:", queryDate);
+    }
+
     // Category filter
-    if (Array.isArray(categoryId) && categoryId.length > 0) {
-      match.$and.push({ category: { $in: categoryId.map((id) => new Types.ObjectId(id)) } });
-    } else if (categoryId && typeof categoryId === "string" && categoryId.trim() !== "") {
-      match.$and.push({ category: new Types.ObjectId(categoryId) });
+    if (categoryId.length) {
+      match.$and.push({ category: { $in: categoryId.map(id => new Types.ObjectId(id)) } });
     }
 
     // Tags filter
@@ -436,30 +444,22 @@ exports.getServices = async (req, res) => {
     else if (q.isFree === false || q.isFree === "false") match.$and.push({ isFree: false });
 
     // Exclude owner
+    let excludeOwnerId = q.excludeOwnerId || (req.user && req.user._id);
     if (excludeOwnerId) match.$and.push({ owner: { $ne: new Types.ObjectId(excludeOwnerId) } });
-
-    // Date filter
-    if (q.date) {
-      const queryDate = new Date(q.date);
-      console.log("Query date filter:", queryDate);
-      match.$and.push({
-        $or: [
-          { service_type: "one_time", date: queryDate },
-          { service_type: "recurring", "recurring_schedule.date": queryDate },
-        ],
-      });
-    }
+    console.log("Exclude owner ID:", excludeOwnerId);
 
     // Keyword filter
     if (keyword) {
       const regex = new RegExp(keyword, "i");
-      const keywordOr = [{ title: regex }, { description: regex }];
+      const keywordOr = [
+        { title: regex },
+        { description: regex },
+        { tags: { $in: [regex] } },
+      ];
       if (matchedCategoryIds.length) keywordOr.push({ category: { $in: matchedCategoryIds } });
-      match.$and.push({ $or: keywordOr });
+      if (keywordOr.length) match.$and.push({ $or: keywordOr });
     }
 
-    // If no filters added, remove $and
-    if (!match.$and.length) delete match.$and;
     console.log("Final match object:", JSON.stringify(match, null, 2));
 
     // ----- LOCATION -----
@@ -478,7 +478,7 @@ exports.getServices = async (req, res) => {
     }
     console.log("Reference coordinates:", refLat, refLon);
 
-    // ----- AGGREGATION PIPELINE -----
+    // ---------- PIPELINE BASE ----------
     const buildPipeline = (withPagination = false) => {
       const pipeline = [];
 
@@ -492,21 +492,98 @@ exports.getServices = async (req, res) => {
             distanceMultiplier: 0.001,
           },
         });
-        pipeline.push({ $addFields: { distance_km: { $round: ["$distance_km", 2] } } });
+        pipeline.push({
+          $addFields: { distance_km: { $round: ["$distance_km", 2] } },
+        });
       }
 
       pipeline.push({ $match: match });
+
+      pipeline.push(
+        {
+          $lookup: {
+            from: "categories",
+            localField: "category",
+            foreignField: "_id",
+            as: "category",
+          },
+        },
+        { $unwind: "$category" },
+        {
+          $lookup: {
+            from: "users",
+            localField: "owner",
+            foreignField: "_id",
+            as: "owner",
+          },
+        },
+        { $unwind: "$owner" },
+        {
+          $replaceRoot: {
+            newRoot: {
+              $mergeObjects: [
+                "$$ROOT",
+                {
+                  owner: {
+                    _id: "$owner._id",
+                    profile_image: "$owner.profile_image",
+                    name: "$owner.name",
+                  },
+                },
+              ],
+            },
+          },
+        },
+        {
+          $lookup: {
+            from: "reviews",
+            let: { serviceId: "$_id" },
+            pipeline: [
+              { $match: { $expr: { $eq: ["$service", "$$serviceId"] } } },
+              {
+                $lookup: {
+                  from: "users",
+                  localField: "user",
+                  foreignField: "_id",
+                  as: "user",
+                },
+              },
+              { $unwind: "$user" },
+              {
+                $project: {
+                  _id: 1,
+                  rating: 1,
+                  text: 1,
+                  created_at: 1,
+                  "user.name": 1,
+                  "user.email": 1,
+                  "user.profile_image": 1,
+                },
+              },
+            ],
+            as: "reviews",
+          },
+        },
+        {
+          $addFields: {
+            averageRating: { $avg: "$reviews.rating" },
+            totalReviews: { $size: "$reviews" },
+          },
+        }
+      );
+
+      if (withPagination) {
+        pipeline.push({ $skip: skip }, { $limit: limit });
+      }
+
       return pipeline;
     };
 
-    const pipelineTest = buildPipeline(false);
-    console.log("Aggregation pipeline test:", JSON.stringify(pipelineTest, null, 2));
-
-    // Fetch services
+    // ---------- Fetch Services ----------
     const listServices = await Service.aggregate(buildPipeline(true));
     const mapServices = await Service.aggregate(buildPipeline(false));
 
-    // Total count
+    // ---------- Total Count ----------
     const totalCountPipeline = buildPipeline(false);
     totalCountPipeline.push({ $count: "total" });
     const totalCountResult = await Service.aggregate(totalCountPipeline);
@@ -523,9 +600,14 @@ exports.getServices = async (req, res) => {
     });
   } catch (err) {
     console.error("getServices error:", err);
-    return res.status(500).json({ isSuccess: false, message: "Server error", error: err.message });
+    return res.status(500).json({
+      isSuccess: false,
+      message: "Server error",
+      error: err.message,
+    });
   }
 };
+
 
 
 exports.getInterestedUsers = async (req, res) => {

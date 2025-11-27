@@ -74,9 +74,13 @@ exports.getStats = async (req, res) => {
     );
 
     // BOOKINGS
-    const completedBookings = await Booking.countDocuments({ status: "completed" });
+    const completedBookings = await Booking.countDocuments({
+      status: "completed",
+    });
     const pendingBookings = await Booking.countDocuments({ status: "booked" });
-    const cancelledBookings = await Booking.countDocuments({ status: "cancelled" });
+    const cancelledBookings = await Booking.countDocuments({
+      status: "cancelled",
+    });
 
     const totalReviews = await Review.countDocuments();
     const positiveReviews = await Review.countDocuments({
@@ -95,7 +99,7 @@ exports.getStats = async (req, res) => {
         icon: "users",
         color: "primary",
       },
-      
+
       {
         title: "Total Fake Users",
         value: totalFakeUsers.toString(),
@@ -122,9 +126,7 @@ exports.getStats = async (req, res) => {
         icon: "Tags",
         color: "info",
       },
-      
-
-      ];
+    ];
 
     const chartData = {
       users: [
@@ -146,7 +148,19 @@ exports.getStats = async (req, res) => {
           color: "hsl(142 70% 45%)",
         },
       ],
-      
+      bookings: [
+        {
+          name: "Completed",
+          value: completedBookings,
+          color: "hsl(168 100% 50%)",
+        },
+        { name: "Pending", value: pendingBookings, color: "hsl(210 100% 56%)" },
+        {
+          name: "Cancelled",
+          value: cancelledBookings,
+          color: "hsl(0 70% 55%)",
+        },
+      ],
       reviews: [
         { name: "Positive", value: positiveReviews, color: "hsl(142 70% 45%)" },
         { name: "Neutral", value: neutralReviews, color: "hsl(45 90% 55%)" },

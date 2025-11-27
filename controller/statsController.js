@@ -21,7 +21,7 @@ exports.getStats = async (req, res) => {
 
     // Total users
     const totalUsers = await User.countDocuments();
-
+ const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
     // Users created last month
     const lastMonthUsers = await User.countDocuments({
       created_at: { $gte: new Date(now.setMonth(now.getMonth() - 1)) },

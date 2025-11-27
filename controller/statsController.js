@@ -21,14 +21,14 @@ exports.getStats = async (req, res) => {
 
     // Total users
     const totalUsers = await User.countDocuments();
- const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+
     // Users created last month
+    const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
     const lastMonthUsers = await User.countDocuments({
-      created_at: { $gte: new Date(now.setMonth(now.getMonth() - 1)) },
+      created_at: { $gte: lastMonthStart },
     });
 
-    // Inactive users (no location update in last 7 days)
+    // Inactive users
     const inactiveUsers = await User.countDocuments({
       $or: [
         { "lastLocation.updatedAt": { $lt: sevenDaysAgo } },
@@ -37,44 +37,37 @@ exports.getStats = async (req, res) => {
       ],
     });
 
-    // Active users = total - inactive
     const activeUsers = totalUsers - inactiveUsers;
     const totalFakeUsers = await User.countDocuments({ is_fake: true });
-
-    // Trend for users (based on total)
     const userTrend = calculateTrend(totalUsers, totalUsers - lastMonthUsers);
 
-    // SERVICES
+    // Services
     const totalServices = await Service.countDocuments();
     const lastMonthServices = await Service.countDocuments({
-      created_at: {
-        $gte: new Date(new Date().setMonth(new Date().getMonth() - 1)),
-      },
+      created_at: { $gte: lastMonthStart },
     });
     const serviceTrend = calculateTrend(
       totalServices,
       totalServices - lastMonthServices
     );
 
-    // CATEGORIES
+    // Categories
     const totalCategories = await Category.countDocuments();
     const lastMonthCategories = await Category.countDocuments({
-      created_at: {
-        $gte: new Date(new Date().setMonth(new Date().getMonth() - 1)),
-      },
+      created_at: { $gte: lastMonthStart },
     });
     const categoryTrend = calculateTrend(
       totalCategories,
       totalCategories - lastMonthCategories
     );
-    // ✅ Total tags count (sum of all tags arrays)
+
     const categories = await Category.find({}, { tags: 1 });
     const totalTags = categories.reduce(
       (sum, cat) => sum + (cat.tags?.length || 0),
       0
     );
 
-    // BOOKINGS
+    // Bookings by status
     const completedBookings = await Booking.countDocuments({
       status: "completed",
     });
@@ -83,12 +76,11 @@ exports.getStats = async (req, res) => {
       status: "cancelled",
     });
 
-// Month start & end in UTC
-// Current month bookings (all statuses)
-    const monthStart = thisMonthStart;
-    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    // Current month bookings (all statuses)
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1); // 1st day
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999); // last ms of month
     const currentMonthBookings = await Booking.countDocuments({
-      createdAt: { $gte: monthStart, $lt: monthEnd },
+      createdAt: { $gte: monthStart, $lte: monthEnd },
     });
 
     console.log("Bookings Count:", {
@@ -97,17 +89,14 @@ exports.getStats = async (req, res) => {
       cancelledBookings,
       currentMonthBookings,
       monthStart,
-      monthEnd
+      monthEnd,
     });
 
+    // Reviews
     const totalReviews = await Review.countDocuments();
-    const positiveReviews = await Review.countDocuments({
-      rating: { $gte: 4 },
-    });
+    const positiveReviews = await Review.countDocuments({ rating: { $gte: 4 } });
     const neutralReviews = await Review.countDocuments({ rating: 3 });
-    const negativeReviews = await Review.countDocuments({
-      rating: { $lte: 2 },
-    });
+    const negativeReviews = await Review.countDocuments({ rating: { $lte: 2 } });
 
     const summaryWidgets = [
       {
@@ -120,11 +109,9 @@ exports.getStats = async (req, res) => {
       {
         title: "Bookings This Month",
         value: currentMonthBookings.toString(),
-
         icon: "calendar",
         color: "primary",
       },
-
       {
         title: "Total Fake Users",
         value: totalFakeUsers.toString(),
@@ -155,36 +142,14 @@ exports.getStats = async (req, res) => {
 
     const chartData = {
       users: [
-        {
-          name: "Active Users",
-          value: activeUsers,
-          color: "hsl(168 100% 50%)",
-        },
-        {
-          name: "Inactive Users",
-          value: inactiveUsers,
-          color: "hsl(0 70% 55%)",
-        },
+        { name: "Active Users", value: activeUsers, color: "hsl(168 100% 50%)" },
+        { name: "Inactive Users", value: inactiveUsers, color: "hsl(0 70% 55%)" },
       ],
-      services: [
-        {
-          name: "Total Services",
-          value: totalServices,
-          color: "hsl(142 70% 45%)",
-        },
-      ],
+      services: [{ name: "Total Services", value: totalServices, color: "hsl(142 70% 45%)" }],
       bookings: [
-        {
-          name: "Completed",
-          value: completedBookings,
-          color: "hsl(168 100% 50%)",
-        },
+        { name: "Completed", value: completedBookings, color: "hsl(168 100% 50%)" },
         { name: "Pending", value: pendingBookings, color: "hsl(210 100% 56%)" },
-        {
-          name: "Cancelled",
-          value: cancelledBookings,
-          color: "hsl(0 70% 55%)",
-        },
+        { name: "Cancelled", value: cancelledBookings, color: "hsl(0 70% 55%)" },
       ],
       reviews: [
         { name: "Positive", value: positiveReviews, color: "hsl(142 70% 45%)" },

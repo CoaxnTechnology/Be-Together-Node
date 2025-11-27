@@ -377,9 +377,6 @@ function bboxForLatLon(lat, lon, radiusKm = 3) {
   };
 }
 //------------------Get Service------------------
-// Adjust path
-
-
 exports.getServices = async (req, res) => {
   try {
     const q = { ...req.query, ...req.body };
@@ -391,8 +388,6 @@ exports.getServices = async (req, res) => {
 
     if (keyword) {
       const regex = new RegExp(keyword, "i");
-
-      // find matching categories first
       const matchedCategories = await Category.find({ name: regex });
       matchedCategoryIds = matchedCategories.map((c) => c._id);
     }
@@ -402,9 +397,7 @@ exports.getServices = async (req, res) => {
     if (categoryId && typeof categoryId === "string") {
       try {
         categoryId = JSON.parse(categoryId);
-      } catch {
-        // keep string as-is
-      }
+      } catch {}
     }
 
     // ----- TAGS -----
@@ -418,47 +411,50 @@ exports.getServices = async (req, res) => {
     // ----- RADIUS -----
     const radiusKm = q.radius_km !== undefined ? Number(q.radius_km) : 10;
 
-    // ----- MATCH FILTER -----
-    const match = {};
+    // ----- EXCLUDE OWNER -----
+    let excludeOwnerId = q.excludeOwnerId || (req.user && req.user._id);
 
+    // ----- BUILD MATCH -----
+    const match = { $and: [] };
+
+    // Category filter
     if (Array.isArray(categoryId) && categoryId.length > 0) {
-      match.category = { $in: categoryId.map((id) => new Types.ObjectId(id)) };
+      match.$and.push({ category: { $in: categoryId.map((id) => new Types.ObjectId(id)) } });
     } else if (categoryId && typeof categoryId === "string" && categoryId.trim() !== "") {
-      match.category = new Types.ObjectId(categoryId);
+      match.$and.push({ category: new Types.ObjectId(categoryId) });
     }
 
-    if (tags.length) match.tags = { $in: tags };
+    // Tags filter
+    if (tags.length) match.$and.push({ tags: { $in: tags } });
 
-    if (q.isFree === true || q.isFree === "true") match.isFree = true;
-    else if (q.isFree === false || q.isFree === "false") match.isFree = false;
+    // isFree filter
+    if (q.isFree === true || q.isFree === "true") match.$and.push({ isFree: true });
+    else if (q.isFree === false || q.isFree === "false") match.$and.push({ isFree: false });
 
-    let excludeOwnerId = q.excludeOwnerId || (req.user && req.user._id);
-    if (excludeOwnerId) match.owner = { $ne: new Types.ObjectId(excludeOwnerId) };
-
-    // ----- COMBINE DATE + KEYWORD CONDITIONS -----
-    const orConditions = [];
+    // Exclude owner
+    if (excludeOwnerId) match.$and.push({ owner: { $ne: new Types.ObjectId(excludeOwnerId) } });
 
     // Date filter
     if (q.date) {
       const queryDate = new Date(q.date);
-      orConditions.push(
-        { service_type: "one_time", date: queryDate },
-        { service_type: "recurring", "recurring_schedule.date": queryDate }
-      );
+      match.$and.push({
+        $or: [
+          { service_type: "one_time", date: queryDate },
+          { service_type: "recurring", "recurring_schedule.date": queryDate },
+        ],
+      });
     }
 
     // Keyword filter
     if (keyword) {
       const regex = new RegExp(keyword, "i");
-      orConditions.push(
-        { title: regex },
-        { description: regex },
-        { tags: { $in: [regex] } },
-        { category: { $in: matchedCategoryIds } }
-      );
+      const keywordOr = [{ title: regex }, { description: regex }];
+      if (matchedCategoryIds.length) keywordOr.push({ category: { $in: matchedCategoryIds } });
+      match.$and.push({ $or: keywordOr });
     }
 
-    if (orConditions.length) match.$or = orConditions;
+    // If no filters added, remove $and
+    if (!match.$and.length) delete match.$and;
 
     // ----- LOCATION -----
     let refLat = null;
@@ -475,7 +471,7 @@ exports.getServices = async (req, res) => {
       refLon = Number(q.longitude);
     }
 
-    // ---------- PIPELINE BASE ----------
+    // ----- AGGREGATION PIPELINE -----
     const buildPipeline = (withPagination = false) => {
       const pipeline = [];
 
@@ -561,15 +557,14 @@ exports.getServices = async (req, res) => {
       );
 
       if (withPagination) pipeline.push({ $skip: skip }, { $limit: limit });
-
       return pipeline;
     };
 
-    // ---------- Fetch Services ----------
+    // Fetch services
     const listServices = await Service.aggregate(buildPipeline(true));
     const mapServices = await Service.aggregate(buildPipeline(false));
 
-    // ---------- Total Count ----------
+    // Total count
     const totalCountPipeline = buildPipeline(false);
     totalCountPipeline.push({ $count: "total" });
     const totalCountResult = await Service.aggregate(totalCountPipeline);
@@ -586,14 +581,9 @@ exports.getServices = async (req, res) => {
     });
   } catch (err) {
     console.error("getServices error:", err);
-    return res.status(500).json({
-      isSuccess: false,
-      message: "Server error",
-      error: err.message,
-    });
+    return res.status(500).json({ isSuccess: false, message: "Server error", error: err.message });
   }
 };
-
 
 exports.getInterestedUsers = async (req, res) => {
   try {

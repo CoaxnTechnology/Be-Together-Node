@@ -74,16 +74,30 @@ exports.getStats = async (req, res) => {
     );
 
     // BOOKINGS
-    const completedBookings = await Booking.countDocuments({ status: "completed" });
-const pendingBookings = await Booking.countDocuments({ status: "booked" });
-const cancelledBookings = await Booking.countDocuments({ status: "cancelled" });
+    const completedBookings = await Booking.countDocuments({
+      status: "completed",
+    });
+    const pendingBookings = await Booking.countDocuments({ status: "booked" });
+    const cancelledBookings = await Booking.countDocuments({
+      status: "cancelled",
+    });
 
-console.log("Bookings Count:", {
-  completedBookings,
-  pendingBookings,
-  cancelledBookings
-});
+    // Month ka start
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
+    // Month ka end
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1); // next month start date
+
+    // Current month bookings
+    const currentMonthBookings = await Booking.countDocuments({
+      created_at: { $gte: monthStart, $lt: monthEnd },
+    });
+
+    console.log("Bookings Count:", {
+      completedBookings,
+      pendingBookings,
+      cancelledBookings,
+    });
 
     const totalReviews = await Review.countDocuments();
     const positiveReviews = await Review.countDocuments({
@@ -100,6 +114,13 @@ console.log("Bookings Count:", {
         value: totalUsers.toString(),
         ...userTrend,
         icon: "users",
+        color: "primary",
+      },
+      {
+        title: "Bookings This Month",
+        value: currentMonthBookings.toString(),
+
+        icon: "calendar",
         color: "primary",
       },
 

@@ -390,6 +390,7 @@ exports.getServices = async (req, res) => {
       const regex = new RegExp(keyword, "i");
       const matchedCategories = await Category.find({ name: regex });
       matchedCategoryIds = matchedCategories.map((c) => c._id);
+      console.log("Matched category IDs for keyword:", matchedCategoryIds);
     }
 
     // ----- CATEGORY -----
@@ -399,9 +400,11 @@ exports.getServices = async (req, res) => {
         categoryId = JSON.parse(categoryId);
       } catch {}
     }
+    console.log("Category ID filter:", categoryId);
 
     // ----- TAGS -----
     const tags = Array.isArray(q.tags) ? q.tags : q.tags ? [q.tags] : [];
+    console.log("Tags filter:", tags);
 
     // ----- PAGINATION -----
     const page = Math.max(1, Number(q.page || 1));
@@ -413,6 +416,7 @@ exports.getServices = async (req, res) => {
 
     // ----- EXCLUDE OWNER -----
     let excludeOwnerId = q.excludeOwnerId || (req.user && req.user._id);
+    console.log("Exclude owner ID:", excludeOwnerId);
 
     // ----- BUILD MATCH -----
     const match = { $and: [] };
@@ -437,6 +441,7 @@ exports.getServices = async (req, res) => {
     // Date filter
     if (q.date) {
       const queryDate = new Date(q.date);
+      console.log("Query date filter:", queryDate);
       match.$and.push({
         $or: [
           { service_type: "one_time", date: queryDate },
@@ -455,6 +460,7 @@ exports.getServices = async (req, res) => {
 
     // If no filters added, remove $and
     if (!match.$and.length) delete match.$and;
+    console.log("Final match object:", JSON.stringify(match, null, 2));
 
     // ----- LOCATION -----
     let refLat = null;
@@ -470,6 +476,7 @@ exports.getServices = async (req, res) => {
       refLat = Number(q.latitude);
       refLon = Number(q.longitude);
     }
+    console.log("Reference coordinates:", refLat, refLon);
 
     // ----- AGGREGATION PIPELINE -----
     const buildPipeline = (withPagination = false) => {
@@ -489,76 +496,11 @@ exports.getServices = async (req, res) => {
       }
 
       pipeline.push({ $match: match });
-
-      pipeline.push(
-        {
-          $lookup: {
-            from: "categories",
-            localField: "category",
-            foreignField: "_id",
-            as: "category",
-          },
-        },
-        { $unwind: "$category" },
-        {
-          $lookup: {
-            from: "users",
-            localField: "owner",
-            foreignField: "_id",
-            as: "owner",
-          },
-        },
-        { $unwind: "$owner" },
-        {
-          $replaceRoot: {
-            newRoot: {
-              $mergeObjects: [
-                "$$ROOT",
-                {
-                  owner: {
-                    _id: "$owner._id",
-                    profile_image: "$owner.profile_image",
-                    name: "$owner.name",
-                  },
-                },
-              ],
-            },
-          },
-        },
-        {
-          $lookup: {
-            from: "reviews",
-            let: { serviceId: "$_id" },
-            pipeline: [
-              { $match: { $expr: { $eq: ["$service", "$$serviceId"] } } },
-              { $lookup: { from: "users", localField: "user", foreignField: "_id", as: "user" } },
-              { $unwind: "$user" },
-              {
-                $project: {
-                  _id: 1,
-                  rating: 1,
-                  text: 1,
-                  created_at: 1,
-                  "user.name": 1,
-                  "user.email": 1,
-                  "user.profile_image": 1,
-                },
-              },
-            ],
-            as: "reviews",
-          },
-        },
-        {
-          $addFields: {
-            averageRating: { $avg: "$reviews.rating" },
-            totalReviews: { $size: "$reviews" },
-          },
-        }
-      );
-
-      if (withPagination) pipeline.push({ $skip: skip }, { $limit: limit });
       return pipeline;
     };
+
+    const pipelineTest = buildPipeline(false);
+    console.log("Aggregation pipeline test:", JSON.stringify(pipelineTest, null, 2));
 
     // Fetch services
     const listServices = await Service.aggregate(buildPipeline(true));
@@ -584,6 +526,7 @@ exports.getServices = async (req, res) => {
     return res.status(500).json({ isSuccess: false, message: "Server error", error: err.message });
   }
 };
+
 
 exports.getInterestedUsers = async (req, res) => {
   try {

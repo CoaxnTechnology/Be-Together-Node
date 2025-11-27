@@ -83,12 +83,13 @@ exports.getStats = async (req, res) => {
     });
 
 // Month start & end in UTC
-const monthStart = new Date(Date.UTC(now.getFullYear(), now.getMonth(), 1));
-const monthEnd = new Date(Date.UTC(now.getFullYear(), now.getMonth() + 1, 1));
+// Current month bookings (all statuses)
+    const monthStart = thisMonthStart;
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    const currentMonthBookings = await Booking.countDocuments({
+      createdAt: { $gte: monthStart, $lt: monthEnd },
+    });
 
-const currentMonthBookings = await Booking.countDocuments({
-  createdAt: { $gte: monthStart, $lt: monthEnd },
-});
     console.log("Bookings Count:", {
       completedBookings,
       pendingBookings,

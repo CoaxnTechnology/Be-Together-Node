@@ -377,158 +377,150 @@ function bboxForLatLon(lat, lon, radiusKm = 3) {
   };
 }
 //------------------Get Service------------------
+// Adjust path
+
 exports.getServices = async (req, res) => {
   try {
-    const q = { ...req.query, ...req.body };
-    console.log("Incoming query/body:", q);
+    const {
+      page = 1,
+      limit = 10,
+      categoryId = [],
+      date,
+      tags = [],
+      isFree,
+      latitude,
+      longitude,
+      radius_km,
+      keyword = ""
+    } = req.body;
 
-    // ----- KEYWORD SEARCH -----
-    const keyword = q.keyword?.trim() || null;
-    let matchedCategoryIds = [];
-    if (keyword) {
-      const regex = new RegExp(keyword, "i");
-      const matchedCategories = await Category.find({ name: regex });
-      matchedCategoryIds = matchedCategories.map((c) => c._id);
+    let finalMatch = { $and: [] };
+
+    // ---------------------------------------------
+    // ✅ DATE FILTER (one_time + recurring)
+    // ---------------------------------------------
+    if (date) {
+      const startDate = new Date(date);
+      const endDate = new Date(date);
+      endDate.setDate(endDate.getDate() + 1);
+
+      finalMatch.$and.push({
+        $or: [
+          // One-time services (stored as string, so convert)
+          {
+            service_type: "one_time",
+            date: {
+              $gte: date,
+              $lt: new Date(endDate).toISOString().split("T")[0] // "YYYY-MM-DD"
+            }
+          },
+          // Recurring services
+          {
+            service_type: "recurring",
+            recurring_schedule: {
+              $elemMatch: {
+                date: {
+                  $gte: date,
+                  $lt: new Date(endDate).toISOString().split("T")[0]
+                }
+              }
+            }
+          }
+        ]
+      });
     }
 
-    // ----- CATEGORY -----
-    let categoryId = q.categoryId || null;
-    if (categoryId && typeof categoryId === "string") {
-      try { categoryId = JSON.parse(categoryId); } 
-      catch { /* keep string as-is */ }
+    // ---------------------------------------------
+    // ✅ CATEGORY FILTER
+    // ---------------------------------------------
+    if (categoryId.length > 0) {
+      finalMatch.$and.push({ category: { $in: categoryId } });
     }
 
-    // ----- TAGS -----
-    const tags = Array.isArray(q.tags) ? q.tags : q.tags ? [q.tags] : [];
+    // ---------------------------------------------
+    // ✅ TAG FILTER
+    // ---------------------------------------------
+    if (tags.length > 0) {
+      finalMatch.$and.push({ tags: { $in: tags } });
+    }
 
-    // ----- PAGINATION -----
-    const page = Math.max(1, Number(q.page || 1));
-    const limit = Math.min(100, Number(q.limit || 20));
+    // ---------------------------------------------
+    // ✅ FREE / PAID FILTER
+    // ---------------------------------------------
+    if (isFree === true) finalMatch.$and.push({ isFree: true });
+
+    // ---------------------------------------------
+    // ✅ KEYWORD FILTER
+    // ---------------------------------------------
+    const safeKeyword = String(keyword || "").trim();
+    if (safeKeyword !== "") {
+      const regex = new RegExp(safeKeyword, "i");
+      finalMatch.$and.push({
+        $or: [
+          { title: { $regex: regex } },
+          { description: { $regex: regex } },
+          { tags: { $in: [regex] } }
+        ]
+      });
+    }
+
+    // ---------------------------------------------
+    // ✅ GEO FILTER
+    // ---------------------------------------------
+    if (latitude && longitude && radius_km) {
+      finalMatch.$and.push({
+        location: {
+          $geoWithin: {
+            $centerSphere: [
+              [parseFloat(longitude), parseFloat(latitude)],
+              radius_km / 6378.1
+            ]
+          }
+        }
+      });
+    }
+
+    // ---------------------------------------------
+    // Cleanup empty $and
+    // ---------------------------------------------
+    if (finalMatch.$and.length === 0) delete finalMatch.$and;
+
+    console.log("🔥 FINAL QUERY:", JSON.stringify(finalMatch, null, 2));
+
+    // ---------------------------------------------
+    // Pagination
+    // ---------------------------------------------
     const skip = (page - 1) * limit;
 
-    // ----- RADIUS -----
-    const radiusKm = q.radius_km ? Number(q.radius_km) : 10;
+    // Fetch services
+    const services = await Service.find(finalMatch)
+      .populate("category")
+      .populate("owner", "name profile_image")
+      .sort({ created_at: -1 })
+      .skip(skip)
+      .limit(limit);
 
-    // ----- MATCH FILTER -----
-    const match = { $and: [] };
-
-    // Date filter
-    if (q.date) {
-      const queryDate = new Date(q.date);
-      match.$and.push({
-        $or: [
-          { service_type: "one_time", date: queryDate },
-          { service_type: "recurring", "recurring_schedule.date": queryDate },
-        ],
-      });
-      console.log("Query date filter:", queryDate);
-    }
-
-    // Exclude owner
-    const excludeOwnerId = q.excludeOwnerId || (req.user && req.user._id);
-    if (excludeOwnerId) match.$and.push({ owner: { $ne: new Types.ObjectId(excludeOwnerId) } });
-
-    // Category filter
-    if (Array.isArray(categoryId) && categoryId.length) match.$and.push({ category: { $in: categoryId.map((id) => new Types.ObjectId(id)) } });
-
-    // Tags filter
-    if (tags.length) match.$and.push({ tags: { $in: tags } });
-
-    // isFree filter
-    if (q.isFree === true || q.isFree === "true") match.$and.push({ isFree: true });
-    else if (q.isFree === false || q.isFree === "false") match.$and.push({ isFree: false });
-
-    // Keyword filter
-    if (keyword) {
-      const regex = new RegExp(keyword, "i");
-      const keywordOr = [
-        { title: regex },
-        { description: regex },
-      ];
-      if (tags.length) keywordOr.push({ tags: { $in: [regex] } });
-      if (matchedCategoryIds.length) keywordOr.push({ category: { $in: matchedCategoryIds } });
-      match.$and.push({ $or: keywordOr });
-    }
-
-    console.log("Final match object:", JSON.stringify(match, null, 2));
-
-    // ----- LOCATION -----
-    let refLat = null, refLon = null;
-    if (req.user?.lastLocation?.coords?.coordinates?.length === 2) {
-      [refLon, refLat] = req.user.lastLocation.coords.coordinates;
-    } else if (q.latitude && q.longitude) {
-      refLat = Number(q.latitude);
-      refLon = Number(q.longitude);
-    }
-    console.log("Reference coordinates:", refLat, refLon);
-
-    // ----- PIPELINE -----
-    const buildPipeline = (withPagination = false) => {
-      const pipeline = [];
-      if (refLat != null && refLon != null) {
-        pipeline.push({
-          $geoNear: {
-            near: { type: "Point", coordinates: [refLon, refLat] },
-            distanceField: "distance_km",
-            spherical: true,
-            maxDistance: radiusKm * 1000,
-            distanceMultiplier: 0.001,
-          },
-        });
-        pipeline.push({ $addFields: { distance_km: { $round: ["$distance_km", 2] } } });
-      }
-      pipeline.push({ $match: match });
-
-      pipeline.push(
-        { $lookup: { from: "categories", localField: "category", foreignField: "_id", as: "category" } },
-        { $unwind: "$category" },
-        { $lookup: { from: "users", localField: "owner", foreignField: "_id", as: "owner" } },
-        { $unwind: "$owner" },
-        { $replaceRoot: { newRoot: { $mergeObjects: ["$$ROOT", { owner: { _id: "$owner._id", profile_image: "$owner.profile_image", name: "$owner.name" } }] } } },
-        { $lookup: {
-            from: "reviews",
-            let: { serviceId: "$_id" },
-            pipeline: [
-              { $match: { $expr: { $eq: ["$service", "$$serviceId"] } } },
-              { $lookup: { from: "users", localField: "user", foreignField: "_id", as: "user" } },
-              { $unwind: "$user" },
-              { $project: { _id: 1, rating: 1, text: 1, created_at: 1, "user.name": 1, "user.email": 1, "user.profile_image": 1 } },
-            ],
-            as: "reviews"
-        }},
-        { $addFields: { averageRating: { $avg: "$reviews.rating" }, totalReviews: { $size: "$reviews" } } }
-      );
-
-      if (withPagination) pipeline.push({ $skip: skip }, { $limit: limit });
-      return pipeline;
-    };
-
-    // ----- FETCH SERVICES -----
-    const listServices = await Service.aggregate(buildPipeline(true));
-    const mapServices = await Service.aggregate(buildPipeline(false));
-
-    // ----- TOTAL COUNT -----
-    const totalCountPipeline = buildPipeline(false);
-    totalCountPipeline.push({ $count: "total" });
-    const totalCountResult = await Service.aggregate(totalCountPipeline);
-    const totalCount = totalCountResult[0]?.total || 0;
+    const total = await Service.countDocuments(finalMatch);
 
     return res.json({
       isSuccess: true,
       message: "Services fetched successfully",
-      total: totalCount,
+      total,
       page,
       limit,
-      listServices,
-      mapServices,
+      listServices: services,
+      mapServices: services
     });
 
   } catch (err) {
-    console.error("getServices error:", err);
-    return res.status(500).json({ isSuccess: false, message: "Server error", error: err.message });
+    console.error("❌ ERROR:", err);
+    return res.status(500).json({
+      isSuccess: false,
+      message: "Internal server error",
+      error: err.message
+    });
   }
 };
-
 
 
 

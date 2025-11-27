@@ -21,7 +21,6 @@ const Booking = require("../model/Booking");
 const CommissionSetting = require("../model/CommissionSetting");
 const updateProviderPerformance = require("../utils/providerPerformance");
 
-
 // Email transporter
 const transporter = nodemailer.createTransport({
   service: "gmail",
@@ -54,6 +53,23 @@ exports.bookService = async (req, res) => {
 
     const amount = serviceDetails.isFree ? 0 : serviceDetails.price;
     // Commission
+    // =============================================
+    // 🚫 BLOCK DOUBLE PAYMENT (Check pending payment)
+    // =============================================
+    const existingPayment = await Payment.findOne({
+      user: userId,
+      provider: providerId,
+      service: serviceId,
+      status: { $in: ["pending", "held"] },
+    });
+
+    if (existingPayment) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Payment already in progress. Please do not pay again.",
+        paymentId: existingPayment._id,
+      });
+    }
 
     if (serviceDetails.isFree) {
       const booking = await Booking.create({
@@ -206,7 +222,16 @@ exports.updateBookingStatus = async (req, res) => {
       console.log("❌ Payment NOT in requires_capture state.");
       return res.status(400).json({ message: "Payment not completed" });
     }
-
+    // =============================================
+    // 🚫 PREVENT DOUBLE BOOKING
+    // =============================================
+    if (payment.status === "held") {
+      return res.json({
+        isSuccess: true,
+        message: "Booking already created earlier",
+        bookingId: payment.bookingId,
+      });
+    }
     const { userId, providerId, serviceId } = session.metadata;
     console.log("🔐 Metadata:", session.metadata);
 
@@ -389,7 +414,7 @@ exports.completeService = async (req, res) => {
     if (booking.amount === 0 || booking.service.isFree) {
       booking.status = "completed";
       await booking.save();
-       // 🟢 Performance update → Completed service = +1
+      // 🟢 Performance update → Completed service = +1
       console.log("📊 Updating provider performance (free service)...");
       await updateProviderPerformance(provider._id, 1, 0);
 
@@ -723,4 +748,3 @@ exports.refundBooking = async (req, res) => {
     return res.status(500).json({ message: err.message });
   }
 };
-

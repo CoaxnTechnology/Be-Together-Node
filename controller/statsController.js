@@ -1,7 +1,6 @@
 const User = require("../model/User");
 const Category = require("../model/Category");
 const Service = require("../model/Service");
-//const Booking = require("../model/Booking");
 const Review = require("../model/review");
 
 // Helper to calculate trend
@@ -17,67 +16,61 @@ const calculateTrend = (current, previous) => {
 exports.getStats = async (req, res) => {
   try {
     const now = new Date();
-    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const days = Number(req.query.days) || 7; // <-- dynamic filter
+    const dateAgo = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
     // Total users
     const totalUsers = await User.countDocuments();
 
-    // Users created last month
-    const lastMonthUsers = await User.countDocuments({
-      created_at: { $gte: new Date(now.setMonth(now.getMonth() - 1)) },
+    // Users created in last X days
+    const lastXDaysUsers = await User.countDocuments({
+      created_at: { $gte: dateAgo },
     });
 
-    // Inactive users (no location update in last 7 days)
+    // Inactive users (no location update in last X days)
     const inactiveUsers = await User.countDocuments({
       $or: [
-        { "lastLocation.updatedAt": { $lt: sevenDaysAgo } },
+        { "lastLocation.updatedAt": { $lt: dateAgo } },
         { "lastLocation.updatedAt": { $exists: false } },
         { "lastLocation.coords.coordinates": [0, 0] },
       ],
     });
 
-    // Active users = total - inactive
     const activeUsers = totalUsers - inactiveUsers;
     const totalFakeUsers = await User.countDocuments({ is_fake: true });
 
-    // Trend for users (based on total)
-    const userTrend = calculateTrend(totalUsers, totalUsers - lastMonthUsers);
+    const userTrend = calculateTrend(totalUsers, totalUsers - lastXDaysUsers);
 
     // SERVICES
     const totalServices = await Service.countDocuments();
-    const lastMonthServices = await Service.countDocuments({
-      created_at: {
-        $gte: new Date(new Date().setMonth(new Date().getMonth() - 1)),
-      },
+    const lastXDaysServices = await Service.countDocuments({
+      created_at: { $gte: dateAgo },
     });
+
     const serviceTrend = calculateTrend(
       totalServices,
-      totalServices - lastMonthServices
+      totalServices - lastXDaysServices
     );
 
     // CATEGORIES
     const totalCategories = await Category.countDocuments();
-    const lastMonthCategories = await Category.countDocuments({
-      created_at: {
-        $gte: new Date(new Date().setMonth(new Date().getMonth() - 1)),
-      },
+    const lastXDaysCategories = await Category.countDocuments({
+      created_at: { $gte: dateAgo },
     });
+
     const categoryTrend = calculateTrend(
       totalCategories,
-      totalCategories - lastMonthCategories
+      totalCategories - lastXDaysCategories
     );
-    // ✅ Total tags count (sum of all tags arrays)
+
+    // TAGS count
     const categories = await Category.find({}, { tags: 1 });
     const totalTags = categories.reduce(
       (sum, cat) => sum + (cat.tags?.length || 0),
       0
     );
 
-    // BOOKINGS
-    // const completedBookings = await Booking.countDocuments({ status: "completed" });
-    // const pendingBookings = await Booking.countDocuments({ status: "pending" });
-    // const cancelledBookings = await Booking.countDocuments({ status: "cancelled" });
-
+    // REVIEWS
     const totalReviews = await Review.countDocuments();
     const positiveReviews = await Review.countDocuments({
       rating: { $gte: 4 },
@@ -95,7 +88,6 @@ exports.getStats = async (req, res) => {
         icon: "users",
         color: "primary",
       },
-      
       {
         title: "Total Fake Users",
         value: totalFakeUsers.toString(),
@@ -122,9 +114,7 @@ exports.getStats = async (req, res) => {
         icon: "Tags",
         color: "info",
       },
-      
-
-      ];
+    ];
 
     const chartData = {
       users: [
@@ -139,14 +129,6 @@ exports.getStats = async (req, res) => {
           color: "hsl(0 70% 55%)",
         },
       ],
-      services: [
-        {
-          name: "Total Services",
-          value: totalServices,
-          color: "hsl(142 70% 45%)",
-        },
-      ],
-      
       reviews: [
         { name: "Positive", value: positiveReviews, color: "hsl(142 70% 45%)" },
         { name: "Neutral", value: neutralReviews, color: "hsl(45 90% 55%)" },

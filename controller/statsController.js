@@ -16,18 +16,17 @@ const calculateTrend = (current, previous) => {
 exports.getStats = async (req, res) => {
   try {
     const now = new Date();
-    const days = Number(req.query.days) || 7; // <-- dynamic filter
+    const days = Number(req.query.days) || 7; // dynamic filter from query
     const dateAgo = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
-    // Total users
-    const totalUsers = await User.countDocuments();
+    console.log("🟢 Filter days:", days);
+    console.log("🟢 Calculated dateAgo:", dateAgo);
 
-    // Users created in last X days
+    // ===== USERS =====
+    const totalUsers = await User.countDocuments();
     const lastXDaysUsers = await User.countDocuments({
       created_at: { $gte: dateAgo },
     });
-
-    // Inactive users (no location update in last X days)
     const inactiveUsers = await User.countDocuments({
       $or: [
         { "lastLocation.updatedAt": { $lt: dateAgo } },
@@ -35,51 +34,70 @@ exports.getStats = async (req, res) => {
         { "lastLocation.coords.coordinates": [0, 0] },
       ],
     });
-
     const activeUsers = totalUsers - inactiveUsers;
     const totalFakeUsers = await User.countDocuments({ is_fake: true });
-
     const userTrend = calculateTrend(totalUsers, totalUsers - lastXDaysUsers);
 
-    // SERVICES
+    console.log("Total Users:", totalUsers);
+    console.log("Users last X days:", lastXDaysUsers);
+    console.log("Inactive Users:", inactiveUsers);
+    console.log("Active Users:", activeUsers);
+    console.log("Total Fake Users:", totalFakeUsers);
+
+    // ===== SERVICES =====
     const totalServices = await Service.countDocuments();
     const lastXDaysServices = await Service.countDocuments({
       created_at: { $gte: dateAgo },
     });
-
     const serviceTrend = calculateTrend(
       totalServices,
       totalServices - lastXDaysServices
     );
 
-    // CATEGORIES
+    console.log("Total Services:", totalServices);
+    console.log("Services last X days:", lastXDaysServices);
+
+    // ===== CATEGORIES =====
     const totalCategories = await Category.countDocuments();
     const lastXDaysCategories = await Category.countDocuments({
       created_at: { $gte: dateAgo },
     });
-
     const categoryTrend = calculateTrend(
       totalCategories,
       totalCategories - lastXDaysCategories
     );
 
-    // TAGS count
     const categories = await Category.find({}, { tags: 1 });
     const totalTags = categories.reduce(
       (sum, cat) => sum + (cat.tags?.length || 0),
       0
     );
 
-    // REVIEWS
+    console.log("Total Categories:", totalCategories);
+    console.log("Categories last X days:", lastXDaysCategories);
+    console.log("Total Tags:", totalTags);
+
+    // ===== REVIEWS =====
     const totalReviews = await Review.countDocuments();
     const positiveReviews = await Review.countDocuments({
       rating: { $gte: 4 },
+      created_at: { $gte: dateAgo }, // optional: filter by days
     });
-    const neutralReviews = await Review.countDocuments({ rating: 3 });
+    const neutralReviews = await Review.countDocuments({
+      rating: 3,
+      created_at: { $gte: dateAgo },
+    });
     const negativeReviews = await Review.countDocuments({
       rating: { $lte: 2 },
+      created_at: { $gte: dateAgo },
     });
 
+    console.log("Total Reviews:", totalReviews);
+    console.log("Positive Reviews:", positiveReviews);
+    console.log("Neutral Reviews:", neutralReviews);
+    console.log("Negative Reviews:", negativeReviews);
+
+    // ===== RESPONSE =====
     const summaryWidgets = [
       {
         title: "Total Users",
@@ -118,16 +136,8 @@ exports.getStats = async (req, res) => {
 
     const chartData = {
       users: [
-        {
-          name: "Active Users",
-          value: activeUsers,
-          color: "hsl(168 100% 50%)",
-        },
-        {
-          name: "Inactive Users",
-          value: inactiveUsers,
-          color: "hsl(0 70% 55%)",
-        },
+        { name: "Active Users", value: activeUsers, color: "hsl(168 100% 50%)" },
+        { name: "Inactive Users", value: inactiveUsers, color: "hsl(0 70% 55%)" },
       ],
       reviews: [
         { name: "Positive", value: positiveReviews, color: "hsl(142 70% 45%)" },
@@ -138,7 +148,7 @@ exports.getStats = async (req, res) => {
 
     res.status(200).json({ summaryWidgets, chartData });
   } catch (err) {
-    console.error("Error fetching stats:", err);
+    console.error("❌ Error fetching stats:", err);
     res.status(500).json({ message: "Internal server error" });
   }
 };

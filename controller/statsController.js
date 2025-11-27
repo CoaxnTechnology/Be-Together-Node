@@ -74,13 +74,16 @@ exports.getStats = async (req, res) => {
     );
 
     // BOOKINGS
-    const completedBookings = await Booking.countDocuments({
-      status: "completed",
-    });
-    const pendingBookings = await Booking.countDocuments({ status: "booked" });
-    const cancelledBookings = await Booking.countDocuments({
-      status: "cancelled",
-    });
+    const completedBookings = await Booking.countDocuments({ status: "completed" });
+const pendingBookings = await Booking.countDocuments({ status: "booked" });
+const cancelledBookings = await Booking.countDocuments({ status: "cancelled" });
+
+console.log("Bookings Count:", {
+  completedBookings,
+  pendingBookings,
+  cancelledBookings
+});
+
 
     const totalReviews = await Review.countDocuments();
     const positiveReviews = await Review.countDocuments({

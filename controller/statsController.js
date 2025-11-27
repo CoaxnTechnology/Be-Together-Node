@@ -97,6 +97,7 @@ exports.getStats = async (req, res) => {
       completedBookings,
       pendingBookings,
       cancelledBookings,
+      currentMonthBookings
     });
 
     const totalReviews = await Review.countDocuments();

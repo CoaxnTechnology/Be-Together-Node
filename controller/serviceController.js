@@ -383,28 +383,23 @@ exports.getServices = async (req, res) => {
     console.log("Incoming query/body:", q);
 
     // ----- KEYWORD SEARCH -----
-    let keyword = q.keyword?.trim() || null;
+    const keyword = q.keyword?.trim() || null;
     let matchedCategoryIds = [];
-
     if (keyword) {
       const regex = new RegExp(keyword, "i");
       const matchedCategories = await Category.find({ name: regex });
       matchedCategoryIds = matchedCategories.map((c) => c._id);
-      console.log("Matched category IDs for keyword:", matchedCategoryIds);
     }
 
     // ----- CATEGORY -----
-    let categoryId = q.categoryId || [];
+    let categoryId = q.categoryId || null;
     if (categoryId && typeof categoryId === "string") {
-      try {
-        categoryId = JSON.parse(categoryId);
-      } catch {}
+      try { categoryId = JSON.parse(categoryId); } 
+      catch { /* keep string as-is */ }
     }
-    console.log("Category ID filter:", categoryId);
 
     // ----- TAGS -----
     const tags = Array.isArray(q.tags) ? q.tags : q.tags ? [q.tags] : [];
-    console.log("Tags filter:", tags);
 
     // ----- PAGINATION -----
     const page = Math.max(1, Number(q.page || 1));
@@ -412,7 +407,7 @@ exports.getServices = async (req, res) => {
     const skip = (page - 1) * limit;
 
     // ----- RADIUS -----
-    const radiusKm = q.radius_km !== undefined && q.radius_km !== '' ? Number(q.radius_km) : 10;
+    const radiusKm = q.radius_km ? Number(q.radius_km) : 10;
 
     // ----- MATCH FILTER -----
     const match = { $and: [] };
@@ -430,27 +425,20 @@ exports.getServices = async (req, res) => {
     }
 
     // Exclude owner
-    let excludeOwnerId = q.excludeOwnerId || (req.user && req.user._id);
-    if (excludeOwnerId) {
-      match.$and.push({ owner: { $ne: new Types.ObjectId(excludeOwnerId) } });
-      console.log("Exclude owner ID:", excludeOwnerId);
-    }
+    const excludeOwnerId = q.excludeOwnerId || (req.user && req.user._id);
+    if (excludeOwnerId) match.$and.push({ owner: { $ne: new Types.ObjectId(excludeOwnerId) } });
 
     // Category filter
-    if (Array.isArray(categoryId) && categoryId.length) {
-      match.$and.push({ category: { $in: categoryId.map((id) => new Types.ObjectId(id)) } });
-    }
+    if (Array.isArray(categoryId) && categoryId.length) match.$and.push({ category: { $in: categoryId.map((id) => new Types.ObjectId(id)) } });
 
     // Tags filter
-    if (tags.length) {
-      match.$and.push({ tags: { $in: tags } });
-    }
+    if (tags.length) match.$and.push({ tags: { $in: tags } });
 
     // isFree filter
     if (q.isFree === true || q.isFree === "true") match.$and.push({ isFree: true });
     else if (q.isFree === false || q.isFree === "false") match.$and.push({ isFree: false });
 
-    // Keyword search
+    // Keyword filter
     if (keyword) {
       const regex = new RegExp(keyword, "i");
       const keywordOr = [
@@ -462,28 +450,21 @@ exports.getServices = async (req, res) => {
       match.$and.push({ $or: keywordOr });
     }
 
-    console.log("Final match object:", match);
+    console.log("Final match object:", JSON.stringify(match, null, 2));
 
     // ----- LOCATION -----
-    let refLat = null;
-    let refLon = null;
-    if (req.user?.lastLocation?.coords?.coordinates) {
-      const coords = req.user.lastLocation.coords.coordinates;
-      if (Array.isArray(coords) && coords.length === 2) {
-        refLon = coords[0];
-        refLat = coords[1];
-      }
-    }
-    if ((refLat === null || refLon === null) && q.latitude && q.longitude) {
+    let refLat = null, refLon = null;
+    if (req.user?.lastLocation?.coords?.coordinates?.length === 2) {
+      [refLon, refLat] = req.user.lastLocation.coords.coordinates;
+    } else if (q.latitude && q.longitude) {
       refLat = Number(q.latitude);
       refLon = Number(q.longitude);
     }
     console.log("Reference coordinates:", refLat, refLon);
 
-    // ---------- PIPELINE ----------
+    // ----- PIPELINE -----
     const buildPipeline = (withPagination = false) => {
       const pipeline = [];
-
       if (refLat != null && refLon != null) {
         pipeline.push({
           $geoNear: {
@@ -496,66 +477,37 @@ exports.getServices = async (req, res) => {
         });
         pipeline.push({ $addFields: { distance_km: { $round: ["$distance_km", 2] } } });
       }
-
-      if (match.$and.length) pipeline.push({ $match: match });
+      pipeline.push({ $match: match });
 
       pipeline.push(
-        {
-          $lookup: { from: "categories", localField: "category", foreignField: "_id", as: "category" },
-        },
+        { $lookup: { from: "categories", localField: "category", foreignField: "_id", as: "category" } },
         { $unwind: "$category" },
-        {
-          $lookup: { from: "users", localField: "owner", foreignField: "_id", as: "owner" },
-        },
+        { $lookup: { from: "users", localField: "owner", foreignField: "_id", as: "owner" } },
         { $unwind: "$owner" },
-        {
-          $replaceRoot: {
-            newRoot: {
-              $mergeObjects: [
-                "$$ROOT",
-                { owner: { _id: "$owner._id", profile_image: "$owner.profile_image", name: "$owner.name" } },
-              ],
-            },
-          },
-        },
-        {
-          $lookup: {
+        { $replaceRoot: { newRoot: { $mergeObjects: ["$$ROOT", { owner: { _id: "$owner._id", profile_image: "$owner.profile_image", name: "$owner.name" } }] } } },
+        { $lookup: {
             from: "reviews",
             let: { serviceId: "$_id" },
             pipeline: [
               { $match: { $expr: { $eq: ["$service", "$$serviceId"] } } },
               { $lookup: { from: "users", localField: "user", foreignField: "_id", as: "user" } },
               { $unwind: "$user" },
-              {
-                $project: {
-                  _id: 1,
-                  rating: 1,
-                  text: 1,
-                  created_at: 1,
-                  "user.name": 1,
-                  "user.email": 1,
-                  "user.profile_image": 1,
-                },
-              },
+              { $project: { _id: 1, rating: 1, text: 1, created_at: 1, "user.name": 1, "user.email": 1, "user.profile_image": 1 } },
             ],
-            as: "reviews",
-          },
-        },
-        {
-          $addFields: { averageRating: { $avg: "$reviews.rating" }, totalReviews: { $size: "$reviews" } },
-        }
+            as: "reviews"
+        }},
+        { $addFields: { averageRating: { $avg: "$reviews.rating" }, totalReviews: { $size: "$reviews" } } }
       );
 
       if (withPagination) pipeline.push({ $skip: skip }, { $limit: limit });
-
       return pipeline;
     };
 
-    // ---------- FETCH SERVICES ----------
+    // ----- FETCH SERVICES -----
     const listServices = await Service.aggregate(buildPipeline(true));
     const mapServices = await Service.aggregate(buildPipeline(false));
 
-    // ---------- TOTAL COUNT ----------
+    // ----- TOTAL COUNT -----
     const totalCountPipeline = buildPipeline(false);
     totalCountPipeline.push({ $count: "total" });
     const totalCountResult = await Service.aggregate(totalCountPipeline);
@@ -576,6 +528,7 @@ exports.getServices = async (req, res) => {
     return res.status(500).json({ isSuccess: false, message: "Server error", error: err.message });
   }
 };
+
 
 
 

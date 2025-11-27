@@ -93,7 +93,9 @@ const currentMonthBookings = await Booking.countDocuments({
       completedBookings,
       pendingBookings,
       cancelledBookings,
-      currentMonthBookings
+      currentMonthBookings,
+      monthStart,
+      monthEnd
     });
 
     const totalReviews = await Review.countDocuments();

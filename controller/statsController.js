@@ -82,17 +82,12 @@ exports.getStats = async (req, res) => {
       status: "cancelled",
     });
 
-    // Month ka start
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+const monthStart = new Date(Date.UTC(now.getFullYear(), now.getMonth(), 1));
+const monthEnd = new Date(Date.UTC(now.getFullYear(), now.getMonth() + 1, 1));
 
-    // Month ka end
-    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1); // next month start date
-
-    // Current month bookings
-    const currentMonthBookings = await Booking.countDocuments({
-      created_at: { $gte: monthStart, $lt: monthEnd },
-    });
-
+const currentMonthBookings = await Booking.countDocuments({
+  createdAt: { $gte: monthStart, $lt: monthEnd },
+});
     console.log("Bookings Count:", {
       completedBookings,
       pendingBookings,

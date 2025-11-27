@@ -1,6 +1,7 @@
 const User = require("../model/User");
 const Category = require("../model/Category");
 const Service = require("../model/Service");
+//const Booking = require("../model/Booking");
 const Review = require("../model/review");
 
 // Helper to calculate trend
@@ -16,84 +17,74 @@ const calculateTrend = (current, previous) => {
 exports.getStats = async (req, res) => {
   try {
     const now = new Date();
-    const days = Number(req.query.days) || 7;
-    const dateAgo = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
 
-    console.log("🟢 Filter days:", days);
-    console.log("🟢 Calculated dateAgo:", dateAgo);
+    // Total users
+    const totalUsers = await User.countDocuments();
 
-    // Total users in last X days
-    const totalUsers = await User.countDocuments({
-      created_at: { $gte: dateAgo },
+    // Users created last month
+    const lastMonthUsers = await User.countDocuments({
+      created_at: { $gte: new Date(now.setMonth(now.getMonth() - 1)) },
     });
 
-    // Active/inactive based on last X days
+    // Inactive users (no location update in last 7 days)
     const inactiveUsers = await User.countDocuments({
       $or: [
-        { "lastLocation.updatedAt": { $lt: dateAgo } },
+        { "lastLocation.updatedAt": { $lt: sevenDaysAgo } },
         { "lastLocation.updatedAt": { $exists: false } },
         { "lastLocation.coords.coordinates": [0, 0] },
       ],
     });
 
+    // Active users = total - inactive
     const activeUsers = totalUsers - inactiveUsers;
+    const totalFakeUsers = await User.countDocuments({ is_fake: true });
 
-    // Fake users in last X days
-    const totalFakeUsers = await User.countDocuments({
-      is_fake: true,
-      created_at: { $gte: dateAgo },
-    });
-
-    // Trend: compare with previous X days
-    const prevDateAgo = new Date(Date.now() - 2 * days * 24 * 60 * 60 * 1000);
-    const prevTotalUsers = await User.countDocuments({
-      created_at: { $gte: prevDateAgo, $lt: dateAgo },
-    });
-    const userTrend = calculateTrend(totalUsers, prevTotalUsers);
+    // Trend for users (based on total)
+    const userTrend = calculateTrend(totalUsers, totalUsers - lastMonthUsers);
 
     // SERVICES
-    const totalServices = await Service.countDocuments({
-      created_at: { $gte: dateAgo },
+    const totalServices = await Service.countDocuments();
+    const lastMonthServices = await Service.countDocuments({
+      created_at: {
+        $gte: new Date(new Date().setMonth(new Date().getMonth() - 1)),
+      },
     });
-    const prevTotalServices = await Service.countDocuments({
-      created_at: { $gte: prevDateAgo, $lt: dateAgo },
-    });
-    const serviceTrend = calculateTrend(totalServices, prevTotalServices);
+    const serviceTrend = calculateTrend(
+      totalServices,
+      totalServices - lastMonthServices
+    );
 
     // CATEGORIES
-    const totalCategories = await Category.countDocuments({
-      created_at: { $gte: dateAgo },
+    const totalCategories = await Category.countDocuments();
+    const lastMonthCategories = await Category.countDocuments({
+      created_at: {
+        $gte: new Date(new Date().setMonth(new Date().getMonth() - 1)),
+      },
     });
-    const prevTotalCategories = await Category.countDocuments({
-      created_at: { $gte: prevDateAgo, $lt: dateAgo },
-    });
-    const categoryTrend = calculateTrend(totalCategories, prevTotalCategories);
-
-    // TAGS
-    const categories = await Category.find(
-      { created_at: { $gte: dateAgo } },
-      { tags: 1 }
+    const categoryTrend = calculateTrend(
+      totalCategories,
+      totalCategories - lastMonthCategories
     );
+    // ✅ Total tags count (sum of all tags arrays)
+    const categories = await Category.find({}, { tags: 1 });
     const totalTags = categories.reduce(
       (sum, cat) => sum + (cat.tags?.length || 0),
       0
     );
 
-    // REVIEWS
-    const totalReviews = await Review.countDocuments({
-      created_at: { $gte: dateAgo },
-    });
+    // BOOKINGS
+    // const completedBookings = await Booking.countDocuments({ status: "completed" });
+    // const pendingBookings = await Booking.countDocuments({ status: "pending" });
+    // const cancelledBookings = await Booking.countDocuments({ status: "cancelled" });
+
+    const totalReviews = await Review.countDocuments();
     const positiveReviews = await Review.countDocuments({
       rating: { $gte: 4 },
-      created_at: { $gte: dateAgo },
     });
-    const neutralReviews = await Review.countDocuments({
-      rating: 3,
-      created_at: { $gte: dateAgo },
-    });
+    const neutralReviews = await Review.countDocuments({ rating: 3 });
     const negativeReviews = await Review.countDocuments({
       rating: { $lte: 2 },
-      created_at: { $gte: dateAgo },
     });
 
     const summaryWidgets = [
@@ -104,6 +95,7 @@ exports.getStats = async (req, res) => {
         icon: "users",
         color: "primary",
       },
+      
       {
         title: "Total Fake Users",
         value: totalFakeUsers.toString(),
@@ -130,7 +122,9 @@ exports.getStats = async (req, res) => {
         icon: "Tags",
         color: "info",
       },
-    ];
+      
+
+      ];
 
     const chartData = {
       users: [
@@ -145,6 +139,14 @@ exports.getStats = async (req, res) => {
           color: "hsl(0 70% 55%)",
         },
       ],
+      services: [
+        {
+          name: "Total Services",
+          value: totalServices,
+          color: "hsl(142 70% 45%)",
+        },
+      ],
+      
       reviews: [
         { name: "Positive", value: positiveReviews, color: "hsl(142 70% 45%)" },
         { name: "Neutral", value: neutralReviews, color: "hsl(45 90% 55%)" },

@@ -395,12 +395,10 @@ exports.getServices = async (req, res) => {
 
     // ----- CATEGORY -----
     let categoryId = q.categoryId || [];
-    if (typeof categoryId === "string" && categoryId.trim() !== "") {
+    if (categoryId && typeof categoryId === "string") {
       try {
         categoryId = JSON.parse(categoryId);
-      } catch {
-        categoryId = [categoryId];
-      }
+      } catch {}
     }
     console.log("Category ID filter:", categoryId);
 
@@ -414,7 +412,7 @@ exports.getServices = async (req, res) => {
     const skip = (page - 1) * limit;
 
     // ----- RADIUS -----
-    const radiusKm = q.radius_km !== undefined && q.radius_km !== "" ? Number(q.radius_km) : 10;
+    const radiusKm = q.radius_km !== undefined && q.radius_km !== '' ? Number(q.radius_km) : 10;
 
     // ----- MATCH FILTER -----
     const match = { $and: [] };
@@ -431,36 +429,40 @@ exports.getServices = async (req, res) => {
       console.log("Query date filter:", queryDate);
     }
 
+    // Exclude owner
+    let excludeOwnerId = q.excludeOwnerId || (req.user && req.user._id);
+    if (excludeOwnerId) {
+      match.$and.push({ owner: { $ne: new Types.ObjectId(excludeOwnerId) } });
+      console.log("Exclude owner ID:", excludeOwnerId);
+    }
+
     // Category filter
-    if (categoryId.length) {
-      match.$and.push({ category: { $in: categoryId.map(id => new Types.ObjectId(id)) } });
+    if (Array.isArray(categoryId) && categoryId.length) {
+      match.$and.push({ category: { $in: categoryId.map((id) => new Types.ObjectId(id)) } });
     }
 
     // Tags filter
-    if (tags.length) match.$and.push({ tags: { $in: tags } });
+    if (tags.length) {
+      match.$and.push({ tags: { $in: tags } });
+    }
 
     // isFree filter
     if (q.isFree === true || q.isFree === "true") match.$and.push({ isFree: true });
     else if (q.isFree === false || q.isFree === "false") match.$and.push({ isFree: false });
 
-    // Exclude owner
-    let excludeOwnerId = q.excludeOwnerId || (req.user && req.user._id);
-    if (excludeOwnerId) match.$and.push({ owner: { $ne: new Types.ObjectId(excludeOwnerId) } });
-    console.log("Exclude owner ID:", excludeOwnerId);
-
-    // Keyword filter
+    // Keyword search
     if (keyword) {
       const regex = new RegExp(keyword, "i");
       const keywordOr = [
         { title: regex },
         { description: regex },
-        { tags: { $in: [regex] } },
       ];
+      if (tags.length) keywordOr.push({ tags: { $in: [regex] } });
       if (matchedCategoryIds.length) keywordOr.push({ category: { $in: matchedCategoryIds } });
-      if (keywordOr.length) match.$and.push({ $or: keywordOr });
+      match.$and.push({ $or: keywordOr });
     }
 
-    console.log("Final match object:", JSON.stringify(match, null, 2));
+    console.log("Final match object:", match);
 
     // ----- LOCATION -----
     let refLat = null;
@@ -478,7 +480,7 @@ exports.getServices = async (req, res) => {
     }
     console.log("Reference coordinates:", refLat, refLon);
 
-    // ---------- PIPELINE BASE ----------
+    // ---------- PIPELINE ----------
     const buildPipeline = (withPagination = false) => {
       const pipeline = [];
 
@@ -492,30 +494,18 @@ exports.getServices = async (req, res) => {
             distanceMultiplier: 0.001,
           },
         });
-        pipeline.push({
-          $addFields: { distance_km: { $round: ["$distance_km", 2] } },
-        });
+        pipeline.push({ $addFields: { distance_km: { $round: ["$distance_km", 2] } } });
       }
 
-      pipeline.push({ $match: match });
+      if (match.$and.length) pipeline.push({ $match: match });
 
       pipeline.push(
         {
-          $lookup: {
-            from: "categories",
-            localField: "category",
-            foreignField: "_id",
-            as: "category",
-          },
+          $lookup: { from: "categories", localField: "category", foreignField: "_id", as: "category" },
         },
         { $unwind: "$category" },
         {
-          $lookup: {
-            from: "users",
-            localField: "owner",
-            foreignField: "_id",
-            as: "owner",
-          },
+          $lookup: { from: "users", localField: "owner", foreignField: "_id", as: "owner" },
         },
         { $unwind: "$owner" },
         {
@@ -523,13 +513,7 @@ exports.getServices = async (req, res) => {
             newRoot: {
               $mergeObjects: [
                 "$$ROOT",
-                {
-                  owner: {
-                    _id: "$owner._id",
-                    profile_image: "$owner.profile_image",
-                    name: "$owner.name",
-                  },
-                },
+                { owner: { _id: "$owner._id", profile_image: "$owner.profile_image", name: "$owner.name" } },
               ],
             },
           },
@@ -540,14 +524,7 @@ exports.getServices = async (req, res) => {
             let: { serviceId: "$_id" },
             pipeline: [
               { $match: { $expr: { $eq: ["$service", "$$serviceId"] } } },
-              {
-                $lookup: {
-                  from: "users",
-                  localField: "user",
-                  foreignField: "_id",
-                  as: "user",
-                },
-              },
+              { $lookup: { from: "users", localField: "user", foreignField: "_id", as: "user" } },
               { $unwind: "$user" },
               {
                 $project: {
@@ -565,25 +542,20 @@ exports.getServices = async (req, res) => {
           },
         },
         {
-          $addFields: {
-            averageRating: { $avg: "$reviews.rating" },
-            totalReviews: { $size: "$reviews" },
-          },
+          $addFields: { averageRating: { $avg: "$reviews.rating" }, totalReviews: { $size: "$reviews" } },
         }
       );
 
-      if (withPagination) {
-        pipeline.push({ $skip: skip }, { $limit: limit });
-      }
+      if (withPagination) pipeline.push({ $skip: skip }, { $limit: limit });
 
       return pipeline;
     };
 
-    // ---------- Fetch Services ----------
+    // ---------- FETCH SERVICES ----------
     const listServices = await Service.aggregate(buildPipeline(true));
     const mapServices = await Service.aggregate(buildPipeline(false));
 
-    // ---------- Total Count ----------
+    // ---------- TOTAL COUNT ----------
     const totalCountPipeline = buildPipeline(false);
     totalCountPipeline.push({ $count: "total" });
     const totalCountResult = await Service.aggregate(totalCountPipeline);
@@ -598,15 +570,13 @@ exports.getServices = async (req, res) => {
       listServices,
       mapServices,
     });
+
   } catch (err) {
     console.error("getServices error:", err);
-    return res.status(500).json({
-      isSuccess: false,
-      message: "Server error",
-      error: err.message,
-    });
+    return res.status(500).json({ isSuccess: false, message: "Server error", error: err.message });
   }
 };
+
 
 
 

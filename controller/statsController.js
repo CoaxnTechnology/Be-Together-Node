@@ -1,7 +1,7 @@
 const User = require("../model/User");
 const Category = require("../model/Category");
 const Service = require("../model/Service");
-//const Booking = require("../model/Booking");
+const Booking = require("../model/Booking");
 const Review = require("../model/review");
 
 // Helper to calculate trend
@@ -74,9 +74,9 @@ exports.getStats = async (req, res) => {
     );
 
     // BOOKINGS
-    // const completedBookings = await Booking.countDocuments({ status: "completed" });
-    // const pendingBookings = await Booking.countDocuments({ status: "pending" });
-    // const cancelledBookings = await Booking.countDocuments({ status: "cancelled" });
+    const completedBookings = await Booking.countDocuments({ status: "completed" });
+    const pendingBookings = await Booking.countDocuments({ status: "booked" });
+    const cancelledBookings = await Booking.countDocuments({ status: "cancelled" });
 
     const totalReviews = await Review.countDocuments();
     const positiveReviews = await Review.countDocuments({

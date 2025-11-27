@@ -80,7 +80,7 @@ exports.createService = async (req, res) => {
     const isFree = body.isFree === true || body.isFree === "true";
     const price = isFree ? 0 : Number(body.price || 0);
     const location = tryParse(body.location);
-   // const city = body.city;
+    // const city = body.city;
     const isDoorstepService =
       body.isDoorstepService === true || body.isDoorstepService === "true";
     const service_type = body.service_type || "one_time";
@@ -190,7 +190,7 @@ exports.createService = async (req, res) => {
       isFree,
       price,
       location_name: location.name,
-     // city,
+      // city,
       isDoorstepService,
       location: {
         type: "Point",
@@ -384,6 +384,18 @@ exports.getServices = async (req, res) => {
     const q = { ...req.query, ...req.body };
     console.log("Incoming query/body:", q);
 
+    // ----- KEYWORD SEARCH -----
+    let keyword = q.keyword?.trim() || null;
+    let matchedCategoryIds = [];
+
+    if (keyword) {
+      const regex = new RegExp(keyword, "i");
+
+      // find matching categories first
+      const matchedCategories = await Category.find({ name: regex });
+      matchedCategoryIds = matchedCategories.map((c) => c._id);
+    }
+
     // ----- CATEGORY -----
     let categoryId = q.categoryId || null;
     if (categoryId && typeof categoryId === "string") {
@@ -432,6 +444,17 @@ exports.getServices = async (req, res) => {
       match.$or = [
         { service_type: "one_time", date: queryDate },
         { service_type: "recurring", "recurring_schedule.date": queryDate },
+      ];
+    }
+    // ----- 📌 KEYWORD SEARCH LOGIC HERE -----
+    if (keyword) {
+      const regex = new RegExp(keyword, "i");
+
+      match.$or = [
+        { title: regex },
+        { description: regex },
+        { tags: { $in: [regex] } },
+        { category: { $in: matchedCategoryIds } },
       ];
     }
 

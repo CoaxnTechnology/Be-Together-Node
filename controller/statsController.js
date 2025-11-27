@@ -3,6 +3,7 @@ const Category = require("../model/Category");
 const Service = require("../model/Service");
 const Booking = require("../model/Booking");
 const Review = require("../model/review");
+const Payment=require("../model/Payment");
 
 // Helper to calculate trend
 const calculateTrend = (current, previous) => {
@@ -78,7 +79,15 @@ exports.getStats = async (req, res) => {
 
     // Current month bookings (all statuses)
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1); // 1st day
-    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999); // last ms of month
+    const monthEnd = new Date(
+      now.getFullYear(),
+      now.getMonth() + 1,
+      0,
+      23,
+      59,
+      59,
+      999
+    ); // last ms of month
     const currentMonthBookings = await Booking.countDocuments({
       createdAt: { $gte: monthStart, $lte: monthEnd },
     });
@@ -91,12 +100,24 @@ exports.getStats = async (req, res) => {
       monthStart,
       monthEnd,
     });
+    // Only consider completed payments
+    const payments = await Payment.find({ status: "completed" });
 
+    // Sum appCommission
+    const totalCommission = payments.reduce(
+      (sum, p) => sum + p.appCommission,
+      0
+    );
+    console.log("Total Commission:", totalCommission);
     // Reviews
     const totalReviews = await Review.countDocuments();
-    const positiveReviews = await Review.countDocuments({ rating: { $gte: 4 } });
+    const positiveReviews = await Review.countDocuments({
+      rating: { $gte: 4 },
+    });
     const neutralReviews = await Review.countDocuments({ rating: 3 });
-    const negativeReviews = await Review.countDocuments({ rating: { $lte: 2 } });
+    const negativeReviews = await Review.countDocuments({
+      rating: { $lte: 2 },
+    });
 
     const summaryWidgets = [
       {
@@ -138,18 +159,46 @@ exports.getStats = async (req, res) => {
         icon: "Tags",
         color: "info",
       },
+       {
+        title: "Total Revenue (This Month)",
+        value: totalCommission.toString(),
+        icon: "dollar-sign",
+        color: "success",
+      },
     ];
 
     const chartData = {
       users: [
-        { name: "Active Users", value: activeUsers, color: "hsl(168 100% 50%)" },
-        { name: "Inactive Users", value: inactiveUsers, color: "hsl(0 70% 55%)" },
+        {
+          name: "Active Users",
+          value: activeUsers,
+          color: "hsl(168 100% 50%)",
+        },
+        {
+          name: "Inactive Users",
+          value: inactiveUsers,
+          color: "hsl(0 70% 55%)",
+        },
       ],
-      services: [{ name: "Total Services", value: totalServices, color: "hsl(142 70% 45%)" }],
+      services: [
+        {
+          name: "Total Services",
+          value: totalServices,
+          color: "hsl(142 70% 45%)",
+        },
+      ],
       bookings: [
-        { name: "Completed", value: completedBookings, color: "hsl(168 100% 50%)" },
+        {
+          name: "Completed",
+          value: completedBookings,
+          color: "hsl(168 100% 50%)",
+        },
         { name: "Pending", value: pendingBookings, color: "hsl(210 100% 56%)" },
-        { name: "Cancelled", value: cancelledBookings, color: "hsl(0 70% 55%)" },
+        {
+          name: "Cancelled",
+          value: cancelledBookings,
+          color: "hsl(0 70% 55%)",
+        },
       ],
       reviews: [
         { name: "Positive", value: positiveReviews, color: "hsl(142 70% 45%)" },

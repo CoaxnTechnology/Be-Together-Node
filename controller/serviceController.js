@@ -379,6 +379,7 @@ function bboxForLatLon(lat, lon, radiusKm = 3) {
 //------------------Get Service------------------
 // Adjust path
 
+
 exports.getServices = async (req, res) => {
   try {
     const q = { ...req.query, ...req.body };
@@ -422,11 +423,7 @@ exports.getServices = async (req, res) => {
 
     if (Array.isArray(categoryId) && categoryId.length > 0) {
       match.category = { $in: categoryId.map((id) => new Types.ObjectId(id)) };
-    } else if (
-      categoryId &&
-      typeof categoryId === "string" &&
-      categoryId.trim() !== ""
-    ) {
+    } else if (categoryId && typeof categoryId === "string" && categoryId.trim() !== "") {
       match.category = new Types.ObjectId(categoryId);
     }
 
@@ -436,27 +433,32 @@ exports.getServices = async (req, res) => {
     else if (q.isFree === false || q.isFree === "false") match.isFree = false;
 
     let excludeOwnerId = q.excludeOwnerId || (req.user && req.user._id);
-    if (excludeOwnerId)
-      match.owner = { $ne: new Types.ObjectId(excludeOwnerId) };
+    if (excludeOwnerId) match.owner = { $ne: new Types.ObjectId(excludeOwnerId) };
 
+    // ----- COMBINE DATE + KEYWORD CONDITIONS -----
+    const orConditions = [];
+
+    // Date filter
     if (q.date) {
       const queryDate = new Date(q.date);
-      match.$or = [
+      orConditions.push(
         { service_type: "one_time", date: queryDate },
-        { service_type: "recurring", "recurring_schedule.date": queryDate },
-      ];
+        { service_type: "recurring", "recurring_schedule.date": queryDate }
+      );
     }
-    // ----- 📌 KEYWORD SEARCH LOGIC HERE -----
+
+    // Keyword filter
     if (keyword) {
       const regex = new RegExp(keyword, "i");
-
-      match.$or = [
+      orConditions.push(
         { title: regex },
         { description: regex },
         { tags: { $in: [regex] } },
-        { category: { $in: matchedCategoryIds } },
-      ];
+        { category: { $in: matchedCategoryIds } }
+      );
     }
+
+    if (orConditions.length) match.$or = orConditions;
 
     // ----- LOCATION -----
     let refLat = null;
@@ -487,9 +489,7 @@ exports.getServices = async (req, res) => {
             distanceMultiplier: 0.001,
           },
         });
-        pipeline.push({
-          $addFields: { distance_km: { $round: ["$distance_km", 2] } },
-        });
+        pipeline.push({ $addFields: { distance_km: { $round: ["$distance_km", 2] } } });
       }
 
       pipeline.push({ $match: match });
@@ -535,14 +535,7 @@ exports.getServices = async (req, res) => {
             let: { serviceId: "$_id" },
             pipeline: [
               { $match: { $expr: { $eq: ["$service", "$$serviceId"] } } },
-              {
-                $lookup: {
-                  from: "users",
-                  localField: "user",
-                  foreignField: "_id",
-                  as: "user",
-                },
-              },
+              { $lookup: { from: "users", localField: "user", foreignField: "_id", as: "user" } },
               { $unwind: "$user" },
               {
                 $project: {
@@ -567,9 +560,7 @@ exports.getServices = async (req, res) => {
         }
       );
 
-      if (withPagination) {
-        pipeline.push({ $skip: skip }, { $limit: limit });
-      }
+      if (withPagination) pipeline.push({ $skip: skip }, { $limit: limit });
 
       return pipeline;
     };
@@ -590,8 +581,8 @@ exports.getServices = async (req, res) => {
       total: totalCount,
       page,
       limit,
-      listServices, // for list with pagination
-      mapServices, // for map without pagination
+      listServices,
+      mapServices,
     });
   } catch (err) {
     console.error("getServices error:", err);
@@ -602,6 +593,7 @@ exports.getServices = async (req, res) => {
     });
   }
 };
+
 
 exports.getInterestedUsers = async (req, res) => {
   try {

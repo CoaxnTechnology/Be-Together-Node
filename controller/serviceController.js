@@ -784,6 +784,12 @@ exports.updateService = async (req, res) => {
     if (body.isFree !== undefined)
       updatePayload.isFree = body.isFree === true || body.isFree === "true";
     if (body.price !== undefined) updatePayload.price = Number(body.price || 0);
+    // ⭐ NEW: Currency update support
+    if (body.currency) {
+      updatePayload.currency = body.currency;
+      user.currency = body.currency;
+      await user.save();
+    }
 
     // Language
     if (body.language || body.Language)

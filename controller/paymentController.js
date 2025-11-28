@@ -47,8 +47,9 @@ exports.bookService = async (req, res) => {
     const customer = await User.findById(userId);
     const provider = await User.findById(providerId);
     const serviceDetails = await Service.findById(serviceId);
-    const currency = provider.currency || "eur"; // fallback to EUR if not set
-console.log("Booking currency:", currency);
+    // ⭐ Always use service currency (NOT provider)
+    const currency = serviceDetails.currency?.toLowerCase() || "eur";
+    console.log("Booking currency:", currency);
 
     if (!customer || !provider || !serviceDetails)
       return res.status(404).json({ message: "Data not found" });

@@ -94,12 +94,13 @@ exports.createService = async (req, res) => {
       body.promoteService === true || body.promoteService === "true";
     const promotionAmount = Number(body.amount || 0);
     const paymentMethodId = body.paymentMethodId;
+    // ⭐ GET CURRENCY (service-level)
     const currency = body.currency || user.currency || "EUR";
 
-    if (!isFree) {
-      user.currency = currency; // provider payout currency
-      await user.save();
-    }
+    // ⭐ ALWAYS update user table to "last used currency"
+    user.currency = currency;
+    await user.save();
+
     // Validations
     if (!title)
       return res
@@ -194,6 +195,7 @@ exports.createService = async (req, res) => {
       Language: language,
       isFree,
       price,
+      currency, // <-- NOW SAVED IN SERVICE TABLE
       location_name: location.name,
       // city,
       isDoorstepService,

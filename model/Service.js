@@ -6,6 +6,10 @@ const serviceSchema = new mongoose.Schema({
   isFree: { type: Boolean, default: false },
   price: { type: Number, default: 0 },
   description: { type: String, default: null },
+  currency: {
+    type: String,
+    default: "EUR",
+  },
 
   category: {
     type: mongoose.Schema.Types.ObjectId,

@@ -4,7 +4,7 @@ const serviceController = require("../controller/serviceController");
 const auth = require("../Middleware/authMiddleware");
 const checkServiceRestrictionJs = require("../Middleware/checkServiceRestriction");
 //const authMiddleware = require("../Middleware/authMiddleware");
-router.post("/create", auth,checkServiceRestrictionJs, serviceController.createService);
+router.post("/create", auth, serviceController.createService);
 router.post("/get", serviceController.getServices);
 router.post("/user/search", serviceController.getInterestedUsers);
 router.get("/getall", serviceController.getAllServices);

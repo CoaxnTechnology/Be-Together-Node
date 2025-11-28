@@ -14,6 +14,7 @@ const jwt = require("jsonwebtoken");
 const fs = require("fs");
 const csv = require("csv-parser");
 const Booking=require("../model/Booking");
+const Payment=require("../model/Payment");
 // ------------------ Cloudinary Config ------------------
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -1424,7 +1425,6 @@ exports.loginAdmin = async (req, res) => {
   }
 };
 //admin booking 
-
 exports.getAllBookings = async (req, res) => {
   try {
     // 1️⃣ Fetch all bookings with all details
@@ -1484,48 +1484,102 @@ exports.getAllBookings = async (req, res) => {
     });
   }
 };
-
-//--------------------Booking By ID----------
-exports.getBookingDetails = async (req, res) => {
+//--------------------Payment INformation-------------------
+exports.getAllPayments = async (req, res) => {
   try {
-    const { bookingId } = req.body; // 🔥 Body se id aa raha hai
+    let { 
+      page = 1, 
+      limit = 20, 
+      status, 
+      currency, 
+      providerId, 
+      userId 
+    } = req.query;
 
-    if (!bookingId) {
-      return res.status(400).json({
-        isSuccess: false,
-        message: "bookingId is required",
-      });
-    }
+    page = Number(page);
+    limit = Number(limit);
 
-    const booking = await Booking.findById(bookingId)
-      .populate("customer", "name email phone")
+    const query = {};
+
+    // --------- OPTIONAL FILTERS ---------
+    if (status) query.status = status;
+    if (currency) query.currency = currency;
+    if (providerId) query.provider = providerId;
+    if (userId) query.user = userId;
+
+    // --------- FETCH PAYMENTS ----------
+    const payments = await Payment.find(query)
+      .populate("user", "name email phone")
       .populate("provider", "name email phone")
       .populate("service", "title description price isFree")
-      .populate("paymentId");
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit);
 
-    if (!booking) {
-      return res.status(404).json({
-        isSuccess: false,
-        message: "Booking not found",
-      });
-    }
+    const total = await Payment.countDocuments(query);
 
-    // Count total times the service was booked
-    const serviceBookingsCount = await Booking.countDocuments({
-      service: booking.service._id,
-    });
-
+    // --------- RESPONSE ----------
     return res.json({
       isSuccess: true,
-      message: "Booking details fetched",
-      booking,
-      serviceBookingsCount,
+      message: "All payments fetched successfully",
+      totalPayments: total,
+      currentPage: page,
+      totalPages: Math.ceil(total / limit),
+
+      data: payments.map((p) => ({
+        paymentId: p._id,
+        bookingId: p.bookingId || null,
+
+        customer: {
+          id: p.user?._id || null,
+          name: p.user?.name || null,
+          email: p.user?.email || null,
+          phone: p.user?.phone || null,
+        },
+
+        provider: {
+          id: p.provider?._id || null,
+          name: p.provider?.name || null,
+          email: p.provider?.email || null,
+          phone: p.provider?.phone || null,
+        },
+
+        service: {
+          id: p.service?._id || null,
+          title: p.service?.title || null,
+          description: p.service?.description || null,
+          price: p.service?.price || null,
+          isFree: p.service?.isFree || false,
+        },
+
+        amount: p.amount,
+        currency: p.currency,
+        appCommission: p.appCommission,
+        providerAmount: p.providerAmount,
+
+        // --------- PAYMENT STATUS ---------
+        paymentStatus: p.status || "unknown",
+
+        refundId: p.refundId,
+        refundReason: p.refundReason,
+
+        checkoutSessionId: p.checkoutSessionId,
+        paymentIntentId: p.paymentIntentId,
+        customerStripeId: p.customerStripeId,
+        providerStripeId: p.providerStripeId,
+
+        createdAt: p.createdAt,
+        completedAt: p.completedAt,
+        refundedAt: p.refundedAt,
+      })),
     });
+
   } catch (err) {
+    console.error("getAllPayments error:", err);
     return res.status(500).json({
       isSuccess: false,
-      message: err.message,
+      message: "Server error",
+      error: err.message,
     });
   }
 };
-

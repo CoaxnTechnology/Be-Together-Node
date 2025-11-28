@@ -27,7 +27,8 @@ const {
   generateUsersFromCSV,
   deleteAllFakeUsers,
   getAllBookings,
-  getBookingDetails
+  getBookingDetails,
+  getAllPayments
 } = require("../controller/Admin");
 
 // ------------------------USER DETAILS------------------------
@@ -61,9 +62,10 @@ router.post("/create", createService);
 
 // ------------------------BOOKINGS------------------------
 router.get("/allbooking", getAllBookings);      // specific route
-router.post("/booking/details", getBookingDetails); // bookingId from body
 
 // ------------------------AUTH------------------------
 router.post("/auth/login", loginAdmin);
+//--------------------------payment----------------------------
+router.get("/payment",getAllPayments)
 
 module.exports = router;

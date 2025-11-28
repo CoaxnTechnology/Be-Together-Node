@@ -94,7 +94,12 @@ exports.createService = async (req, res) => {
       body.promoteService === true || body.promoteService === "true";
     const promotionAmount = Number(body.amount || 0);
     const paymentMethodId = body.paymentMethodId;
+    const currency = body.currency || user.currency || "EUR";
 
+    if (!isFree) {
+      user.currency = currency; // provider payout currency
+      await user.save();
+    }
     // Validations
     if (!title)
       return res
@@ -391,7 +396,7 @@ exports.getServices = async (req, res) => {
       latitude,
       longitude,
       radius_km,
-      keyword = ""
+      keyword = "",
     } = req.body;
 
     let finalMatch = { $and: [] };
@@ -411,8 +416,8 @@ exports.getServices = async (req, res) => {
             service_type: "one_time",
             date: {
               $gte: date,
-              $lt: new Date(endDate).toISOString().split("T")[0] // "YYYY-MM-DD"
-            }
+              $lt: new Date(endDate).toISOString().split("T")[0], // "YYYY-MM-DD"
+            },
           },
           // Recurring services
           {
@@ -421,12 +426,12 @@ exports.getServices = async (req, res) => {
               $elemMatch: {
                 date: {
                   $gte: date,
-                  $lt: new Date(endDate).toISOString().split("T")[0]
-                }
-              }
-            }
-          }
-        ]
+                  $lt: new Date(endDate).toISOString().split("T")[0],
+                },
+              },
+            },
+          },
+        ],
       });
     }
 
@@ -459,8 +464,8 @@ exports.getServices = async (req, res) => {
         $or: [
           { title: { $regex: regex } },
           { description: { $regex: regex } },
-          { tags: { $in: [regex] } }
-        ]
+          { tags: { $in: [regex] } },
+        ],
       });
     }
 
@@ -473,10 +478,10 @@ exports.getServices = async (req, res) => {
           $geoWithin: {
             $centerSphere: [
               [parseFloat(longitude), parseFloat(latitude)],
-              radius_km / 6378.1
-            ]
-          }
-        }
+              radius_km / 6378.1,
+            ],
+          },
+        },
       });
     }
 
@@ -509,21 +514,17 @@ exports.getServices = async (req, res) => {
       page,
       limit,
       listServices: services,
-      mapServices: services
+      mapServices: services,
     });
-
   } catch (err) {
     console.error("❌ ERROR:", err);
     return res.status(500).json({
       isSuccess: false,
       message: "Internal server error",
-      error: err.message
+      error: err.message,
     });
   }
 };
-
-
-
 
 exports.getInterestedUsers = async (req, res) => {
   try {

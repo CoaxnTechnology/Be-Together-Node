@@ -898,3 +898,36 @@ exports.forgotOrResetPassword = async (req, res) => {
     return res.status(500).json({ IsSucces: false, message: "Server error" });
   }
 };
+
+// controller/authController.js
+
+exports.logout = async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ IsSucces: false, message: "Email required" });
+    }
+
+    const user = await User.findOne({ email: String(email).toLowerCase() });
+    if (!user) {
+      return res.status(404).json({ IsSucces: false, message: "User not found" });
+    }
+
+    // Clear all FCM tokens
+    user.fcmToken = [];
+
+    // Clear session info
+    user.session_id = null;
+    user.access_token = null;
+
+    await user.save();
+
+    return res.json({
+      IsSucces: true,
+      message: "Logged out successfully, FCM tokens cleared",
+    });
+  } catch (err) {
+    console.error("❌ Logout Error:", err);
+    return res.status(500).json({ IsSucces: false, message: "Server error" });
+  }
+};

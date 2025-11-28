@@ -69,3 +69,4 @@ router.post("/auth/login", loginAdmin);
 router.get("/payment",getAllPayments)
 
 module.exports = router;
+//

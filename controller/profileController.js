@@ -455,7 +455,7 @@ exports.getUserProfileByEmail = async (req, res) => {
         age: user.age || null,
         interests: user.interests || [],
         offeredTags: user.offeredTags || [],
-
+        currency: user.currency || "EUR",
         servicesCount: servicesWithRating.length, // total services
         services: servicesWithRating, // full service details with avg rating
       },

@@ -47,6 +47,8 @@ exports.bookService = async (req, res) => {
     const customer = await User.findById(userId);
     const provider = await User.findById(providerId);
     const serviceDetails = await Service.findById(serviceId);
+    const currency = provider.currency || "eur"; // fallback to EUR if not set
+
 
     if (!customer || !provider || !serviceDetails)
       return res.status(404).json({ message: "Data not found" });
@@ -144,7 +146,7 @@ exports.bookService = async (req, res) => {
       line_items: [
         {
           price_data: {
-            currency: "eur",
+            currency: currency,
             product_data: {
               name: serviceDetails.title,
               description: serviceDetails.description || "No description",

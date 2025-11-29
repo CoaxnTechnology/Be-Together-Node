@@ -196,7 +196,6 @@ exports.bookService = async (req, res) => {
 
 // -----------------------------
 // 2️⃣ Confirm Payment & Create Booking
-// -----------------------------
 exports.updateBookingStatus = async (req, res) => {
   try {
     console.log("▶️ updateBookingStatus called");
@@ -225,19 +224,10 @@ exports.updateBookingStatus = async (req, res) => {
       console.log("❌ Payment NOT in requires_capture state.");
       return res.status(400).json({ message: "Payment not completed" });
     }
-    // =============================================
-    // 🚫 PREVENT DOUBLE BOOKING
-    // =============================================
-    if (payment.status === "held") {
-      return res.json({
-        isSuccess: true,
-        message: "Booking already created earlier",
-        bookingId: payment.bookingId,
-      });
-    }
-    const { userId, providerId, serviceId } = session.metadata;
-    console.log("🔐 Metadata:", session.metadata);
 
+    // =============================================
+    // 🚫 Fetch Payment From DB Before Using It
+    // =============================================
     const payment = await Payment.findOne({ checkoutSessionId: sessionId });
     console.log("💰 Payment Found:", payment?._id);
 
@@ -245,6 +235,24 @@ exports.updateBookingStatus = async (req, res) => {
       console.log("❌ Payment not found in DB");
       return res.status(404).json({ message: "Payment not found" });
     }
+
+    // =============================================
+    // 🚫 PREVENT DOUBLE BOOKING
+    // =============================================
+    if (payment.status === "held") {
+      console.log("⚠️ Booking already exists:", payment.bookingId);
+      return res.json({
+        isSuccess: true,
+        message: "Booking already created earlier",
+        bookingId: payment.bookingId,
+      });
+    }
+
+    // =============================================
+    // 📌 Metadata
+    // =============================================
+    const { userId, providerId, serviceId } = session.metadata;
+    console.log("🔐 Metadata:", session.metadata);
 
     console.log("🔎 Fetching Customer, Provider, Service…");
 
@@ -256,20 +264,31 @@ exports.updateBookingStatus = async (req, res) => {
     console.log("🧑‍🔧 Provider:", provider ? "FOUND" : "NOT FOUND");
     console.log("🛠 Service:", service ? "FOUND" : "NOT FOUND");
 
-    // Create booking
+    if (!customer || !provider || !service) {
+      return res.status(404).json({
+        message: "Service / Provider / Customer not found",
+      });
+    }
+
+    // =============================================
+    // 📝 Create Booking
+    // =============================================
     console.log("📝 Creating booking…");
     const booking = await Booking.create({
       customer: userId,
       provider: providerId,
       service: serviceId,
       amount: payment.amount,
-      status: "booked",
+      currency: payment.currency,
       paymentId: payment._id,
+      status: "booked",
     });
 
     console.log("✅ Booking Created:", booking._id);
 
-    // Update payment
+    // =============================================
+    // 💾 Update Payment
+    // =============================================
     payment.status = "held";
     payment.paymentIntentId = session.payment_intent;
     payment.bookingId = booking._id;
@@ -277,9 +296,11 @@ exports.updateBookingStatus = async (req, res) => {
 
     console.log("💾 Payment updated");
 
-    // ⭐ Send Email
+    // =============================================
+    // 📧 Send Emails
+    // =============================================
     console.log("📧 Calling sendServiceBookedEmail…");
-    // Send customer email
+
     sendServiceBookedEmail(
       customer,
       service,
@@ -288,7 +309,6 @@ exports.updateBookingStatus = async (req, res) => {
       "customer"
     ).catch((err) => console.log("❌ Customer Email error:", err));
 
-    // Send provider email
     sendServiceBookedEmail(
       customer,
       service,
@@ -297,12 +317,18 @@ exports.updateBookingStatus = async (req, res) => {
       "provider"
     ).catch((err) => console.log("❌ Provider Email error:", err));
 
-    // ⭐ Send Notification
+    // =============================================
+    // 🔔 Send Notification
+    // =============================================
     console.log("🔔 Calling sendBookingNotification…");
+
     sendBookingNotification(customer, provider, service, booking).catch((err) =>
       console.log("❌ Notification error:", err)
     );
 
+    // =============================================
+    // ✅ RESPONSE
+    // =============================================
     res.json({
       isSuccess: true,
       message: "Booking created after payment success",

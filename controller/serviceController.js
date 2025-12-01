@@ -7,7 +7,7 @@ const notificationController = require("./notificationController");
 const { notifyOnNewService } = require("./notificationController");
 const { notifyOnServiceView } = require("./notificationController");
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
-
+const axios = require("axios");
 const { Types } = mongoose;
 const Review = require("../model/review");
 // Helper to parse JSON safely
@@ -386,8 +386,189 @@ function bboxForLatLon(lat, lon, radiusKm = 3) {
 //------------------Get Service------------------
 // Adjust path
 
+// exports.getServices = async (req, res) => {
+//   try {
+//     const {
+//       page = 1,
+//       limit = 50,
+//       categoryId = [],
+//       date,
+//       tags = [],
+//       isFree,
+//       latitude,
+//       longitude,
+//       radius_km,
+//       keyword = "",
+//     } = req.body;
+
+//     let finalMatch = { $and: [] };
+
+//     // ---------------- DATE FILTER ----------------
+//     if (date) {
+//       const startDate = new Date(date);
+//       const endDate = new Date(date);
+//       endDate.setDate(endDate.getDate() + 1);
+
+//       finalMatch.$and.push({
+//         $or: [
+//           {
+//             service_type: "one_time",
+//             date: {
+//               $gte: date,
+//               $lt: new Date(endDate).toISOString().split("T")[0],
+//             },
+//           },
+//           {
+//             service_type: "recurring",
+//             recurring_schedule: {
+//               $elemMatch: {
+//                 date: {
+//                   $gte: date,
+//                   $lt: new Date(endDate).toISOString().split("T")[0],
+//                 },
+//               },
+//             },
+//           },
+//         ],
+//       });
+//     }
+
+//     // ---------------- CATEGORY FILTER ----------------
+//     if (categoryId.length > 0) {
+//       finalMatch.$and.push({ category: { $in: categoryId } });
+//     }
+
+//     // ---------------- TAG FILTER ----------------
+//     if (tags.length > 0) {
+//       finalMatch.$and.push({ tags: { $in: tags } });
+//     }
+
+//     // ---------------- FREE FILTER ----------------
+//     if (isFree === true) {
+//       finalMatch.$and.push({ isFree: true });
+//     }
+
+//     // ---------------- KEYWORD FILTER ----------------
+//     if (keyword.trim() !== "") {
+//       const regex = new RegExp(keyword.trim(), "i");
+
+//       finalMatch.$and.push({
+//         $or: [
+//           { title: { $regex: regex } },
+//           { description: { $regex: regex } },
+//           { tags: { $in: [regex] } },
+//         ],
+//       });
+//     }
+
+//     // ---------------- GEO FILTER ----------------
+//     if (latitude && longitude && radius_km) {
+//       finalMatch.$and.push({
+//         location: {
+//           $geoWithin: {
+//             $centerSphere: [
+//               [parseFloat(longitude), parseFloat(latitude)],
+//               parseFloat(radius_km) / 6378.1,
+//             ],
+//           },
+//         },
+//       });
+//     }
+
+//     if (finalMatch.$and.length === 0) {
+//       delete finalMatch.$and;
+//     }
+
+//     // ---------------- FETCH ALL ----------------
+//     let allServices = await Service.find(finalMatch)
+//       .populate("category")
+//       .populate("owner", "name profile_image")
+//       .lean();
+
+//     // ---------------- DISTANCE CALCULATION ----------------
+//     const userLat = parseFloat(latitude);
+//     const userLng = parseFloat(longitude);
+
+//     function getDistanceKm(lat1, lon1, lat2, lon2) {
+//       const R = 6371;
+//       const dLat = (lat2 - lat1) * (Math.PI / 180);
+//       const dLon = (lon2 - lon1) * (Math.PI / 180);
+//       const a =
+//         Math.sin(dLat / 2) ** 2 +
+//         Math.cos(lat1 * (Math.PI / 180)) *
+//           Math.cos(lat2 * (Math.PI / 180)) *
+//           Math.sin(dLon / 2) ** 2;
+//       return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+//     }
+
+//     if (!isNaN(userLat) && !isNaN(userLng)) {
+//       allServices = allServices.map((svc) => {
+//         const svcLat = svc.location?.coordinates?.[1];
+//         const svcLng = svc.location?.coordinates?.[0];
+
+//         let distance = null;
+
+//         if (!isNaN(svcLat) && !isNaN(svcLng)) {
+//           distance = getDistanceKm(userLat, userLng, svcLat, svcLng);
+//         }
+
+//         return {
+//           ...svc,
+//           distance_km: distance ? Number(distance.toFixed(2)) : null,
+//         };
+//       });
+
+//       // sort nearest → farthest
+//       allServices.sort((a, b) => {
+//         if (a.distance_km === null) return 1;
+//         if (b.distance_km === null) return -1;
+//         return a.distance_km - b.distance_km;
+//       });
+//     } // ⭐ ADD THIS BLOCK HERE
+//     if (req.body.userId) {
+//       const ownServices = allServices.filter(
+//         (s) => s.owner?._id?.toString() === req.body.userId
+//       );
+
+//       const otherServices = allServices.filter(
+//         (s) => s.owner?._id?.toString() !== req.body.userId
+//       );
+
+//       allServices = [...ownServices, ...otherServices];
+//     }
+
+//     // ---------------- PAGINATION ----------------
+//     const start = (page - 1) * limit;
+//     const paginated = allServices.slice(start, start + limit);
+
+//     const total = allServices.length;
+
+//     // ---------------- RESPONSE ----------------
+//     return res.json({
+//       isSuccess: true,
+//       message: "Services fetched successfully",
+//       total,
+//       page,
+//       limit,
+//       listServices: paginated,
+//       mapServices: allServices,
+//     });
+//   } catch (err) {
+//     console.error("❌ ERROR:", err);
+//     return res.status(500).json({
+//       isSuccess: false,
+//       message: "Internal server error",
+//       error: err.message,
+//     });
+//   }
+// };
+
+// GET ALL SERVICES (with city search + distance + filters)
+
 exports.getServices = async (req, res) => {
   try {
+    console.log("📩 Incoming Filters:", req.body);
+
     const {
       page = 1,
       limit = 50,
@@ -403,8 +584,10 @@ exports.getServices = async (req, res) => {
 
     let finalMatch = { $and: [] };
 
-    // ---------------- DATE FILTER ----------------
+    // -------------------- DATE FILTER --------------------
     if (date) {
+      console.log("📅 Date filter:", date);
+
       const startDate = new Date(date);
       const endDate = new Date(date);
       endDate.setDate(endDate.getDate() + 1);
@@ -433,23 +616,70 @@ exports.getServices = async (req, res) => {
       });
     }
 
-    // ---------------- CATEGORY FILTER ----------------
+    // -------------------- CATEGORY FILTER --------------------
     if (categoryId.length > 0) {
+      console.log("📂 Category filter:", categoryId);
       finalMatch.$and.push({ category: { $in: categoryId } });
     }
 
-    // ---------------- TAG FILTER ----------------
+    // -------------------- TAG FILTER --------------------
     if (tags.length > 0) {
+      console.log("🏷 Tag filter:", tags);
       finalMatch.$and.push({ tags: { $in: tags } });
     }
 
-    // ---------------- FREE FILTER ----------------
+    // -------------------- FREE FILTER --------------------
     if (isFree === true) {
+      console.log("💰 Free Only filter");
       finalMatch.$and.push({ isFree: true });
     }
 
-    // ---------------- KEYWORD FILTER ----------------
-    if (keyword.trim() !== "") {
+    // =====================================================
+    // ⭐ CITY SEARCH USING KEYWORD→ Convert city name → lat/lng
+    // =====================================================
+    let cityLat = null;
+    let cityLng = null;
+
+    if (keyword && keyword.trim().length > 2) {
+      try {
+        console.log("🌍 Searching city from keyword:", keyword);
+
+        const cityUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${keyword}`;
+        const result = await axios.get(cityUrl);
+
+        if (result.data.length > 0) {
+          cityLat = parseFloat(result.data[0].lat);
+          cityLng = parseFloat(result.data[0].lon);
+
+          console.log("📍 City detected:", cityLat, cityLng);
+        } else {
+          console.log("❌ No city found for keyword");
+        }
+      } catch (err) {
+        console.error("🌐 City lookup FAILED:", err.message);
+      }
+    }
+
+    // -------------------- GEO FILTER (CITY CIRCLE) --------------------
+    if (cityLat && cityLng) {
+      console.log("🧭 Using city circle filter for keyword area");
+
+      finalMatch.$and.push({
+        location: {
+          $geoWithin: {
+            $centerSphere: [
+              [cityLng, cityLat],
+              parseFloat(radius_km || 200) / 6371,
+            ],
+          },
+        },
+      });
+    }
+
+    // -------------------- TEXT KEYWORD FILTER --------------------
+    if (keyword.trim() !== "" && !cityLat) {
+      console.log("🔎 Keyword text search:", keyword);
+
       const regex = new RegExp(keyword.trim(), "i");
 
       finalMatch.$and.push({
@@ -461,31 +691,24 @@ exports.getServices = async (req, res) => {
       });
     }
 
-    // ---------------- GEO FILTER ----------------
-    if (latitude && longitude && radius_km) {
-      finalMatch.$and.push({
-        location: {
-          $geoWithin: {
-            $centerSphere: [
-              [parseFloat(longitude), parseFloat(latitude)],
-              parseFloat(radius_km) / 6378.1,
-            ],
-          },
-        },
-      });
-    }
+    // Clean empty
+    if (finalMatch.$and.length === 0) delete finalMatch.$and;
 
-    if (finalMatch.$and.length === 0) {
-      delete finalMatch.$and;
-    }
+    console.log("🔍 Final Mongo Filter:", JSON.stringify(finalMatch, null, 2));
 
-    // ---------------- FETCH ALL ----------------
+    // -----------------------------------------------------
+    // FETCH SERVICES
+    // -----------------------------------------------------
     let allServices = await Service.find(finalMatch)
       .populate("category")
       .populate("owner", "name profile_image")
       .lean();
 
-    // ---------------- DISTANCE CALCULATION ----------------
+    console.log("📦 Services Found:", allServices.length);
+
+    // -----------------------------------------------------
+    // ⭐ DISTANCE CALCULATION
+    // -----------------------------------------------------
     const userLat = parseFloat(latitude);
     const userLng = parseFloat(longitude);
 
@@ -498,10 +721,13 @@ exports.getServices = async (req, res) => {
         Math.cos(lat1 * (Math.PI / 180)) *
           Math.cos(lat2 * (Math.PI / 180)) *
           Math.sin(dLon / 2) ** 2;
+
       return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     }
 
     if (!isNaN(userLat) && !isNaN(userLng)) {
+      console.log("📍 Calculating distances from:", userLat, userLng);
+
       allServices = allServices.map((svc) => {
         const svcLat = svc.location?.coordinates?.[1];
         const svcLng = svc.location?.coordinates?.[0];
@@ -518,36 +744,26 @@ exports.getServices = async (req, res) => {
         };
       });
 
-      // sort nearest → farthest
+      // ⭐ Sort nearest first
       allServices.sort((a, b) => {
         if (a.distance_km === null) return 1;
         if (b.distance_km === null) return -1;
         return a.distance_km - b.distance_km;
       });
-    } // ⭐ ADD THIS BLOCK HERE
-    if (req.body.userId) {
-      const ownServices = allServices.filter(
-        (s) => s.owner?._id?.toString() === req.body.userId
-      );
-
-      const otherServices = allServices.filter(
-        (s) => s.owner?._id?.toString() !== req.body.userId
-      );
-
-      allServices = [...ownServices, ...otherServices];
     }
 
-    // ---------------- PAGINATION ----------------
+    // -----------------------------------------------------
+    // PAGINATION
+    // -----------------------------------------------------
     const start = (page - 1) * limit;
     const paginated = allServices.slice(start, start + limit);
 
-    const total = allServices.length;
+    console.log("📄 Returning:", paginated.length, "items");
 
-    // ---------------- RESPONSE ----------------
     return res.json({
       isSuccess: true,
       message: "Services fetched successfully",
-      total,
+      total: allServices.length,
       page,
       limit,
       listServices: paginated,

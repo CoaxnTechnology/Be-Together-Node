@@ -551,7 +551,7 @@ exports.getServices = async (req, res) => {
       page,
       limit,
       listServices: paginated,
-      mapServices: paginated,
+      mapServices: allServices,
     });
   } catch (err) {
     console.error("❌ ERROR:", err);

@@ -390,7 +390,7 @@ exports.getServices = async (req, res) => {
   try {
     const {
       page = 1,
-      limit = 10,
+      limit = 50,
       categoryId = [],
       date,
       tags = [],
@@ -404,7 +404,7 @@ exports.getServices = async (req, res) => {
     let finalMatch = { $and: [] };
 
     // ---------------------------------------------
-    // ✅ DATE FILTER (one_time + recurring)
+    // DATE FILTER
     // ---------------------------------------------
     if (date) {
       const startDate = new Date(date);
@@ -413,15 +413,13 @@ exports.getServices = async (req, res) => {
 
       finalMatch.$and.push({
         $or: [
-          // One-time services (stored as string, so convert)
           {
             service_type: "one_time",
             date: {
               $gte: date,
-              $lt: new Date(endDate).toISOString().split("T")[0], // "YYYY-MM-DD"
+              $lt: new Date(endDate).toISOString().split("T")[0],
             },
           },
-          // Recurring services
           {
             service_type: "recurring",
             recurring_schedule: {
@@ -438,26 +436,26 @@ exports.getServices = async (req, res) => {
     }
 
     // ---------------------------------------------
-    // ✅ CATEGORY FILTER
+    // CATEGORY FILTER
     // ---------------------------------------------
     if (categoryId.length > 0) {
       finalMatch.$and.push({ category: { $in: categoryId } });
     }
 
     // ---------------------------------------------
-    // ✅ TAG FILTER
+    // TAG FILTER
     // ---------------------------------------------
     if (tags.length > 0) {
       finalMatch.$and.push({ tags: { $in: tags } });
     }
 
     // ---------------------------------------------
-    // ✅ FREE / PAID FILTER
+    // FREE FILTER
     // ---------------------------------------------
     if (isFree === true) finalMatch.$and.push({ isFree: true });
 
     // ---------------------------------------------
-    // ✅ KEYWORD FILTER
+    // KEYWORD FILTER
     // ---------------------------------------------
     const safeKeyword = String(keyword || "").trim();
     if (safeKeyword !== "") {
@@ -470,17 +468,16 @@ exports.getServices = async (req, res) => {
         ],
       });
     }
-
-    // ---------------------------------------------
-    // ✅ GEO FILTER
-    // ---------------------------------------------
+    // -------------------------------------------------
+    // ⭐ GEO FILTER (REAL RADIUS FILTER)
+    // -------------------------------------------------
     if (latitude && longitude && radius_km) {
       finalMatch.$and.push({
         location: {
           $geoWithin: {
             $centerSphere: [
               [parseFloat(longitude), parseFloat(latitude)],
-              radius_km / 6378.1,
+              parseFloat(radius_km) / 6378.1, // km → radians
             ],
           },
         },
@@ -488,27 +485,73 @@ exports.getServices = async (req, res) => {
     }
 
     // ---------------------------------------------
-    // Cleanup empty $and
+    // CLEANUP EMPTY AND
     // ---------------------------------------------
     if (finalMatch.$and.length === 0) delete finalMatch.$and;
 
-    console.log("🔥 FINAL QUERY:", JSON.stringify(finalMatch, null, 2));
-
     // ---------------------------------------------
-    // Pagination
+    // FETCH SERVICES
     // ---------------------------------------------
     const skip = (page - 1) * limit;
 
-    // Fetch services
-    const services = await Service.find(finalMatch)
+    let services = await Service.find(finalMatch)
       .populate("category")
       .populate("owner", "name profile_image")
       .sort({ created_at: -1 })
       .skip(skip)
-      .limit(limit);
+      .limit(limit)
+      .lean(); // ⭐ VERY IMPORTANT (allows modifying result)
+
+    // ---------------------------------------------
+    // ⭐ DISTANCE CALCULATION & SORTING BY NEAREST
+    // ---------------------------------------------
+    let userLat = parseFloat(latitude);
+    let userLng = parseFloat(longitude);
+
+    function getDistanceKm(lat1, lon1, lat2, lon2) {
+      const R = 6371; // Earth radius km
+      const dLat = (lat2 - lat1) * (Math.PI / 180);
+      const dLon = (lon2 - lon1) * (Math.PI / 180);
+      const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(lat1 * (Math.PI / 180)) *
+          Math.cos(lat2 * (Math.PI / 180)) *
+          Math.sin(dLon / 2) *
+          Math.sin(dLon / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return R * c;
+    }
+
+    if (!isNaN(userLat) && !isNaN(userLng)) {
+      services = services.map((svc) => {
+        const svcLat = svc.location?.coordinates?.[1];
+        const svcLng = svc.location?.coordinates?.[0];
+
+        let distanceKm = null;
+
+        if (!isNaN(svcLat) && !isNaN(svcLng)) {
+          distanceKm = getDistanceKm(userLat, userLng, svcLat, svcLng);
+        }
+
+        return {
+          ...svc,
+          distance_km: distanceKm ? Number(distanceKm.toFixed(2)) : null,
+        };
+      });
+
+      // ⭐ SORT: nearest → farthest
+      services.sort((a, b) => {
+        if (a.distance_km === null) return 1;
+        if (b.distance_km === null) return -1;
+        return a.distance_km - b.distance_km;
+      });
+    }
 
     const total = await Service.countDocuments(finalMatch);
 
+    // ---------------------------------------------
+    // RESPONSE
+    // ---------------------------------------------
     return res.json({
       isSuccess: true,
       message: "Services fetched successfully",

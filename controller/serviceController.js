@@ -403,9 +403,7 @@ exports.getServices = async (req, res) => {
 
     let finalMatch = { $and: [] };
 
-    // ---------------------------------------------
-    // DATE FILTER
-    // ---------------------------------------------
+    // ---------------- DATE FILTER ----------------
     if (date) {
       const startDate = new Date(date);
       const endDate = new Date(date);
@@ -435,31 +433,25 @@ exports.getServices = async (req, res) => {
       });
     }
 
-    // ---------------------------------------------
-    // CATEGORY FILTER
-    // ---------------------------------------------
+    // ---------------- CATEGORY FILTER ----------------
     if (categoryId.length > 0) {
       finalMatch.$and.push({ category: { $in: categoryId } });
     }
 
-    // ---------------------------------------------
-    // TAG FILTER
-    // ---------------------------------------------
+    // ---------------- TAG FILTER ----------------
     if (tags.length > 0) {
       finalMatch.$and.push({ tags: { $in: tags } });
     }
 
-    // ---------------------------------------------
-    // FREE FILTER
-    // ---------------------------------------------
-    if (isFree === true) finalMatch.$and.push({ isFree: true });
+    // ---------------- FREE FILTER ----------------
+    if (isFree === true) {
+      finalMatch.$and.push({ isFree: true });
+    }
 
-    // ---------------------------------------------
-    // KEYWORD FILTER
-    // ---------------------------------------------
-    const safeKeyword = String(keyword || "").trim();
-    if (safeKeyword !== "") {
-      const regex = new RegExp(safeKeyword, "i");
+    // ---------------- KEYWORD FILTER ----------------
+    if (keyword.trim() !== "") {
+      const regex = new RegExp(keyword.trim(), "i");
+
       finalMatch.$and.push({
         $or: [
           { title: { $regex: regex } },
@@ -468,98 +460,87 @@ exports.getServices = async (req, res) => {
         ],
       });
     }
-    // -------------------------------------------------
-    // ⭐ GEO FILTER (REAL RADIUS FILTER)
-    // -------------------------------------------------
+
+    // ---------------- GEO FILTER ----------------
     if (latitude && longitude && radius_km) {
       finalMatch.$and.push({
         location: {
           $geoWithin: {
             $centerSphere: [
               [parseFloat(longitude), parseFloat(latitude)],
-              parseFloat(radius_km) / 6378.1, // km → radians
+              parseFloat(radius_km) / 6378.1,
             ],
           },
         },
       });
     }
 
-    // ---------------------------------------------
-    // CLEANUP EMPTY AND
-    // ---------------------------------------------
-    if (finalMatch.$and.length === 0) delete finalMatch.$and;
+    if (finalMatch.$and.length === 0) {
+      delete finalMatch.$and;
+    }
 
-    // ---------------------------------------------
-    // FETCH SERVICES
-    // ---------------------------------------------
-    const skip = (page - 1) * limit;
-
-    let services = await Service.find(finalMatch)
+    // ---------------- FETCH ALL ----------------
+    let allServices = await Service.find(finalMatch)
       .populate("category")
       .populate("owner", "name profile_image")
-      .sort({ created_at: -1 })
-      .skip(skip)
-      .limit(limit)
-      .lean(); // ⭐ VERY IMPORTANT (allows modifying result)
+      .lean();
 
-    // ---------------------------------------------
-    // ⭐ DISTANCE CALCULATION & SORTING BY NEAREST
-    // ---------------------------------------------
-    let userLat = parseFloat(latitude);
-    let userLng = parseFloat(longitude);
+    // ---------------- DISTANCE CALCULATION ----------------
+    const userLat = parseFloat(latitude);
+    const userLng = parseFloat(longitude);
 
     function getDistanceKm(lat1, lon1, lat2, lon2) {
-      const R = 6371; // Earth radius km
+      const R = 6371;
       const dLat = (lat2 - lat1) * (Math.PI / 180);
       const dLon = (lon2 - lon1) * (Math.PI / 180);
       const a =
-        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.sin(dLat / 2) ** 2 +
         Math.cos(lat1 * (Math.PI / 180)) *
           Math.cos(lat2 * (Math.PI / 180)) *
-          Math.sin(dLon / 2) *
-          Math.sin(dLon / 2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-      return R * c;
+          Math.sin(dLon / 2) ** 2;
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     }
 
     if (!isNaN(userLat) && !isNaN(userLng)) {
-      services = services.map((svc) => {
+      allServices = allServices.map((svc) => {
         const svcLat = svc.location?.coordinates?.[1];
         const svcLng = svc.location?.coordinates?.[0];
 
-        let distanceKm = null;
+        let distance = null;
 
         if (!isNaN(svcLat) && !isNaN(svcLng)) {
-          distanceKm = getDistanceKm(userLat, userLng, svcLat, svcLng);
+          distance = getDistanceKm(userLat, userLng, svcLat, svcLng);
         }
 
         return {
           ...svc,
-          distance_km: distanceKm ? Number(distanceKm.toFixed(2)) : null,
+          distance_km: distance ? Number(distance.toFixed(2)) : null,
         };
       });
 
-      // ⭐ SORT: nearest → farthest
-      services.sort((a, b) => {
+      // sort nearest → farthest
+      allServices.sort((a, b) => {
         if (a.distance_km === null) return 1;
         if (b.distance_km === null) return -1;
         return a.distance_km - b.distance_km;
       });
     }
 
-    const total = await Service.countDocuments(finalMatch);
+    // ---------------- PAGINATION ----------------
+    const start = (page - 1) * limit;
+    const paginated = allServices.slice(start, start + limit);
 
-    // ---------------------------------------------
-    // RESPONSE
-    // ---------------------------------------------
+    const total = allServices.length;
+
+    // ---------------- RESPONSE ----------------
     return res.json({
       isSuccess: true,
       message: "Services fetched successfully",
       total,
       page,
       limit,
-      listServices: services,
-      mapServices: services,
+      listServices: paginated,
+      mapServices: paginated,
     });
   } catch (err) {
     console.error("❌ ERROR:", err);

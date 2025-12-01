@@ -524,6 +524,17 @@ exports.getServices = async (req, res) => {
         if (b.distance_km === null) return -1;
         return a.distance_km - b.distance_km;
       });
+    } // ⭐ ADD THIS BLOCK HERE
+    if (req.body.userId) {
+      const ownServices = allServices.filter(
+        (s) => s.owner?._id?.toString() === req.body.userId
+      );
+
+      const otherServices = allServices.filter(
+        (s) => s.owner?._id?.toString() !== req.body.userId
+      );
+
+      allServices = [...ownServices, ...otherServices];
     }
 
     // ---------------- PAGINATION ----------------

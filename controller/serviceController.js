@@ -567,7 +567,8 @@ function bboxForLatLon(lat, lon, radiusKm = 3) {
 
 exports.getServices = async (req, res) => {
   try {
-    console.log("📩 Incoming Filters:", req.body);
+    console.log("---- Incoming Body ----");
+    console.log(req.body);
 
     const {
       page = 1,
@@ -634,67 +635,36 @@ exports.getServices = async (req, res) => {
       finalMatch.$and.push({ isFree: true });
     }
 
-    // =====================================================
-    // ⭐ CITY SEARCH USING KEYWORD→ Convert city name → lat/lng
-    // =====================================================
-    let cityLat = null;
-    let cityLng = null;
+    // -------------------- KEYWORD FILTER --------------------
+    if (keyword.trim() !== "") {
+      console.log("🔎 Keyword search:", keyword);
 
-    if (keyword && keyword.trim().length > 2) {
-      try {
-        console.log("🌍 Searching city from keyword:", keyword);
-
-        const cityUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${keyword}`;
-        const result = await axios.get(cityUrl);
-
-        if (result.data.length > 0) {
-          cityLat = parseFloat(result.data[0].lat);
-          cityLng = parseFloat(result.data[0].lon);
-
-          console.log("📍 City detected:", cityLat, cityLng);
-        } else {
-          console.log("❌ No city found for keyword");
-        }
-      } catch (err) {
-        console.error("🌐 City lookup FAILED:", err.message);
+      // escape special chars for regex
+      function escapeRegex(text) {
+        return text.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&");
       }
-    }
 
-    // -------------------- GEO FILTER (CITY CIRCLE) --------------------
-    if (cityLat && cityLng) {
-      console.log("🧭 Using city circle filter for keyword area");
-
-      finalMatch.$and.push({
-        location: {
-          $geoWithin: {
-            $centerSphere: [
-              [cityLng, cityLat],
-              parseFloat(radius_km || 200) / 6371,
-            ],
-          },
-        },
-      });
-    }
-
-    // -------------------- TEXT KEYWORD FILTER --------------------
-    if (keyword.trim() !== "" && !cityLat) {
-      console.log("🔎 Keyword text search:", keyword);
-
-      const regex = new RegExp(keyword.trim(), "i");
+      const safeKeyword = escapeRegex(keyword.trim());
+      const regex = new RegExp(safeKeyword, "i");
 
       finalMatch.$and.push({
         $or: [
           { title: { $regex: regex } },
           { description: { $regex: regex } },
           { tags: { $in: [regex] } },
+          { city: { $regex: regex } },
+          { categoryName: { $regex: regex } }, // if you store category name field
         ],
       });
     }
 
-    // Clean empty
-    if (finalMatch.$and.length === 0) delete finalMatch.$and;
+    // Clean empty $and
+    if (finalMatch.$and.length === 0) {
+      delete finalMatch.$and;
+    }
 
-    console.log("🔍 Final Mongo Filter:", JSON.stringify(finalMatch, null, 2));
+    console.log("---- Final Mongo Filter ----");
+    console.log(JSON.stringify(finalMatch, null, 2));
 
     // -----------------------------------------------------
     // FETCH SERVICES
@@ -704,10 +674,13 @@ exports.getServices = async (req, res) => {
       .populate("owner", "name profile_image")
       .lean();
 
-    console.log("📦 Services Found:", allServices.length);
+    console.log(
+      "✔ Total services before distance & pagination:",
+      allServices.length
+    );
 
     // -----------------------------------------------------
-    // ⭐ DISTANCE CALCULATION
+    // DISTANCE CALCULATION
     // -----------------------------------------------------
     const userLat = parseFloat(latitude);
     const userLng = parseFloat(longitude);
@@ -726,7 +699,7 @@ exports.getServices = async (req, res) => {
     }
 
     if (!isNaN(userLat) && !isNaN(userLng)) {
-      console.log("📍 Calculating distances from:", userLat, userLng);
+      console.log("📍 Distance calculation from:", userLat, userLng);
 
       allServices = allServices.map((svc) => {
         const svcLat = svc.location?.coordinates?.[1];
@@ -744,11 +717,21 @@ exports.getServices = async (req, res) => {
         };
       });
 
-      // ⭐ Sort nearest first
+      // Sort nearest → farthest
       allServices.sort((a, b) => {
         if (a.distance_km === null) return 1;
         if (b.distance_km === null) return -1;
         return a.distance_km - b.distance_km;
+      });
+    }
+    // -------------------- RADIUS FILTER --------------------
+    if (radius_km && !isNaN(radius_km)) {
+      const maxRadius = parseFloat(radius_km);
+
+      console.log("🎯 Radius filter enabled:", maxRadius, "km");
+
+      allServices = allServices.filter((svc) => {
+        return svc.distance_km !== null && svc.distance_km <= maxRadius;
       });
     }
 
@@ -756,9 +739,10 @@ exports.getServices = async (req, res) => {
     // PAGINATION
     // -----------------------------------------------------
     const start = (page - 1) * limit;
-    const paginated = allServices.slice(start, start + limit);
+    const listServices = allServices.slice(start, start + limit);
 
-    console.log("📄 Returning:", paginated.length, "items");
+    console.log("✔ mapServices count:", allServices.length);
+    console.log("✔ listServices (paginated) count:", listServices.length);
 
     return res.json({
       isSuccess: true,
@@ -766,7 +750,7 @@ exports.getServices = async (req, res) => {
       total: allServices.length,
       page,
       limit,
-      listServices: paginated,
+      listServices,
       mapServices: allServices,
     });
   } catch (err) {

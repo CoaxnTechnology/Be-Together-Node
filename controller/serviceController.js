@@ -769,10 +769,11 @@ exports.getInterestedUsers = async (req, res) => {
       latitude = 0,
       longitude = 0,
       radius_km = 10,
-      categoryId = [], // can be empty array
+      categoryId = [],
       tags = [],
-      languages = [], // array of languages
-      age, // exact age filter
+      languages = [],
+      age,
+      keyword = "",      // 🔥 added for interests keyword search
       page = 1,
       limit = 10,
       userId,
@@ -787,16 +788,18 @@ exports.getInterestedUsers = async (req, res) => {
     // ---------- Step 1: Build interests filter ----------
     let interestsFilter = [];
 
+    // 🔥 Keyword filter — match in user.interests array
+    if (keyword && typeof keyword === "string" && keyword.trim() !== "") {
+      const cleanKeyword = keyword.trim().toLowerCase();
+      interestsFilter.push(cleanKeyword);
+      console.log("Applying keyword filter:", cleanKeyword);
+    }
+
+    // categoryId → fetch category names + tags
     if (Array.isArray(categoryId) && categoryId.length) {
       const categories = await Category.find({ _id: { $in: categoryId } })
         .select("name tags")
         .lean();
-
-      if (!categories.length) {
-        return res
-          .status(404)
-          .json({ success: false, message: "Category not found" });
-      }
 
       categories.forEach((category) => {
         if (category.name) interestsFilter.push(category.name.toLowerCase());
@@ -808,7 +811,7 @@ exports.getInterestedUsers = async (req, res) => {
 
     if (tags.length) interestsFilter.push(...tags.map((t) => t.toLowerCase()));
 
-    // Remove duplicates
+    // remove duplicates
     interestsFilter = [...new Set(interestsFilter)];
     console.log("Final interests filter:", interestsFilter);
 
@@ -816,7 +819,12 @@ exports.getInterestedUsers = async (req, res) => {
     const query = {};
 
     if (excludeSelf && userId) query._id = { $ne: userId };
-    if (interestsFilter.length) query.interests = { $in: interestsFilter };
+
+    // 🔥 Apply interests filter (keyword + category + tags)
+    if (interestsFilter.length) {
+      query.interests = { $in: interestsFilter };
+      console.log("Applying interests filter in query:", interestsFilter);
+    }
 
     // ---------- Step 3: Language filter ----------
     if (languages.length) {
@@ -824,24 +832,27 @@ exports.getInterestedUsers = async (req, res) => {
         .filter((l) => typeof l === "string" && l.trim())
         .map((l) => new RegExp(`^${l.trim()}$`, "i"));
 
-      if (regexLanguages.length) {
-        query.languages = { $in: regexLanguages };
-      }
+      if (regexLanguages.length) query.languages = { $in: regexLanguages };
 
       console.log("Applying language filter:", regexLanguages);
     }
 
     // ---------- Step 4: Age filter ----------
-    const validAge = Number(age);
-    if (!isNaN(validAge) && age !== "" && age !== null && age !== undefined) {
-      query.age = validAge;
-      console.log("Applying age filter:", validAge);
+    if (age !== undefined && age !== null && !(Array.isArray(age) && age.length === 0)) {
+      if (Array.isArray(age)) {
+        query.age = { $in: age };
+        console.log("Applying age filter (array):", age);
+      } else if (!isNaN(Number(age))) {
+        query.age = Number(age);
+        console.log("Applying age filter (single):", age);
+      }
     } else {
-      console.log("Skipping age filter — invalid or empty age:", age);
+      console.log("Skipping age filter — empty or not provided:", age);
     }
 
     // ---------- Step 5: Location filter ----------
     let calculateDistance = false;
+
     if (Number(latitude) !== 0 && Number(longitude) !== 0) {
       calculateDistance = true;
       query["lastLocation.coords"] = {
@@ -874,6 +885,7 @@ exports.getInterestedUsers = async (req, res) => {
     // ---------- Step 7: Distance calculation ----------
     const addDistance = (userList) => {
       if (!calculateDistance) return userList;
+
       const toRad = (v) => (v * Math.PI) / 180;
 
       return userList

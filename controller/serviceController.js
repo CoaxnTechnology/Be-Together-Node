@@ -565,6 +565,203 @@ function bboxForLatLon(lat, lon, radiusKm = 3) {
 
 // GET ALL SERVICES (with city search + distance + filters)
 
+// exports.getServices = async (req, res) => {
+//   try {
+//     console.log("---- Incoming Body ----");
+//     console.log(req.body);
+
+//     const {
+//       page = 1,
+//       limit = 50,
+//       categoryId = [],
+//       date,
+//       tags = [],
+//       isFree,
+//       latitude,
+//       longitude,
+//       radius_km,
+//       keyword = "",
+//     } = req.body;
+
+//     let finalMatch = { $and: [] };
+
+//     // -------------------- DATE FILTER --------------------
+//     if (date) {
+//       console.log("📅 Date filter:", date);
+
+//       const startDate = new Date(date);
+//       const endDate = new Date(date);
+//       endDate.setDate(endDate.getDate() + 1);
+
+//       finalMatch.$and.push({
+//         $or: [
+//           {
+//             service_type: "one_time",
+//             date: {
+//               $gte: date,
+//               $lt: new Date(endDate).toISOString().split("T")[0],
+//             },
+//           },
+//           {
+//             service_type: "recurring",
+//             recurring_schedule: {
+//               $elemMatch: {
+//                 date: {
+//                   $gte: date,
+//                   $lt: new Date(endDate).toISOString().split("T")[0],
+//                 },
+//               },
+//             },
+//           },
+//         ],
+//       });
+//     }
+
+//     // -------------------- CATEGORY FILTER --------------------
+//     if (categoryId.length > 0) {
+//       console.log("📂 Category filter:", categoryId);
+//       finalMatch.$and.push({ category: { $in: categoryId } });
+//     }
+
+//     // -------------------- TAG FILTER --------------------
+//     if (tags.length > 0) {
+//       console.log("🏷 Tag filter:", tags);
+//       finalMatch.$and.push({ tags: { $in: tags } });
+//     }
+
+//     // -------------------- FREE FILTER --------------------
+//     if (isFree === true) {
+//       console.log("💰 Free Only filter");
+//       finalMatch.$and.push({ isFree: true });
+//     }
+
+//     // -------------------- KEYWORD FILTER --------------------
+//     if (keyword.trim() !== "") {
+//       console.log("🔎 Keyword search:", keyword);
+
+//       // escape special chars for regex
+//       function escapeRegex(text) {
+//         return text.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&");
+//       }
+
+//       const safeKeyword = escapeRegex(keyword.trim());
+//       const regex = new RegExp(safeKeyword, "i");
+
+//       finalMatch.$and.push({
+//         $or: [
+//           { title: { $regex: regex } },
+//           { description: { $regex: regex } },
+//           { tags: { $in: [regex] } },
+//           { city: { $regex: regex } },
+//           { categoryName: { $regex: regex } }, // if you store category name field
+//         ],
+//       });
+//     }
+
+//     // Clean empty $and
+//     if (finalMatch.$and.length === 0) {
+//       delete finalMatch.$and;
+//     }
+
+//     console.log("---- Final Mongo Filter ----");
+//     console.log(JSON.stringify(finalMatch, null, 2));
+
+//     // -----------------------------------------------------
+//     // FETCH SERVICES
+//     // -----------------------------------------------------
+//     let allServices = await Service.find(finalMatch)
+//       .populate("category")
+//       .populate("owner", "name profile_image")
+//       .lean();
+
+//     console.log(
+//       "✔ Total services before distance & pagination:",
+//       allServices.length
+//     );
+
+//     // -----------------------------------------------------
+//     // DISTANCE CALCULATION
+//     // -----------------------------------------------------
+//     const userLat = parseFloat(latitude);
+//     const userLng = parseFloat(longitude);
+
+//     function getDistanceKm(lat1, lon1, lat2, lon2) {
+//       const R = 6371;
+//       const dLat = (lat2 - lat1) * (Math.PI / 180);
+//       const dLon = (lon2 - lon1) * (Math.PI / 180);
+//       const a =
+//         Math.sin(dLat / 2) ** 2 +
+//         Math.cos(lat1 * (Math.PI / 180)) *
+//           Math.cos(lat2 * (Math.PI / 180)) *
+//           Math.sin(dLon / 2) ** 2;
+
+//       return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+//     }
+
+//     if (!isNaN(userLat) && !isNaN(userLng)) {
+//       console.log("📍 Distance calculation from:", userLat, userLng);
+
+//       allServices = allServices.map((svc) => {
+//         const svcLat = svc.location?.coordinates?.[1];
+//         const svcLng = svc.location?.coordinates?.[0];
+
+//         let distance = null;
+
+//         if (!isNaN(svcLat) && !isNaN(svcLng)) {
+//           distance = getDistanceKm(userLat, userLng, svcLat, svcLng);
+//         }
+
+//         return {
+//           ...svc,
+//           distance_km: distance ? Number(distance.toFixed(2)) : null,
+//         };
+//       });
+
+//       // Sort nearest → farthest
+//       allServices.sort((a, b) => {
+//         if (a.distance_km === null) return 1;
+//         if (b.distance_km === null) return -1;
+//         return a.distance_km - b.distance_km;
+//       });
+//     }
+//     // -------------------- RADIUS FILTER --------------------
+//     if (radius_km && !isNaN(radius_km)) {
+//       const maxRadius = parseFloat(radius_km);
+
+//       console.log("🎯 Radius filter enabled:", maxRadius, "km");
+
+//       allServices = allServices.filter((svc) => {
+//         return svc.distance_km !== null && svc.distance_km <= maxRadius;
+//       });
+//     }
+
+//     // -----------------------------------------------------
+//     // PAGINATION
+//     // -----------------------------------------------------
+//     const start = (page - 1) * limit;
+//     const listServices = allServices.slice(start, start + limit);
+
+//     console.log("✔ mapServices count:", allServices.length);
+//     console.log("✔ listServices (paginated) count:", listServices.length);
+
+//     return res.json({
+//       isSuccess: true,
+//       message: "Services fetched successfully",
+//       total: allServices.length,
+//       page,
+//       limit,
+//       listServices,
+//       mapServices: allServices,
+//     });
+//   } catch (err) {
+//     console.error("❌ ERROR:", err);
+//     return res.status(500).json({
+//       isSuccess: false,
+//       message: "Internal server error",
+//       error: err.message,
+//     });
+//   }
+// };
 exports.getServices = async (req, res) => {
   try {
     console.log("---- Incoming Body ----");
@@ -639,7 +836,6 @@ exports.getServices = async (req, res) => {
     if (keyword.trim() !== "") {
       console.log("🔎 Keyword search:", keyword);
 
-      // escape special chars for regex
       function escapeRegex(text) {
         return text.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&");
       }
@@ -653,12 +849,11 @@ exports.getServices = async (req, res) => {
           { description: { $regex: regex } },
           { tags: { $in: [regex] } },
           { city: { $regex: regex } },
-          { categoryName: { $regex: regex } }, // if you store category name field
+          { categoryName: { $regex: regex } },
         ],
       });
     }
 
-    // Clean empty $and
     if (finalMatch.$and.length === 0) {
       delete finalMatch.$and;
     }
@@ -724,34 +919,40 @@ exports.getServices = async (req, res) => {
         return a.distance_km - b.distance_km;
       });
     }
-    // -------------------- RADIUS FILTER --------------------
+
+    // -----------------------------------------------------
+    // ❗ NEW LOGIC: Radius filter ONLY for listServices
+    // -----------------------------------------------------
+    let filteredServices = [...allServices];
+
     if (radius_km && !isNaN(radius_km)) {
       const maxRadius = parseFloat(radius_km);
+      console.log("🎯 Radius filter for listServices only:", maxRadius);
 
-      console.log("🎯 Radius filter enabled:", maxRadius, "km");
-
-      allServices = allServices.filter((svc) => {
+      filteredServices = filteredServices.filter((svc) => {
         return svc.distance_km !== null && svc.distance_km <= maxRadius;
       });
     }
 
     // -----------------------------------------------------
-    // PAGINATION
+    // PAGINATION (only on filtered list)
     // -----------------------------------------------------
     const start = (page - 1) * limit;
-    const listServices = allServices.slice(start, start + limit);
+    const listServices = filteredServices.slice(start, start + limit);
 
-    console.log("✔ mapServices count:", allServices.length);
-    console.log("✔ listServices (paginated) count:", listServices.length);
+    console.log("✔ mapServices count (NO RADIUS):", allServices.length);
+    console.log("✔ listServices (radius + pagination):", listServices.length);
 
     return res.json({
       isSuccess: true,
       message: "Services fetched successfully",
-      total: allServices.length,
+
+      total: filteredServices.length, // list count
       page,
       limit,
-      listServices,
-      mapServices: allServices,
+
+      mapServices: allServices, // full list (no radius)
+      listServices, // filtered + paginated
     });
   } catch (err) {
     console.error("❌ ERROR:", err);
@@ -762,6 +963,7 @@ exports.getServices = async (req, res) => {
     });
   }
 };
+
 
 exports.getInterestedUsers = async (req, res) => {
   try {

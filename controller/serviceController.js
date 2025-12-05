@@ -707,7 +707,7 @@ exports.getServices = async (req, res) => {
       categoryId = [],
       date,
       tags = [],
-      pos,
+      isFree,
       latitude,
       longitude,
       radius_km,

@@ -707,7 +707,7 @@ exports.getServices = async (req, res) => {
       categoryId = [],
       date,
       tags = [],
-      isFree,
+      pos,
       latitude,
       longitude,
       radius_km,
@@ -941,171 +941,371 @@ exports.getServices = async (req, res) => {
 };
 
 
+// exports.getInterestedUsers = async (req, res) => {
+//   try {
+//     const {
+//       latitude = 0,
+//       longitude = 0,
+//       radius_km = 10,
+//       categoryId = [],
+//       tags = [],
+//       languages = [],
+//       age,
+//       keyword = "", // 🔥 added for interests keyword search
+//       page = 1,
+//       limit = 10,
+//       userId,
+//       excludeSelf = false,
+//     } = req.body;
+
+//     const skip = (parseInt(page) - 1) * parseInt(limit);
+
+//     console.log("===== getInterestedUsers called =====");
+//     console.log("Request body:", req.body);
+
+//     // ---------- Step 1: Build interests filter ----------
+//     let interestsFilter = [];
+
+//     // 🔥 Keyword filter — match in user.interests array
+//     if (keyword && typeof keyword === "string" && keyword.trim() !== "") {
+//       const cleanKeyword = keyword.trim().toLowerCase();
+//       interestsFilter.push(cleanKeyword);
+//       console.log("Applying keyword filter:", cleanKeyword);
+//     }
+
+//     // categoryId → fetch category names + tags
+//     if (Array.isArray(categoryId) && categoryId.length) {
+//       const categories = await Category.find({ _id: { $in: categoryId } })
+//         .select("name tags")
+//         .lean();
+
+//       categories.forEach((category) => {
+//         if (category.name) interestsFilter.push(category.name.toLowerCase());
+//         if (Array.isArray(category.tags)) {
+//           interestsFilter.push(...category.tags.map((t) => t.toLowerCase()));
+//         }
+//       });
+//     }
+
+//     if (tags.length) interestsFilter.push(...tags.map((t) => t.toLowerCase()));
+
+//     // remove duplicates
+//     interestsFilter = [...new Set(interestsFilter)];
+//     console.log("Final interests filter:", interestsFilter);
+
+//     // ---------- Step 2: Build user query ----------
+//     const query = {};
+
+//     if (excludeSelf && userId) query._id = { $ne: userId };
+
+//     // 🔥 Apply interests filter (keyword + category + tags)
+//     if (interestsFilter.length) {
+//       query.interests = { $in: interestsFilter };
+//       console.log("Applying interests filter in query:", interestsFilter);
+//     }
+
+//     // ---------- Step 3: Language filter ----------
+//     if (languages.length) {
+//       const regexLanguages = languages
+//         .filter((l) => typeof l === "string" && l.trim())
+//         .map((l) => new RegExp(`^${l.trim()}$`, "i"));
+
+//       if (regexLanguages.length) query.languages = { $in: regexLanguages };
+
+//       console.log("Applying language filter:", regexLanguages);
+//     }
+
+//     // ---------- Step 4: Age filter ----------
+//     if (
+//       age !== undefined &&
+//       age !== null &&
+//       !(Array.isArray(age) && age.length === 0)
+//     ) {
+//       if (Array.isArray(age)) {
+//         query.age = { $in: age };
+//         console.log("Applying age filter (array):", age);
+//       } else if (!isNaN(Number(age))) {
+//         query.age = Number(age);
+//         console.log("Applying age filter (single):", age);
+//       }
+//     } else {
+//       console.log("Skipping age filter — empty or not provided:", age);
+//     }
+
+//     // ---------- Step 5: Location filter ----------
+//     let calculateDistance = false;
+
+//     if (Number(latitude) !== 0 && Number(longitude) !== 0) {
+//       calculateDistance = true;
+//       query["lastLocation.coords"] = {
+//         $geoWithin: {
+//           $centerSphere: [
+//             [parseFloat(longitude), parseFloat(latitude)],
+//             parseFloat(radius_km) / 6371,
+//           ],
+//         },
+//       };
+//       console.log(
+//         `Applying location filter: center=[${longitude},${latitude}], radius_km=${radius_km}`
+//       );
+//     }
+
+//     console.log("MongoDB user query:", JSON.stringify(query, null, 2));
+
+//     // ---------- Step 6A: Map Users (no pagination) ----------
+//     const mapUsers = await User.find(query)
+//       .select("name email profile_image interests languages age lastLocation")
+//       .lean();
+
+//     // ---------- Step 6B: List Users (with pagination) ----------
+//     const listUsers = await User.find(query)
+//       .select("name email profile_image interests languages age lastLocation")
+//       .skip(skip)
+//       .limit(parseInt(limit))
+//       .lean();
+
+//     // ---------- Step 7: Distance calculation ----------
+//     const addDistance = (userList) => {
+//       if (!calculateDistance) return userList;
+
+//       const toRad = (v) => (v * Math.PI) / 180;
+
+//       return userList
+//         .map((u) => {
+//           if (u.lastLocation?.coords?.coordinates) {
+//             const [lon2, lat2] = u.lastLocation.coords.coordinates;
+//             const lat1 = parseFloat(latitude),
+//               lon1 = parseFloat(longitude);
+//             const R = 6371;
+//             const dLat = toRad(lat2 - lat1);
+//             const dLon = toRad(lon2 - lon1);
+//             const a =
+//               Math.sin(dLat / 2) ** 2 +
+//               Math.cos(toRad(lat1)) *
+//                 Math.cos(toRad(lat2)) *
+//                 Math.sin(dLon / 2) ** 2;
+//             const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+//             u.distance_km = Math.round(R * c * 100) / 100;
+//           } else {
+//             u.distance_km = null;
+//           }
+//           return u;
+//         })
+//         .sort((a, b) => (a.distance_km || 9999) - (b.distance_km || 9999));
+//     };
+
+//     const finalMapUsers = addDistance(mapUsers);
+//     const finalListUsers = addDistance(listUsers);
+
+//     // ---------- Step 8: Total count ----------
+//     const total = await User.countDocuments(query);
+
+//     // ---------- Step 9: Return response ----------
+//     res.json({
+//       success: true,
+//       total,
+//       page: parseInt(page),
+//       limit: parseInt(limit),
+//       mapUsers: finalMapUsers,
+//       listUsers: finalListUsers,
+//     });
+//   } catch (err) {
+//     console.error("getInterestedUsers error:", err);
+//     res.status(500).json({ success: false, message: err.message });
+//   }
+// };
+
+// ----------- Get All Services -------------
+
 exports.getInterestedUsers = async (req, res) => {
   try {
     const {
       latitude = 0,
       longitude = 0,
+
+      filterLat,
+      filterLng,
+
       radius_km = 10,
       categoryId = [],
       tags = [],
       languages = [],
       age,
-      keyword = "", // 🔥 added for interests keyword search
+      keyword = "",
       page = 1,
       limit = 10,
       userId,
       excludeSelf = false,
     } = req.body;
 
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const skip = (Number(page) - 1) * Number(limit);
 
     console.log("===== getInterestedUsers called =====");
-    console.log("Request body:", req.body);
+    console.log("Incoming body:", req.body);
 
-    // ---------- Step 1: Build interests filter ----------
+    // -----------------------------------------------------
+    // STEP 1: INTEREST FILTER LOGIC (categories + tags + keyword)
+    // -----------------------------------------------------
     let interestsFilter = [];
 
-    // 🔥 Keyword filter — match in user.interests array
-    if (keyword && typeof keyword === "string" && keyword.trim() !== "") {
-      const cleanKeyword = keyword.trim().toLowerCase();
-      interestsFilter.push(cleanKeyword);
-      console.log("Applying keyword filter:", cleanKeyword);
+    // Keyword filter
+    if (keyword.trim() !== "") {
+      interestsFilter.push(keyword.trim().toLowerCase());
     }
 
-    // categoryId → fetch category names + tags
-    if (Array.isArray(categoryId) && categoryId.length) {
+    // Category filter
+    if (Array.isArray(categoryId) && categoryId.length > 0) {
       const categories = await Category.find({ _id: { $in: categoryId } })
         .select("name tags")
         .lean();
 
-      categories.forEach((category) => {
-        if (category.name) interestsFilter.push(category.name.toLowerCase());
-        if (Array.isArray(category.tags)) {
-          interestsFilter.push(...category.tags.map((t) => t.toLowerCase()));
-        }
+      categories.forEach((c) => {
+        if (c.name) interestsFilter.push(c.name.toLowerCase());
+        if (Array.isArray(c.tags))
+          interestsFilter.push(...c.tags.map((t) => t.toLowerCase()));
       });
     }
 
-    if (tags.length) interestsFilter.push(...tags.map((t) => t.toLowerCase()));
-
-    // remove duplicates
-    interestsFilter = [...new Set(interestsFilter)];
-    console.log("Final interests filter:", interestsFilter);
-
-    // ---------- Step 2: Build user query ----------
-    const query = {};
-
-    if (excludeSelf && userId) query._id = { $ne: userId };
-
-    // 🔥 Apply interests filter (keyword + category + tags)
-    if (interestsFilter.length) {
-      query.interests = { $in: interestsFilter };
-      console.log("Applying interests filter in query:", interestsFilter);
+    // Tags
+    if (Array.isArray(tags) && tags.length > 0) {
+      interestsFilter.push(...tags.map((t) => t.toLowerCase()));
     }
 
-    // ---------- Step 3: Language filter ----------
-    if (languages.length) {
+    // Remove duplicates
+    interestsFilter = [...new Set(interestsFilter)];
+
+    console.log("Final interestsFilter:", interestsFilter);
+
+    // -----------------------------------------------------
+    // STEP 2: BUILD MONGO QUERY
+    // -----------------------------------------------------
+    const query = {};
+
+    if (excludeSelf && userId) {
+      query._id = { $ne: userId };
+    }
+
+    // Interest filter
+    if (interestsFilter.length > 0) {
+      query.interests = { $in: interestsFilter };
+    }
+
+    // Languages filter
+    if (Array.isArray(languages) && languages.length > 0) {
       const regexLanguages = languages
         .filter((l) => typeof l === "string" && l.trim())
         .map((l) => new RegExp(`^${l.trim()}$`, "i"));
 
-      if (regexLanguages.length) query.languages = { $in: regexLanguages };
-
-      console.log("Applying language filter:", regexLanguages);
-    }
-
-    // ---------- Step 4: Age filter ----------
-    if (
-      age !== undefined &&
-      age !== null &&
-      !(Array.isArray(age) && age.length === 0)
-    ) {
-      if (Array.isArray(age)) {
-        query.age = { $in: age };
-        console.log("Applying age filter (array):", age);
-      } else if (!isNaN(Number(age))) {
-        query.age = Number(age);
-        console.log("Applying age filter (single):", age);
+      if (regexLanguages.length > 0) {
+        query.languages = { $in: regexLanguages };
       }
-    } else {
-      console.log("Skipping age filter — empty or not provided:", age);
     }
 
-    // ---------- Step 5: Location filter ----------
-    let calculateDistance = false;
+    // Age filter
+    if (Array.isArray(age) && age.length > 0) {
+      query.age = { $in: age };
+    } else if (!Array.isArray(age) && !isNaN(Number(age))) {
+      query.age = Number(age);
+    }
 
-    if (Number(latitude) !== 0 && Number(longitude) !== 0) {
-      calculateDistance = true;
+    // -----------------------------------------------------
+    // STEP 3: LOCATION (CITY FILTER OR USER LOCATION)
+    // -----------------------------------------------------
+
+    let centerLat = null;
+    let centerLng = null;
+
+    // CASE 1 → CITY (filterLat/filterLng)
+    if (filterLat && filterLng) {
+      centerLat = Number(filterLat);
+      centerLng = Number(filterLng);
+      console.log("📌 Radius Center = CITY:", centerLat, centerLng);
+    }
+    // CASE 2 → USER LOCATION
+    else if (latitude && longitude) {
+      centerLat = Number(latitude);
+      centerLng = Number(longitude);
+      console.log("📌 Radius Center = USER:", centerLat, centerLng);
+    }
+
+    // Apply radius only if center exists
+    if (centerLat !== null && centerLng !== null) {
       query["lastLocation.coords"] = {
         $geoWithin: {
           $centerSphere: [
-            [parseFloat(longitude), parseFloat(latitude)],
-            parseFloat(radius_km) / 6371,
+            [centerLng, centerLat],
+            Number(radius_km) / 6371,
           ],
         },
       };
-      console.log(
-        `Applying location filter: center=[${longitude},${latitude}], radius_km=${radius_km}`
-      );
     }
 
-    console.log("MongoDB user query:", JSON.stringify(query, null, 2));
+    console.log("Final Mongo Query:", JSON.stringify(query, null, 2));
 
-    // ---------- Step 6A: Map Users (no pagination) ----------
+    // -----------------------------------------------------
+    // STEP 4: FETCH USERS
+    // -----------------------------------------------------
+
     const mapUsers = await User.find(query)
       .select("name email profile_image interests languages age lastLocation")
       .lean();
 
-    // ---------- Step 6B: List Users (with pagination) ----------
     const listUsers = await User.find(query)
       .select("name email profile_image interests languages age lastLocation")
       .skip(skip)
-      .limit(parseInt(limit))
+      .limit(Number(limit))
       .lean();
 
-    // ---------- Step 7: Distance calculation ----------
-    const addDistance = (userList) => {
-      if (!calculateDistance) return userList;
-
+    // -----------------------------------------------------
+    // STEP 5: ALWAYS CALCULATE DISTANCE FROM USER LOCATION
+    // -----------------------------------------------------
+    const addDistance = (users) => {
       const toRad = (v) => (v * Math.PI) / 180;
 
-      return userList
+      return users
         .map((u) => {
           if (u.lastLocation?.coords?.coordinates) {
             const [lon2, lat2] = u.lastLocation.coords.coordinates;
-            const lat1 = parseFloat(latitude),
-              lon1 = parseFloat(longitude);
+
+            const lat1 = Number(latitude);
+            const lon1 = Number(longitude);
+
             const R = 6371;
             const dLat = toRad(lat2 - lat1);
             const dLon = toRad(lon2 - lon1);
+
             const a =
               Math.sin(dLat / 2) ** 2 +
               Math.cos(toRad(lat1)) *
                 Math.cos(toRad(lat2)) *
                 Math.sin(dLon / 2) ** 2;
+
             const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-            u.distance_km = Math.round(R * c * 100) / 100;
+            u.distance_km = Number((R * c).toFixed(2));
           } else {
             u.distance_km = null;
           }
           return u;
         })
-        .sort((a, b) => (a.distance_km || 9999) - (b.distance_km || 9999));
+        .sort((a, b) => (a.distance_km || 999999) - (b.distance_km || 999999));
     };
 
     const finalMapUsers = addDistance(mapUsers);
     const finalListUsers = addDistance(listUsers);
 
-    // ---------- Step 8: Total count ----------
+    // -----------------------------------------------------
+    // STEP 6: TOTAL COUNT
+    // -----------------------------------------------------
     const total = await User.countDocuments(query);
 
-    // ---------- Step 9: Return response ----------
+    // -----------------------------------------------------
+    // STEP 7: RESPONSE
+    // -----------------------------------------------------
     res.json({
       success: true,
       total,
-      page: parseInt(page),
-      limit: parseInt(limit),
+      page: Number(page),
+      limit: Number(limit),
       mapUsers: finalMapUsers,
       listUsers: finalListUsers,
     });
@@ -1115,7 +1315,6 @@ exports.getInterestedUsers = async (req, res) => {
   }
 };
 
-// ----------- Get All Services -------------
 exports.getAllServices = async (req, res) => {
   try {
     const page = Math.max(1, Number(req.query.page) || 1);

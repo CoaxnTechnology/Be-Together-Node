@@ -386,8 +386,24 @@ function bboxForLatLon(lat, lon, radiusKm = 3) {
 //------------------Get Service------------------
 // Adjust path
 
+/**
+ * getServices controller
+ *
+ * Expects request body:
+ * {
+ *   page, limit,
+ *   categoryId: [], tags: [], isFree,
+ *   date,
+ *   latitude, longitude, radius_km,
+ *   boundingBox: { north, south, east, west }   // Option B - Google maps style (optional)
+ *   keyword: ""  // keyword applies to both map & list
+ * }
+ */
 // exports.getServices = async (req, res) => {
+//   console.log("\n===== getServices called =====");
 //   try {
+//     console.log("Incoming Body:", JSON.stringify(req.body, null, 2));
+
 //     const {
 //       page = 1,
 //       limit = 50,
@@ -398,363 +414,281 @@ function bboxForLatLon(lat, lon, radiusKm = 3) {
 //       latitude,
 //       longitude,
 //       radius_km,
+//       boundingBox, // { north, south, east, west }
 //       keyword = "",
 //     } = req.body;
 
-//     let finalMatch = { $and: [] };
+//     // parse numeric values
+//     const userLat = isNaN(Number(latitude)) ? null : Number(latitude);
+//     const userLng = isNaN(Number(longitude)) ? null : Number(longitude);
+//     const maxRadius = radius_km ? Number(radius_km) : null;
+//     const bx = boundingBox || null;
+//     const pageNum = Math.max(1, Number(page) || 1);
+//     const limitNum = Math.max(1, Number(limit) || 50);
+//     console.log("Parsed params:", {
+//       pageNum,
+//       limitNum,
+//       userLat,
+//       userLng,
+//       maxRadius,
+//       boundingBox: bx,
+//       keyword,
+//     });
 
-//     // ---------------- DATE FILTER ----------------
+//     // -------------------------
+//     // Build base mongo filter (EXCLUDING keyword and bbox/radius)
+//     // We'll apply keyword and bbox in-memory (after populate) for richer matching
+//     // -------------------------
+//     let baseMatch = {};
+
+//     // DATE filter -> keep same one_time / recurring logic (string dates stored as 'YYYY-MM-DD')
 //     if (date) {
-//       const startDate = new Date(date);
+//       console.log("Applying date filter for:", date);
 //       const endDate = new Date(date);
 //       endDate.setDate(endDate.getDate() + 1);
-
-//       finalMatch.$and.push({
-//         $or: [
-//           {
-//             service_type: "one_time",
-//             date: {
-//               $gte: date,
-//               $lt: new Date(endDate).toISOString().split("T")[0],
-//             },
-//           },
-//           {
-//             service_type: "recurring",
-//             recurring_schedule: {
-//               $elemMatch: {
-//                 date: {
-//                   $gte: date,
-//                   $lt: new Date(endDate).toISOString().split("T")[0],
-//                 },
-//               },
-//             },
-//           },
-//         ],
-//       });
-//     }
-
-//     // ---------------- CATEGORY FILTER ----------------
-//     if (categoryId.length > 0) {
-//       finalMatch.$and.push({ category: { $in: categoryId } });
-//     }
-
-//     // ---------------- TAG FILTER ----------------
-//     if (tags.length > 0) {
-//       finalMatch.$and.push({ tags: { $in: tags } });
-//     }
-
-//     // ---------------- FREE FILTER ----------------
-//     if (isFree === true) {
-//       finalMatch.$and.push({ isFree: true });
-//     }
-
-//     // ---------------- KEYWORD FILTER ----------------
-//     if (keyword.trim() !== "") {
-//       const regex = new RegExp(keyword.trim(), "i");
-
-//       finalMatch.$and.push({
-//         $or: [
-//           { title: { $regex: regex } },
-//           { description: { $regex: regex } },
-//           { tags: { $in: [regex] } },
-//         ],
-//       });
-//     }
-
-//     // ---------------- GEO FILTER ----------------
-//     if (latitude && longitude && radius_km) {
-//       finalMatch.$and.push({
-//         location: {
-//           $geoWithin: {
-//             $centerSphere: [
-//               [parseFloat(longitude), parseFloat(latitude)],
-//               parseFloat(radius_km) / 6378.1,
-//             ],
+//       baseMatch.$or = [
+//         {
+//           service_type: "one_time",
+//           date: {
+//             $gte: date,
+//             $lt: new Date(endDate).toISOString().split("T")[0],
 //           },
 //         },
-//       });
-//     }
-
-//     if (finalMatch.$and.length === 0) {
-//       delete finalMatch.$and;
-//     }
-
-//     // ---------------- FETCH ALL ----------------
-//     let allServices = await Service.find(finalMatch)
-//       .populate("category")
-//       .populate("owner", "name profile_image")
-//       .lean();
-
-//     // ---------------- DISTANCE CALCULATION ----------------
-//     const userLat = parseFloat(latitude);
-//     const userLng = parseFloat(longitude);
-
-//     function getDistanceKm(lat1, lon1, lat2, lon2) {
-//       const R = 6371;
-//       const dLat = (lat2 - lat1) * (Math.PI / 180);
-//       const dLon = (lon2 - lon1) * (Math.PI / 180);
-//       const a =
-//         Math.sin(dLat / 2) ** 2 +
-//         Math.cos(lat1 * (Math.PI / 180)) *
-//           Math.cos(lat2 * (Math.PI / 180)) *
-//           Math.sin(dLon / 2) ** 2;
-//       return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-//     }
-
-//     if (!isNaN(userLat) && !isNaN(userLng)) {
-//       allServices = allServices.map((svc) => {
-//         const svcLat = svc.location?.coordinates?.[1];
-//         const svcLng = svc.location?.coordinates?.[0];
-
-//         let distance = null;
-
-//         if (!isNaN(svcLat) && !isNaN(svcLng)) {
-//           distance = getDistanceKm(userLat, userLng, svcLat, svcLng);
-//         }
-
-//         return {
-//           ...svc,
-//           distance_km: distance ? Number(distance.toFixed(2)) : null,
-//         };
-//       });
-
-//       // sort nearest → farthest
-//       allServices.sort((a, b) => {
-//         if (a.distance_km === null) return 1;
-//         if (b.distance_km === null) return -1;
-//         return a.distance_km - b.distance_km;
-//       });
-//     } // ⭐ ADD THIS BLOCK HERE
-//     if (req.body.userId) {
-//       const ownServices = allServices.filter(
-//         (s) => s.owner?._id?.toString() === req.body.userId
-//       );
-
-//       const otherServices = allServices.filter(
-//         (s) => s.owner?._id?.toString() !== req.body.userId
-//       );
-
-//       allServices = [...ownServices, ...otherServices];
-//     }
-
-//     // ---------------- PAGINATION ----------------
-//     const start = (page - 1) * limit;
-//     const paginated = allServices.slice(start, start + limit);
-
-//     const total = allServices.length;
-
-//     // ---------------- RESPONSE ----------------
-//     return res.json({
-//       isSuccess: true,
-//       message: "Services fetched successfully",
-//       total,
-//       page,
-//       limit,
-//       listServices: paginated,
-//       mapServices: allServices,
-//     });
-//   } catch (err) {
-//     console.error("❌ ERROR:", err);
-//     return res.status(500).json({
-//       isSuccess: false,
-//       message: "Internal server error",
-//       error: err.message,
-//     });
-//   }
-// };
-
-// GET ALL SERVICES (with city search + distance + filters)
-
-// exports.getServices = async (req, res) => {
-//   try {
-//     console.log("---- Incoming Body ----");
-//     console.log(req.body);
-
-//     const {
-//       page = 1,
-//       limit = 50,
-//       categoryId = [],
-//       date,
-//       tags = [],
-//       isFree,
-//       latitude,
-//       longitude,
-//       radius_km,
-//       keyword = "",
-//     } = req.body;
-
-//     let finalMatch = { $and: [] };
-
-//     // -------------------- DATE FILTER --------------------
-//     if (date) {
-//       console.log("📅 Date filter:", date);
-
-//       const startDate = new Date(date);
-//       const endDate = new Date(date);
-//       endDate.setDate(endDate.getDate() + 1);
-
-//       finalMatch.$and.push({
-//         $or: [
-//           {
-//             service_type: "one_time",
-//             date: {
-//               $gte: date,
-//               $lt: new Date(endDate).toISOString().split("T")[0],
-//             },
-//           },
-//           {
-//             service_type: "recurring",
-//             recurring_schedule: {
-//               $elemMatch: {
-//                 date: {
-//                   $gte: date,
-//                   $lt: new Date(endDate).toISOString().split("T")[0],
-//                 },
+//         {
+//           service_type: "recurring",
+//           recurring_schedule: {
+//             $elemMatch: {
+//               date: {
+//                 $gte: date,
+//                 $lt: new Date(endDate).toISOString().split("T")[0],
 //               },
 //             },
 //           },
-//         ],
-//       });
+//         },
+//       ];
 //     }
 
-//     // -------------------- CATEGORY FILTER --------------------
-//     if (categoryId.length > 0) {
-//       console.log("📂 Category filter:", categoryId);
-//       finalMatch.$and.push({ category: { $in: categoryId } });
+//     // CATEGORY filter
+//     if (Array.isArray(categoryId) && categoryId.length > 0) {
+//       console.log("Applying category filter:", categoryId);
+//       baseMatch.category = { $in: categoryId };
 //     }
 
-//     // -------------------- TAG FILTER --------------------
-//     if (tags.length > 0) {
-//       console.log("🏷 Tag filter:", tags);
-//       finalMatch.$and.push({ tags: { $in: tags } });
+//     // TAGS filter
+//     if (Array.isArray(tags) && tags.length > 0) {
+//       console.log("Applying tags filter:", tags);
+//       baseMatch.tags = { $in: tags };
 //     }
 
-//     // -------------------- FREE FILTER --------------------
+//     // FREE filter
 //     if (isFree === true) {
-//       console.log("💰 Free Only filter");
-//       finalMatch.$and.push({ isFree: true });
+//       console.log("Applying isFree=true filter");
+//       baseMatch.isFree = true;
 //     }
 
-//     // -------------------- KEYWORD FILTER --------------------
-//     if (keyword.trim() !== "") {
-//       console.log("🔎 Keyword search:", keyword);
-
-//       // escape special chars for regex
-//       function escapeRegex(text) {
-//         return text.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&");
-//       }
-
-//       const safeKeyword = escapeRegex(keyword.trim());
-//       const regex = new RegExp(safeKeyword, "i");
-
-//       finalMatch.$and.push({
-//         $or: [
-//           { title: { $regex: regex } },
-//           { description: { $regex: regex } },
-//           { tags: { $in: [regex] } },
-//           { city: { $regex: regex } },
-//           { categoryName: { $regex: regex } }, // if you store category name field
-//         ],
-//       });
-//     }
-
-//     // Clean empty $and
-//     if (finalMatch.$and.length === 0) {
-//       delete finalMatch.$and;
-//     }
-
-//     console.log("---- Final Mongo Filter ----");
-//     console.log(JSON.stringify(finalMatch, null, 2));
+//     console.log("Base Mongo filter (no keyword/bbox):", JSON.stringify(baseMatch, null, 2));
 
 //     // -----------------------------------------------------
-//     // FETCH SERVICES
+//     // FETCH SERVICES FROM DB (apply baseMatch only)
+//     // we populate category and owner so we can search category.name and owner fields in-memory
 //     // -----------------------------------------------------
-//     let allServices = await Service.find(finalMatch)
+//     console.log("Querying DB with baseMatch...");
+//     let services = await Service.find(baseMatch)
 //       .populate("category")
-//       .populate("owner", "name profile_image")
+//       .populate("owner", "name email profile_image")
 //       .lean();
 
-//     console.log(
-//       "✔ Total services before distance & pagination:",
-//       allServices.length
-//     );
+//     console.log("DB fetched services count:", services.length);
 
-//     // -----------------------------------------------------
-//     // DISTANCE CALCULATION
-//     // -----------------------------------------------------
-//     const userLat = parseFloat(latitude);
-//     const userLng = parseFloat(longitude);
+//     // -------------------------
+//     // Keyword filtering (applies to map + list)
+//     // We will build a safe regex and filter in JS across:
+//     // title, description, tags (service), city, category.name, category.tags, owner.name, owner.email
+//     // -------------------------
+//     let finalServices = services;
+
+//     if (keyword && typeof keyword === "string" && keyword.trim() !== "") {
+//       const safe = (k) =>
+//         k
+//           .replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&")
+//           .trim();
+//       const k = safe(keyword);
+//       const regex = new RegExp(k, "i");
+
+//       console.log("Applying keyword filter (in-memory) with regex:", regex);
+
+//       finalServices = finalServices.filter((svc) => {
+//         try {
+//           // title
+//           if (svc.title && regex.test(String(svc.title))) return true;
+
+//           // description
+//           if (svc.description && regex.test(String(svc.description))) return true;
+
+//           // service tags (array)
+//           if (Array.isArray(svc.tags) && svc.tags.some((t) => regex.test(String(t)))) return true;
+
+//           // city
+//           if (svc.city && regex.test(String(svc.city))) return true;
+
+//           // category name & tags
+//           if (svc.category) {
+//             if (svc.category.name && regex.test(String(svc.category.name))) return true;
+//             if (Array.isArray(svc.category.tags) && svc.category.tags.some((t) => regex.test(String(t)))) return true;
+//           }
+
+//           // owner (user) name / email if populated
+//           if (svc.owner) {
+//             if (svc.owner.name && regex.test(String(svc.owner.name))) return true;
+//             if (svc.owner.email && regex.test(String(svc.owner.email))) return true;
+//           }
+
+//           return false;
+//         } catch (err) {
+//           console.error("Keyword filter error for service id", svc._id, err);
+//           return false;
+//         }
+//       });
+
+//       console.log("After keyword filter count:", finalServices.length);
+//     } else {
+//       console.log("No keyword provided - skipping keyword filter.");
+//     }
+
+//     // -------------------------
+//     // Distance calculation helper (Haversine)
+//     // NOTE: service.location.coordinates is [lng, lat]
+//     // -------------------------
+//     const toRad = (v) => (v * Math.PI) / 180;
 
 //     function getDistanceKm(lat1, lon1, lat2, lon2) {
 //       const R = 6371;
-//       const dLat = (lat2 - lat1) * (Math.PI / 180);
-//       const dLon = (lon2 - lon1) * (Math.PI / 180);
+//       const dLat = toRad(lat2 - lat1);
+//       const dLon = toRad(lon2 - lon1);
 //       const a =
 //         Math.sin(dLat / 2) ** 2 +
-//         Math.cos(lat1 * (Math.PI / 180)) *
-//           Math.cos(lat2 * (Math.PI / 180)) *
-//           Math.sin(dLon / 2) ** 2;
-
-//       return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+//         Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+//       const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+//       return Number((R * c).toFixed(2));
 //     }
 
-//     if (!isNaN(userLat) && !isNaN(userLng)) {
-//       console.log("📍 Distance calculation from:", userLat, userLng);
-
-//       allServices = allServices.map((svc) => {
-//         const svcLat = svc.location?.coordinates?.[1];
-//         const svcLng = svc.location?.coordinates?.[0];
-
-//         let distance = null;
-
-//         if (!isNaN(svcLat) && !isNaN(svcLng)) {
-//           distance = getDistanceKm(userLat, userLng, svcLat, svcLng);
+//     // add distance_km to each service (if user lat/lng provided)
+//     console.log("Calculating distances for services...");
+//     finalServices = finalServices.map((svc) => {
+//       try {
+//         const coords = svc.location?.coordinates;
+//         if (coords && coords.length >= 2 && userLat !== null && userLng !== null) {
+//           const svcLng = Number(coords[0]);
+//           const svcLat = Number(coords[1]);
+//           if (!isNaN(svcLat) && !isNaN(svcLng)) {
+//             svc.distance_km = getDistanceKm(userLat, userLng, svcLat, svcLng);
+//           } else {
+//             svc.distance_km = null;
+//           }
+//         } else {
+//           svc.distance_km = null;
 //         }
+//       } catch (err) {
+//         svc.distance_km = null;
+//       }
+//       return svc;
+//     });
 
-//         return {
-//           ...svc,
-//           distance_km: distance ? Number(distance.toFixed(2)) : null,
-//         };
+//     console.log("Distance calculation done.");
+
+//     // -------------------------
+//     // Map services: if boundingBox provided, filter services inside bounding box.
+//     // If bbox not provided, mapServices returns ALL finalServices (no radius applied).
+//     // boundingBox expected shape: { north, south, east, west }
+//     // Note: service.location.coordinates = [lng, lat]
+//     // -------------------------
+//     console.log("Building mapServices (bounding box check) ...");
+//     let mapServices = finalServices;
+
+//     if (bx && typeof bx === "object" && bx.north != null && bx.south != null && bx.east != null && bx.west != null) {
+//       console.log("Bounding box provided:", bx);
+//       const north = Number(bx.north);
+//       const south = Number(bx.south);
+//       const east = Number(bx.east);
+//       const west = Number(bx.west);
+
+//       // Normalize if needed
+//       const minLat = Math.min(north, south);
+//       const maxLat = Math.max(north, south);
+//       const minLng = Math.min(east, west) === east ? west : Math.min(east, west); // simpler below
+
+//       mapServices = finalServices.filter((svc) => {
+//         const coords = svc.location?.coordinates;
+//         if (!coords || coords.length < 2) return false;
+//         const lng = Number(coords[0]);
+//         const lat = Number(coords[1]);
+//         // handle wrap-around longitudes if required (simple approach)
+//         const inLat = lat >= minLat && lat <= maxLat;
+//         // For longitude assume east > west; if east < west (crosses antimeridian) handle accordingly
+//         let inLng = false;
+//         if (east >= west) {
+//           inLng = lng >= west && lng <= east;
+//         } else {
+//           // crossing antimeridian
+//           inLng = lng >= west || lng <= east;
+//         }
+//         return inLat && inLng;
 //       });
 
-//       // Sort nearest → farthest
-//       allServices.sort((a, b) => {
-//         if (a.distance_km === null) return 1;
-//         if (b.distance_km === null) return -1;
-//         return a.distance_km - b.distance_km;
-//       });
+//       console.log("mapServices after bbox filter count:", mapServices.length);
+//     } else {
+//       console.log("No bounding box provided — returning all finalServices in mapServices (no radius) count:", mapServices.length);
 //     }
-//     // -------------------- RADIUS FILTER --------------------
-//     if (radius_km && !isNaN(radius_km)) {
-//       const maxRadius = parseFloat(radius_km);
 
-//       console.log("🎯 Radius filter enabled:", maxRadius, "km");
+//     // -------------------------
+//     // listServices: apply radius filter (if radius & user lat/lng provided), then sort and paginate
+//     // If no radius provided, return full finalServices (sorted by distance if available)
+//     // -------------------------
+//     console.log("Building listServices (radius/pagination) ...");
+//     let listCandidates = finalServices.slice(); // copy
 
-//       allServices = allServices.filter((svc) => {
+//     if (maxRadius !== null && !isNaN(maxRadius) && userLat !== null && userLng !== null) {
+//       console.log("Applying radius filter for listServices:", maxRadius, "km");
+//       listCandidates = listCandidates.filter((svc) => {
 //         return svc.distance_km !== null && svc.distance_km <= maxRadius;
 //       });
+//     } else {
+//       console.log("No radius applied for listServices (either radius or user coords not provided).");
 //     }
 
-//     // -----------------------------------------------------
-//     // PAGINATION
-//     // -----------------------------------------------------
-//     const start = (page - 1) * limit;
-//     const listServices = allServices.slice(start, start + limit);
+//     // Sort both mapServices and listCandidates by distance (nearest first). Null distances go to end.
+//     const sortByDistance = (a, b) => {
+//       if (a.distance_km === null && b.distance_km === null) return 0;
+//       if (a.distance_km === null) return 1;
+//       if (b.distance_km === null) return -1;
+//       return a.distance_km - b.distance_km;
+//     };
 
-//     console.log("✔ mapServices count:", allServices.length);
-//     console.log("✔ listServices (paginated) count:", listServices.length);
+//     mapServices.sort(sortByDistance);
+//     listCandidates.sort(sortByDistance);
 
+//     // Pagination on listCandidates
+//     const start = (pageNum - 1) * limitNum;
+//     const paginated = listCandidates.slice(start, start + limitNum);
+
+//     console.log("Final counts:", {
+//       mapServices_total: mapServices.length,
+//       listServices_total: listCandidates.length,
+//       listServices_pageCount: paginated.length,
+//     });
+
+//     // Response: note total refers to listServices total (post-radius)
 //     return res.json({
 //       isSuccess: true,
 //       message: "Services fetched successfully",
-//       total: allServices.length,
-//       page,
-//       limit,
-//       listServices,
-//       mapServices: allServices,
+//       total: listCandidates.length,
+//       page: pageNum,
+//       limit: limitNum,
+//       listServices: paginated,
+//       mapServices, // full map set (subject to bbox if provided), no radius clipping
 //     });
 //   } catch (err) {
-//     console.error("❌ ERROR:", err);
+//     console.error("ERROR in getServices:", err);
 //     return res.status(500).json({
 //       isSuccess: false,
 //       message: "Internal server error",
@@ -763,9 +697,9 @@ function bboxForLatLon(lat, lon, radiusKm = 3) {
 //   }
 // };
 exports.getServices = async (req, res) => {
+  console.log("\n===== getServices called =====");
   try {
-    console.log("---- Incoming Body ----");
-    console.log(req.body);
+    console.log("Incoming Body:", JSON.stringify(req.body, null, 2));
 
     const {
       page = 1,
@@ -777,185 +711,227 @@ exports.getServices = async (req, res) => {
       latitude,
       longitude,
       radius_km,
+      boundingBox,
       keyword = "",
+      filterLat,
+      filterLng,
     } = req.body;
 
-    let finalMatch = { $and: [] };
+    // ==========================
+    // PARSE INPUTS
+    // ==========================
+    const userLat = Number(latitude) || null;
+    const userLng = Number(longitude) || null;
 
-    // -------------------- DATE FILTER --------------------
+    const cityLat =
+      filterLat && !isNaN(Number(filterLat)) ? Number(filterLat) : null;
+    const cityLng =
+      filterLng && !isNaN(Number(filterLng)) ? Number(filterLng) : null;
+
+    const radiusNum = !isNaN(Number(radius_km)) ? Number(radius_km) : 30;
+    const bx = boundingBox || null;
+
+    const pageNum = Math.max(1, Number(page));
+    const limitNum = Math.max(1, Number(limit));
+
+    console.log("\nParsed:", {
+      userLat,
+      userLng,
+      cityLat,
+      cityLng,
+      radiusNum,
+      boundingBox: bx,
+    });
+
+    // ================================
+    // BASE DB FILTER (NO LOCATION)
+    // ================================
+    let baseMatch = {};
+
+    // -----------------------------
+    // ⭐ DATE FILTER
+    // -----------------------------
     if (date) {
-      console.log("📅 Date filter:", date);
+      console.log("Applying date filter:", date);
 
-      const startDate = new Date(date);
       const endDate = new Date(date);
       endDate.setDate(endDate.getDate() + 1);
 
-      finalMatch.$and.push({
-        $or: [
-          {
-            service_type: "one_time",
-            date: {
-              $gte: date,
-              $lt: new Date(endDate).toISOString().split("T")[0],
-            },
+      baseMatch.$or = [
+        {
+          service_type: "one_time",
+          date: {
+            $gte: date,
+            $lt: new Date(endDate).toISOString().split("T")[0],
           },
-          {
-            service_type: "recurring",
-            recurring_schedule: {
-              $elemMatch: {
-                date: {
-                  $gte: date,
-                  $lt: new Date(endDate).toISOString().split("T")[0],
-                },
+        },
+        {
+          service_type: "recurring",
+          recurring_schedule: {
+            $elemMatch: {
+              date: {
+                $gte: date,
+                $lt: new Date(endDate).toISOString().split("T")[0],
               },
             },
           },
-        ],
-      });
+        },
+      ];
     }
 
-    // -------------------- CATEGORY FILTER --------------------
-    if (categoryId.length > 0) {
-      console.log("📂 Category filter:", categoryId);
-      finalMatch.$and.push({ category: { $in: categoryId } });
+    // ⭐ CATEGORY FILTER
+    if (Array.isArray(categoryId) && categoryId.length > 0) {
+      console.log("Applying category filter:", categoryId);
+      baseMatch.category = { $in: categoryId };
     }
 
-    // -------------------- TAG FILTER --------------------
-    if (tags.length > 0) {
-      console.log("🏷 Tag filter:", tags);
-      finalMatch.$and.push({ tags: { $in: tags } });
+    // ⭐ TAGS FILTER
+    if (Array.isArray(tags) && tags.length > 0) {
+      console.log("Applying tags filter:", tags);
+      baseMatch.tags = { $in: tags };
     }
 
-    // -------------------- FREE FILTER --------------------
+    // ⭐ FREE FILTER
     if (isFree === true) {
-      console.log("💰 Free Only filter");
-      finalMatch.$and.push({ isFree: true });
+      console.log("Applying isFree=true filter");
+      baseMatch.isFree = true;
     }
-
-    // -------------------- KEYWORD FILTER --------------------
-    if (keyword.trim() !== "") {
-      console.log("🔎 Keyword search:", keyword);
-
-      function escapeRegex(text) {
-        return text.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&");
-      }
-
-      const safeKeyword = escapeRegex(keyword.trim());
-      const regex = new RegExp(safeKeyword, "i");
-
-      finalMatch.$and.push({
-        $or: [
-          { title: { $regex: regex } },
-          { description: { $regex: regex } },
-          { tags: { $in: [regex] } },
-          { city: { $regex: regex } },
-          { categoryName: { $regex: regex } },
-        ],
-      });
-    }
-
-    if (finalMatch.$and.length === 0) {
-      delete finalMatch.$and;
-    }
-
-    console.log("---- Final Mongo Filter ----");
-    console.log(JSON.stringify(finalMatch, null, 2));
-
-    // -----------------------------------------------------
-    // FETCH SERVICES
-    // -----------------------------------------------------
-    let allServices = await Service.find(finalMatch)
-      .populate("category")
-      .populate("owner", "name profile_image")
-      .lean();
 
     console.log(
-      "✔ Total services before distance & pagination:",
-      allServices.length
+      "Base Mongo filter (no keyword/bbox):",
+      JSON.stringify(baseMatch, null, 2)
     );
 
-    // -----------------------------------------------------
-    // DISTANCE CALCULATION
-    // -----------------------------------------------------
-    const userLat = parseFloat(latitude);
-    const userLng = parseFloat(longitude);
+    // FETCH SERVICES
+    let services = await Service.find(baseMatch)
+      .populate("category")
+      .populate("owner", "name email profile_image")
+      .lean();
 
+    let finalServices = services;
+
+    // ================================
+    // KEYWORD FILTER
+    // ================================
+    if (keyword.trim() !== "") {
+      const regex = new RegExp(keyword.trim(), "i");
+      finalServices = finalServices.filter((svc) => {
+        return (
+          regex.test(svc.title) ||
+          regex.test(svc.description) ||
+          (svc.tags && svc.tags.some((t) => regex.test(t))) ||
+          regex.test(svc.city) ||
+          (svc.category?.name && regex.test(svc.category.name)) ||
+          (svc.owner?.name && regex.test(svc.owner.name))
+        );
+      });
+    }
+
+    // ===============================
+    // HAVERSINE
+    // ===============================
+    const toRad = (v) => (v * Math.PI) / 180;
     function getDistanceKm(lat1, lon1, lat2, lon2) {
       const R = 6371;
-      const dLat = (lat2 - lat1) * (Math.PI / 180);
-      const dLon = (lon2 - lon1) * (Math.PI / 180);
+      const dLat = toRad(lat2 - lat1);
+      const dLon = toRad(lon2 - lon1);
       const a =
         Math.sin(dLat / 2) ** 2 +
-        Math.cos(lat1 * (Math.PI / 180)) *
-          Math.cos(lat2 * (Math.PI / 180)) *
+        Math.cos(toRad(lat1)) *
+          Math.cos(toRad(lat2)) *
           Math.sin(dLon / 2) ** 2;
-
-      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return Number(
+        (R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)))).toFixed(2)
+      );
     }
 
-    if (!isNaN(userLat) && !isNaN(userLng)) {
-      console.log("📍 Distance calculation from:", userLat, userLng);
+    // ===============================
+    // MAP SERVICES (BOUNDING BOX ONLY)
+    // ===============================
+    let mapServices = finalServices;
 
-      allServices = allServices.map((svc) => {
-        const svcLat = svc.location?.coordinates?.[1];
-        const svcLng = svc.location?.coordinates?.[0];
+    if (
+      bx &&
+      bx.north != null &&
+      bx.south != null &&
+      bx.east != null &&
+      bx.west != null
+    ) {
+      const north = Number(bx.north);
+      const south = Number(bx.south);
+      const east = Number(bx.east);
+      const west = Number(bx.west);
 
-        let distance = null;
+      mapServices = finalServices.filter((svc) => {
+        const coords = svc.location?.coordinates;
+        if (!coords) return false;
+        const lng = Number(coords[0]);
+        const lat = Number(coords[1]);
 
-        if (!isNaN(svcLat) && !isNaN(svcLng)) {
-          distance = getDistanceKm(userLat, userLng, svcLat, svcLng);
-        }
-
-        return {
-          ...svc,
-          distance_km: distance ? Number(distance.toFixed(2)) : null,
-        };
-      });
-
-      // Sort nearest → farthest
-      allServices.sort((a, b) => {
-        if (a.distance_km === null) return 1;
-        if (b.distance_km === null) return -1;
-        return a.distance_km - b.distance_km;
-      });
-    }
-
-    // -----------------------------------------------------
-    // ❗ NEW LOGIC: Radius filter ONLY for listServices
-    // -----------------------------------------------------
-    let filteredServices = [...allServices];
-
-    if (radius_km && !isNaN(radius_km)) {
-      const maxRadius = parseFloat(radius_km);
-      console.log("🎯 Radius filter for listServices only:", maxRadius);
-
-      filteredServices = filteredServices.filter((svc) => {
-        return svc.distance_km !== null && svc.distance_km <= maxRadius;
+        return lat >= south && lat <= north && lng >= west && lng <= east;
       });
     }
 
-    // -----------------------------------------------------
-    // PAGINATION (only on filtered list)
-    // -----------------------------------------------------
-    const start = (page - 1) * limit;
-    const listServices = filteredServices.slice(start, start + limit);
+    console.log("🟩 MAP SERVICES COUNT =", mapServices.length);
 
-    console.log("✔ mapServices count (NO RADIUS):", allServices.length);
-    console.log("✔ listServices (radius + pagination):", listServices.length);
+    // ===============================
+    // LIST SERVICES (RADIUS FILTERING)
+    // ===============================
+    let listServices = finalServices.filter((svc) => {
+      const coords = svc.location?.coordinates;
+      if (!coords) return false;
+
+      const svcLng = Number(coords[0]);
+      const svcLat = Number(coords[1]);
+
+      // **IF CITY FILTER EXISTS → USE CITY**
+      const centerLat = cityLat !== null ? cityLat : userLat;
+      const centerLng = cityLng !== null ? cityLng : userLng;
+
+      if (centerLat === null || centerLng === null) return false;
+
+      const distFromCenter = getDistanceKm(centerLat, centerLng, svcLat, svcLng);
+
+      return distFromCenter <= radiusNum;
+    });
+
+    console.log("🟦 LIST SERVICES COUNT =", listServices.length);
+
+    // ===============================
+    // ADD USER DISTANCE ALWAYS
+    // ===============================
+    listServices = listServices.map((svc) => {
+      const coords = svc.location?.coordinates;
+      if (!coords) return svc;
+
+      const svcLng = Number(coords[0]);
+      const svcLat = Number(coords[1]);
+
+      if (userLat !== null && userLng !== null) {
+        svc.distance_km = getDistanceKm(userLat, userLng, svcLat, svcLng);
+      }
+
+      return svc;
+    });
+
+    // SORT BY DISTANCE
+    listServices.sort(
+      (a, b) => (a.distance_km || 999999) - (b.distance_km || 999999)
+    );
+
+    // PAGINATION
+    const start = (pageNum - 1) * limitNum;
+    const paginated = listServices.slice(start, start + limitNum);
 
     return res.json({
       isSuccess: true,
       message: "Services fetched successfully",
-
-      total: filteredServices.length, // list count
-      page,
-      limit,
-
-      mapServices: allServices, // full list (no radius)
-      listServices, // filtered + paginated
+      total: listServices.length,
+      listServices: paginated,
+      mapServices,
     });
   } catch (err) {
-    console.error("❌ ERROR:", err);
+    console.error("ERROR in getServices:", err);
     return res.status(500).json({
       isSuccess: false,
       message: "Internal server error",
@@ -975,7 +951,7 @@ exports.getInterestedUsers = async (req, res) => {
       tags = [],
       languages = [],
       age,
-      keyword = "",      // 🔥 added for interests keyword search
+      keyword = "", // 🔥 added for interests keyword search
       page = 1,
       limit = 10,
       userId,
@@ -1040,7 +1016,11 @@ exports.getInterestedUsers = async (req, res) => {
     }
 
     // ---------- Step 4: Age filter ----------
-    if (age !== undefined && age !== null && !(Array.isArray(age) && age.length === 0)) {
+    if (
+      age !== undefined &&
+      age !== null &&
+      !(Array.isArray(age) && age.length === 0)
+    ) {
       if (Array.isArray(age)) {
         query.age = { $in: age };
         console.log("Applying age filter (array):", age);

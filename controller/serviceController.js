@@ -1206,16 +1206,17 @@ exports.getServices = async (req, res) => {
       baseMatch.isFree = true;
     }
 
-    console.log(
-      "Base Mongo filter (no keyword/bbox):",
-      JSON.stringify(baseMatch, null, 2)
-    );
+    console.log("Base Mongo filter:", JSON.stringify(baseMatch, null, 2));
 
+    // ================================
     // FETCH SERVICES
+    // ================================
     let services = await Service.find(baseMatch)
       .populate("category")
       .populate("owner", "name email profile_image")
       .lean();
+
+    console.log(`📌 Total services from DB = ${services.length}`);
 
     let finalServices = services;
 
@@ -1224,6 +1225,7 @@ exports.getServices = async (req, res) => {
     // ================================
     if (keyword.trim() !== "") {
       const regex = new RegExp(keyword.trim(), "i");
+
       finalServices = finalServices.filter((svc) => {
         return (
           regex.test(svc.title) ||
@@ -1234,6 +1236,10 @@ exports.getServices = async (req, res) => {
           (svc.owner?.name && regex.test(svc.owner.name))
         );
       });
+
+      console.log(`🔍 Keyword matched services = ${finalServices.length}`);
+    } else {
+      console.log("🔍 No keyword provided → skipping keyword filter");
     }
 
     // ===============================
@@ -1246,7 +1252,9 @@ exports.getServices = async (req, res) => {
       const dLon = toRad(lon2 - lon1);
       const a =
         Math.sin(dLat / 2) ** 2 +
-        Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+        Math.cos(toRad(lat1)) *
+          Math.cos(toRad(lat2)) *
+          Math.sin(dLon / 2) ** 2;
       return Number(
         (R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)))).toFixed(2)
       );
@@ -1278,7 +1286,7 @@ exports.getServices = async (req, res) => {
       });
     }
 
-    console.log("🟩 MAP SERVICES COUNT =", mapServices.length);
+    console.log(`🟩 Map services count = ${mapServices.length}`);
 
     // ===============================
     // LIST + MAP SMART FILTERING
@@ -1291,48 +1299,52 @@ exports.getServices = async (req, res) => {
 
     let listServices;
 
-    // ⭐ CASE 1: NO RADIUS → Return all keyword results BUT calculate distance
+    // ⭐ CASE 1: NO RADIUS
     if (!radiusProvided) {
-      console.log("➡️ NO RADIUS → Global keyword search + distance enabled");
+      console.log("➡️ NO RADIUS → Returning all services with distance");
 
       listServices = finalServices.map((svc) => {
         const coords = svc.location?.coordinates;
 
         if (coords && userLat !== null && userLng !== null) {
-          const svcLng = Number(coords[0]);
-          const svcLat = Number(coords[1]);
-          svc.distance_km = getDistanceKm(userLat, userLng, svcLat, svcLng);
+          const dist = getDistanceKm(
+            userLat,
+            userLng,
+            Number(coords[1]),
+            Number(coords[0])
+          );
+          svc.distance_km = dist;
         } else {
-          svc.distance_km = null; // when no user location
+          svc.distance_km = null;
         }
 
         return svc;
       });
 
-      // Map services same
-      mapServices = [...listServices];
-
-      // sort by distance
       listServices.sort(
         (a, b) => (a.distance_km || 999999) - (b.distance_km || 999999)
       );
+
+      mapServices = [...listServices];
+
+      console.log(`🟦 List services (no radius) = ${listServices.length}`);
     }
 
-    // ⭐ CASE 2: RADIUS PROVIDED → Keyword + radius filtering
+    // ⭐ CASE 2: RADIUS PROVIDED
     else {
-      console.log("➡️ RADIUS PROVIDED → Applying radius filtering");
+      console.log("➡️ RADIUS PROVIDED → Applying radius filter");
 
       listServices = finalServices.filter((svc) => {
         const coords = svc.location?.coordinates;
         if (!coords) return false;
 
-        const svcLng = Number(coords[0]);
         const svcLat = Number(coords[1]);
+        const svcLng = Number(coords[0]);
 
-        const centerLat = cityLat !== null ? cityLat : userLat;
-        const centerLng = cityLng !== null ? cityLng : userLng;
+        const centerLat = cityLat ?? userLat;
+        const centerLng = cityLng ?? userLng;
 
-        if (centerLat == null || centerLng == null) return false;
+        if (!centerLat || !centerLng) return false;
 
         const dist = getDistanceKm(centerLat, centerLng, svcLat, svcLng);
         svc.distance_km = dist;
@@ -1340,17 +1352,20 @@ exports.getServices = async (req, res) => {
         return dist <= radiusNum;
       });
 
-      // map = same as radius list
-      mapServices = [...listServices];
-
       listServices.sort(
         (a, b) => (a.distance_km || 999999) - (b.distance_km || 999999)
       );
+
+      mapServices = [...listServices];
+
+      console.log(`🟦 List services (radius) = ${listServices.length}`);
     }
 
     // PAGINATION
     const start = (pageNum - 1) * limitNum;
     const paginated = listServices.slice(start, start + limitNum);
+
+    console.log(`📌 Paginated list count = ${paginated.length}`);
 
     return res.json({
       isSuccess: true,
@@ -1368,6 +1383,7 @@ exports.getServices = async (req, res) => {
     });
   }
 };
+
 
 exports.getInterestedUsers = async (req, res) => {
   try {

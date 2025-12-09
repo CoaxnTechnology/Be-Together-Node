@@ -1246,9 +1246,7 @@ exports.getServices = async (req, res) => {
       const dLon = toRad(lon2 - lon1);
       const a =
         Math.sin(dLat / 2) ** 2 +
-        Math.cos(toRad(lat1)) *
-          Math.cos(toRad(lat2)) *
-          Math.sin(dLon / 2) ** 2;
+        Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
       return Number(
         (R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)))).toFixed(2)
       );
@@ -1293,16 +1291,31 @@ exports.getServices = async (req, res) => {
 
     let listServices;
 
-    // ⭐ CASE 1: NO RADIUS → Global keyword results (list + map same)
+    // ⭐ CASE 1: NO RADIUS → Return all keyword results BUT calculate distance
     if (!radiusProvided) {
-      console.log("➡️ NO RADIUS → Returning all keyword results");
+      console.log("➡️ NO RADIUS → Global keyword search + distance enabled");
 
-      listServices = finalServices.map((svc) => ({
-        ...svc,
-        distance_km: null,
-      }));
+      listServices = finalServices.map((svc) => {
+        const coords = svc.location?.coordinates;
 
+        if (coords && userLat !== null && userLng !== null) {
+          const svcLng = Number(coords[0]);
+          const svcLat = Number(coords[1]);
+          svc.distance_km = getDistanceKm(userLat, userLng, svcLat, svcLng);
+        } else {
+          svc.distance_km = null; // when no user location
+        }
+
+        return svc;
+      });
+
+      // Map services same
       mapServices = [...listServices];
+
+      // sort by distance
+      listServices.sort(
+        (a, b) => (a.distance_km || 999999) - (b.distance_km || 999999)
+      );
     }
 
     // ⭐ CASE 2: RADIUS PROVIDED → Keyword + radius filtering

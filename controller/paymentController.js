@@ -21,22 +21,6 @@ const Booking = require("../model/Booking");
 const CommissionSetting = require("../model/CommissionSetting");
 const updateProviderPerformance = require("../utils/providerPerformance");
 
-// Email transporter
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.SMTP_EMAIL,
-    pass: process.env.SMTP_PASSWORD,
-  },
-});
-transporter.verify((err, success) => {
-  if (err) {
-    console.log("❌ SMTP ERROR:", err);
-  } else {
-    console.log("✅ SMTP CONNECTED SUCCESSFULLY");
-  }
-});
-
 // -----------------------------
 // 1️⃣ Create Stripe Checkout Session (Booking not yet confirmed)
 // -----------------------------

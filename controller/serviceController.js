@@ -1118,6 +1118,7 @@ function bboxForLatLon(lat, lon, radiusKm = 3) {
 // ----------- Get All Services -------------
 exports.getServices = async (req, res) => {
   console.log("\n===== getServices called =====");
+
   try {
     console.log("Incoming Body:", JSON.stringify(req.body, null, 2));
 
@@ -1132,33 +1133,41 @@ exports.getServices = async (req, res) => {
       longitude,
       radius_km,
       boundingBox,
-      keyword = "",
+      filterLat,
+      filterLng,
+      keyword = ""
     } = req.body;
 
+    // -----------------------------
+    // PARSE VALUES
+    // -----------------------------
     const userLat = isNaN(Number(latitude)) ? null : Number(latitude);
     const userLng = isNaN(Number(longitude)) ? null : Number(longitude);
+
+    const cityLat = filterLat ? Number(filterLat) : null;
+    const cityLng = filterLng ? Number(filterLng) : null;
+
     const maxRadius = radius_km ? Number(radius_km) : null;
     const bx = boundingBox || null;
-    const pageNum = Math.max(1, Number(page) || 1);
-    const limitNum = Math.max(1, Number(limit) || 50);
 
-    console.log("Parsed params:", {
-      pageNum,
-      limitNum,
+    const pageNum = Math.max(1, Number(page));
+    const limitNum = Math.max(1, Number(limit));
+
+    console.log("\nParsed Params:", {
       userLat,
       userLng,
+      cityLat,
+      cityLng,
       maxRadius,
       keyword,
-      boundingBox: bx
     });
 
     // -----------------------------
-    // BASE FILTER
+    // BASE MONGO FILTER
     // -----------------------------
     let baseMatch = {};
 
     if (date) {
-      console.log("Applying date filter:", date);
       const endDate = new Date(date);
       endDate.setDate(endDate.getDate() + 1);
 
@@ -1184,11 +1193,11 @@ exports.getServices = async (req, res) => {
       ];
     }
 
-    if (Array.isArray(categoryId) && categoryId.length > 0) {
+    if (categoryId?.length) {
       baseMatch.category = { $in: categoryId };
     }
 
-    if (Array.isArray(tags) && tags.length > 0) {
+    if (tags?.length) {
       baseMatch.tags = { $in: tags };
     }
 
@@ -1196,17 +1205,17 @@ exports.getServices = async (req, res) => {
       baseMatch.isFree = true;
     }
 
-    console.log("Base Mongo filter:", JSON.stringify(baseMatch, null, 2));
+    console.log("\nBase Mongo Filter:", JSON.stringify(baseMatch, null, 2));
 
     // -----------------------------
-    // FETCH FROM DB
+    // FETCH DATABASE SERVICES
     // -----------------------------
     let services = await Service.find(baseMatch)
       .populate("category")
       .populate("owner", "name email profile_image")
       .lean();
 
-    console.log("DB fetched services:", services.length);
+    console.log("DB Services Count:", services.length);
 
     let finalServices = services;
 
@@ -1214,27 +1223,24 @@ exports.getServices = async (req, res) => {
     // KEYWORD FILTER
     // -----------------------------
     if (keyword.trim() !== "") {
-      const safe = (k) => k.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&").trim();
-      const k = safe(keyword);
-      const regex = new RegExp(k, "i");
+      const safe = keyword.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&").trim();
+      const regex = new RegExp(safe, "i");
 
-      console.log("Applying keyword filter:", regex);
+      console.log("Applying Keyword Filter:", regex);
 
       finalServices = finalServices.filter((svc) => {
         return (
           regex.test(svc.title) ||
           regex.test(svc.description) ||
           (svc.tags && svc.tags.some((t) => regex.test(String(t)))) ||
-          regex.test(svc.city) ||
+          regex.test(svc.city || "") ||
           (svc.category?.name && regex.test(svc.category.name)) ||
           (svc.owner?.name && regex.test(svc.owner.name)) ||
           (svc.owner?.email && regex.test(svc.owner.email))
         );
       });
 
-      console.log("After keyword filter:", finalServices.length);
-    } else {
-      console.log("No keyword → skipping keyword filter");
+      console.log("After Keyword Filter:", finalServices.length);
     }
 
     // -----------------------------
@@ -1246,11 +1252,13 @@ exports.getServices = async (req, res) => {
       const R = 6371;
       const dLat = toRad(lat2 - lat1);
       const dLon = toRad(lon2 - lon1);
+
       const a =
         Math.sin(dLat / 2) ** 2 +
         Math.cos(toRad(lat1)) *
           Math.cos(toRad(lat2)) *
           Math.sin(dLon / 2) ** 2;
+
       return Number((R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))).toFixed(2));
     }
 
@@ -1264,19 +1272,18 @@ exports.getServices = async (req, res) => {
       return svc;
     });
 
-    console.log("Distance calculation done.");
-
     // -----------------------------
     // MAP SERVICES (BOUNDING BOX)
     // -----------------------------
     let mapServices = finalServices;
 
     if (bx && bx.north != null) {
-      console.log("Applying bounding box filter:", bx);
+      console.log("\nApplying Bounding Box:", bx);
 
       mapServices = finalServices.filter((svc) => {
         const coords = svc.location?.coordinates;
         if (!coords) return false;
+
         const lng = Number(coords[0]);
         const lat = Number(coords[1]);
 
@@ -1284,53 +1291,83 @@ exports.getServices = async (req, res) => {
       });
     }
 
-    console.log("Map services count:", mapServices.length);
+    console.log("Map Services Count:", mapServices.length);
 
     // -----------------------------
-    // LIST SERVICES with NEW LOGIC:
-    // KEYWORD → SKIP RADIUS COMPLETELY
+    // LIST SERVICES — SMART RADIUS LOGIC
     // -----------------------------
     let listCandidates = finalServices.slice();
 
+    /** ----------------------------------------
+     * CASE 1: KEYWORD EXISTS → SKIP RADIUS
+     * -------------------------------------- **/
     if (keyword.trim() !== "") {
-      console.log("🔍 Keyword exists → SKIPPING radius filter completely");
-      listCandidates = finalServices.map((svc) => svc);
+      console.log("🔍 Keyword detected → SKIPPING radius completely");
+      // return all keyword matches
+      listCandidates = finalServices;
     }
 
-    else if (maxRadius !== null && !isNaN(maxRadius)) {
-      console.log("📏 Applying radius filter:", maxRadius);
-
-      listCandidates = listCandidates.filter((svc) => {
-        return svc.distance_km !== null && svc.distance_km <= maxRadius;
-      });
-
-      console.log("After radius filter:", listCandidates.length);
-    }
-
+    /** ----------------------------------------
+     * CASE 2: NO KEYWORD → APPLY RADIUS
+     * -------------------------------------- **/
     else {
-      console.log("➡️ No keyword & no radius → returning ALL");
+      let centerLat = null;
+      let centerLng = null;
+
+      if (cityLat !== null && cityLng !== null) {
+        console.log("📌 Radius Center = CITY:", cityLat, cityLng);
+        centerLat = cityLat;
+        centerLng = cityLng;
+      } else if (userLat !== null && userLng !== null) {
+        console.log("📌 Radius Center = USER:", userLat, userLng);
+        centerLat = userLat;
+        centerLng = userLng;
+      }
+
+      if (centerLat !== null && centerLng !== null && maxRadius !== null) {
+        console.log("📏 Applying Radius:", maxRadius, "KM");
+
+        listCandidates = listCandidates.filter((svc) => {
+          const coords = svc.location?.coordinates;
+          if (!coords) return false;
+
+          const dist = getDistanceKm(centerLat, centerLng, Number(coords[1]), Number(coords[0]));
+          return dist <= maxRadius;
+        });
+
+        console.log("After Radius Filter:", listCandidates.length);
+      } else {
+        console.log("➡️ No radius applied (no center provided)");
+      }
     }
 
-    // Sort by distance
-    const sortByDistance = (a, b) => {
+    // -----------------------------
+    // SORT + PAGINATION
+    // -----------------------------
+    listCandidates.sort((a, b) => {
       if (a.distance_km === null) return 1;
       if (b.distance_km === null) return -1;
       return a.distance_km - b.distance_km;
-    };
+    });
 
-    listCandidates.sort(sortByDistance);
-    mapServices.sort(sortByDistance);
+    mapServices.sort((a, b) => {
+      if (a.distance_km === null) return 1;
+      if (b.distance_km === null) return -1;
+      return a.distance_km - b.distance_km;
+    });
 
-    // Pagination
     const start = (pageNum - 1) * limitNum;
     const paginated = listCandidates.slice(start, start + limitNum);
 
-    console.log("FINAL COUNTS:", {
-      map_total: mapServices.length,
-      list_total: listCandidates.length,
-      list_page: paginated.length,
+    console.log("\nFINAL COUNTS:", {
+      total_list: listCandidates.length,
+      total_map: mapServices.length,
+      page_items: paginated.length,
     });
 
+    // -----------------------------
+    // RESPONSE
+    // -----------------------------
     return res.json({
       isSuccess: true,
       message: "Services fetched successfully",
@@ -1338,7 +1375,7 @@ exports.getServices = async (req, res) => {
       page: pageNum,
       limit: limitNum,
       listServices: paginated,
-      mapServices,
+      mapServices
     });
 
   } catch (err) {
@@ -1350,6 +1387,7 @@ exports.getServices = async (req, res) => {
     });
   }
 };
+
 
 
 

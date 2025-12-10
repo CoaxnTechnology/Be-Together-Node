@@ -1353,6 +1353,200 @@ exports.getServices = async (req, res) => {
 
 
 
+// exports.getInterestedUsers = async (req, res) => {
+//   try {
+//     const {
+//       latitude = 0,
+//       longitude = 0,
+
+//       filterLat,
+//       filterLng,
+
+//       radius_km = 10,
+//       categoryId = [],
+//       tags = [],
+//       languages = [],
+//       age,
+//       keyword = "",
+//       page = 1,
+//       limit = 10,
+//       userId,
+//       excludeSelf = false,
+//     } = req.body;
+
+//     const skip = (Number(page) - 1) * Number(limit);
+
+//     console.log("===== getInterestedUsers called =====");
+//     console.log("Incoming body:", req.body);
+
+//     // -----------------------------------------------------
+//     // STEP 1: INTEREST FILTER LOGIC (categories + tags + keyword)
+//     // -----------------------------------------------------
+//     let interestsFilter = [];
+
+//     // Keyword filter
+//     if (keyword.trim() !== "") {
+//       interestsFilter.push(keyword.trim().toLowerCase());
+//     }
+
+//     // Category filter
+//     if (Array.isArray(categoryId) && categoryId.length > 0) {
+//       const categories = await Category.find({ _id: { $in: categoryId } })
+//         .select("name tags")
+//         .lean();
+
+//       categories.forEach((c) => {
+//         if (c.name) interestsFilter.push(c.name.toLowerCase());
+//         if (Array.isArray(c.tags))
+//           interestsFilter.push(...c.tags.map((t) => t.toLowerCase()));
+//       });
+//     }
+
+//     // Tags
+//     if (Array.isArray(tags) && tags.length > 0) {
+//       interestsFilter.push(...tags.map((t) => t.toLowerCase()));
+//     }
+
+//     // Remove duplicates
+//     interestsFilter = [...new Set(interestsFilter)];
+
+//     console.log("Final interestsFilter:", interestsFilter);
+
+//     // -----------------------------------------------------
+//     // STEP 2: BUILD MONGO QUERY
+//     // -----------------------------------------------------
+//     const query = {};
+
+//     if (excludeSelf && userId) {
+//       query._id = { $ne: userId };
+//     }
+
+//     // Interest filter
+//     if (interestsFilter.length > 0) {
+//       query.interests = { $in: interestsFilter };
+//     }
+
+//     // Languages filter
+//     if (Array.isArray(languages) && languages.length > 0) {
+//       const regexLanguages = languages
+//         .filter((l) => typeof l === "string" && l.trim())
+//         .map((l) => new RegExp(`^${l.trim()}$`, "i"));
+
+//       if (regexLanguages.length > 0) {
+//         query.languages = { $in: regexLanguages };
+//       }
+//     }
+
+//     // Age filter
+//     if (Array.isArray(age) && age.length > 0) {
+//       query.age = { $in: age };
+//     } else if (!Array.isArray(age) && !isNaN(Number(age))) {
+//       query.age = Number(age);
+//     }
+
+//     // -----------------------------------------------------
+//     // STEP 3: LOCATION (CITY FILTER OR USER LOCATION)
+//     // -----------------------------------------------------
+
+//     let centerLat = null;
+//     let centerLng = null;
+
+//     // CASE 1 → CITY (filterLat/filterLng)
+//     if (filterLat && filterLng) {
+//       centerLat = Number(filterLat);
+//       centerLng = Number(filterLng);
+//       console.log("📌 Radius Center = CITY:", centerLat, centerLng);
+//     }
+//     // CASE 2 → USER LOCATION
+//     else if (latitude && longitude) {
+//       centerLat = Number(latitude);
+//       centerLng = Number(longitude);
+//       console.log("📌 Radius Center = USER:", centerLat, centerLng);
+//     }
+
+//     // Apply radius only if center exists
+//     if (centerLat !== null && centerLng !== null) {
+//       query["lastLocation.coords"] = {
+//         $geoWithin: {
+//           $centerSphere: [[centerLng, centerLat], Number(radius_km) / 6371],
+//         },
+//       };
+//     }
+
+//     console.log("Final Mongo Query:", JSON.stringify(query, null, 2));
+
+//     // -----------------------------------------------------
+//     // STEP 4: FETCH USERS
+//     // -----------------------------------------------------
+
+//     const mapUsers = await User.find(query)
+//       .select("name email profile_image interests languages age lastLocation")
+//       .lean();
+
+//     const listUsers = await User.find(query)
+//       .select("name email profile_image interests languages age lastLocation")
+//       .skip(skip)
+//       .limit(Number(limit))
+//       .lean();
+
+//     // -----------------------------------------------------
+//     // STEP 5: ALWAYS CALCULATE DISTANCE FROM USER LOCATION
+//     // -----------------------------------------------------
+//     const addDistance = (users) => {
+//       const toRad = (v) => (v * Math.PI) / 180;
+
+//       return users
+//         .map((u) => {
+//           if (u.lastLocation?.coords?.coordinates) {
+//             const [lon2, lat2] = u.lastLocation.coords.coordinates;
+
+//             const lat1 = Number(latitude);
+//             const lon1 = Number(longitude);
+
+//             const R = 6371;
+//             const dLat = toRad(lat2 - lat1);
+//             const dLon = toRad(lon2 - lon1);
+
+//             const a =
+//               Math.sin(dLat / 2) ** 2 +
+//               Math.cos(toRad(lat1)) *
+//                 Math.cos(toRad(lat2)) *
+//                 Math.sin(dLon / 2) ** 2;
+
+//             const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+//             u.distance_km = Number((R * c).toFixed(2));
+//           } else {
+//             u.distance_km = null;
+//           }
+//           return u;
+//         })
+//         .sort((a, b) => (a.distance_km || 999999) - (b.distance_km || 999999));
+//     };
+
+//     const finalMapUsers = addDistance(mapUsers);
+//     const finalListUsers = addDistance(listUsers);
+
+//     // -----------------------------------------------------
+//     // STEP 6: TOTAL COUNT
+//     // -----------------------------------------------------
+//     const total = await User.countDocuments(query);
+
+//     // -----------------------------------------------------
+//     // STEP 7: RESPONSE
+//     // -----------------------------------------------------
+//     res.json({
+//       success: true,
+//       total,
+//       page: Number(page),
+//       limit: Number(limit),
+//       mapUsers: finalMapUsers,
+//       listUsers: finalListUsers,
+//     });
+//   } catch (err) {
+//     console.error("getInterestedUsers error:", err);
+//     res.status(500).json({ success: false, message: err.message });
+//   }
+// };
 exports.getInterestedUsers = async (req, res) => {
   try {
     const {
@@ -1376,15 +1570,15 @@ exports.getInterestedUsers = async (req, res) => {
 
     const skip = (Number(page) - 1) * Number(limit);
 
-    console.log("===== getInterestedUsers called =====");
+    console.log("\n===== getInterestedUsers called =====");
     console.log("Incoming body:", req.body);
 
     // -----------------------------------------------------
-    // STEP 1: INTEREST FILTER LOGIC (categories + tags + keyword)
+    // STEP 1: INTEREST FILTER LOGIC
     // -----------------------------------------------------
     let interestsFilter = [];
 
-    // Keyword filter
+    // Keyword
     if (keyword.trim() !== "") {
       interestsFilter.push(keyword.trim().toLowerCase());
     }
@@ -1407,7 +1601,6 @@ exports.getInterestedUsers = async (req, res) => {
       interestsFilter.push(...tags.map((t) => t.toLowerCase()));
     }
 
-    // Remove duplicates
     interestsFilter = [...new Set(interestsFilter)];
 
     console.log("Final interestsFilter:", interestsFilter);
@@ -1421,12 +1614,12 @@ exports.getInterestedUsers = async (req, res) => {
       query._id = { $ne: userId };
     }
 
-    // Interest filter
+    // interests filter
     if (interestsFilter.length > 0) {
       query.interests = { $in: interestsFilter };
     }
 
-    // Languages filter
+    // languages filter
     if (Array.isArray(languages) && languages.length > 0) {
       const regexLanguages = languages
         .filter((l) => typeof l === "string" && l.trim())
@@ -1437,7 +1630,7 @@ exports.getInterestedUsers = async (req, res) => {
       }
     }
 
-    // Age filter
+    // age filter
     if (Array.isArray(age) && age.length > 0) {
       query.age = { $in: age };
     } else if (!Array.isArray(age) && !isNaN(Number(age))) {
@@ -1445,18 +1638,18 @@ exports.getInterestedUsers = async (req, res) => {
     }
 
     // -----------------------------------------------------
-    // STEP 3: LOCATION (CITY FILTER OR USER LOCATION)
+    // STEP 3: LOCATION / RADIUS LOGIC WITH KEYWORD SKIP
     // -----------------------------------------------------
-
     let centerLat = null;
     let centerLng = null;
 
-    // CASE 1 → CITY (filterLat/filterLng)
+    // CASE 1 → CITY SELECTED
     if (filterLat && filterLng) {
       centerLat = Number(filterLat);
       centerLng = Number(filterLng);
       console.log("📌 Radius Center = CITY:", centerLat, centerLng);
     }
+
     // CASE 2 → USER LOCATION
     else if (latitude && longitude) {
       centerLat = Number(latitude);
@@ -1464,8 +1657,15 @@ exports.getInterestedUsers = async (req, res) => {
       console.log("📌 Radius Center = USER:", centerLat, centerLng);
     }
 
-    // Apply radius only if center exists
-    if (centerLat !== null && centerLng !== null) {
+    // ⭐ NEW: If keyword exists → DO NOT APPLY RADIUS
+    if (keyword.trim() !== "") {
+      console.log("🔍 Keyword exists → SKIPPING RADIUS FILTER COMPLETELY.");
+    }
+
+    // Apply radius only when NO keyword
+    else if (centerLat !== null && centerLng !== null) {
+      console.log("📏 Applying radius filter:", radius_km, "km");
+
       query["lastLocation.coords"] = {
         $geoWithin: {
           $centerSphere: [[centerLng, centerLat], Number(radius_km) / 6371],
@@ -1478,7 +1678,6 @@ exports.getInterestedUsers = async (req, res) => {
     // -----------------------------------------------------
     // STEP 4: FETCH USERS
     // -----------------------------------------------------
-
     const mapUsers = await User.find(query)
       .select("name email profile_image interests languages age lastLocation")
       .lean();
@@ -1489,8 +1688,11 @@ exports.getInterestedUsers = async (req, res) => {
       .limit(Number(limit))
       .lean();
 
+    console.log("Fetched mapUsers:", mapUsers.length);
+    console.log("Fetched listUsers:", listUsers.length);
+
     // -----------------------------------------------------
-    // STEP 5: ALWAYS CALCULATE DISTANCE FROM USER LOCATION
+    // STEP 5: DISTANCE CALCULATOR
     // -----------------------------------------------------
     const addDistance = (users) => {
       const toRad = (v) => (v * Math.PI) / 180;
@@ -1527,9 +1729,11 @@ exports.getInterestedUsers = async (req, res) => {
     const finalListUsers = addDistance(listUsers);
 
     // -----------------------------------------------------
-    // STEP 6: TOTAL COUNT
+    // STEP 6: COUNT
     // -----------------------------------------------------
     const total = await User.countDocuments(query);
+
+    console.log("Total matched users:", total);
 
     // -----------------------------------------------------
     // STEP 7: RESPONSE
@@ -1542,6 +1746,7 @@ exports.getInterestedUsers = async (req, res) => {
       mapUsers: finalMapUsers,
       listUsers: finalListUsers,
     });
+
   } catch (err) {
     console.error("getInterestedUsers error:", err);
     res.status(500).json({ success: false, message: err.message });

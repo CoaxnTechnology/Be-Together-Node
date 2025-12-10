@@ -1222,26 +1222,37 @@ exports.getServices = async (req, res) => {
     // -----------------------------
     // KEYWORD FILTER
     // -----------------------------
-    if (keyword.trim() !== "") {
-      const safe = keyword.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&").trim();
+     if (keyword.trim() !== "") {
+      const raw = keyword.trim();
+
+      // SAFE ESCAPE (does NOT escape space)
+      const safe = raw.replace(/[-[\]{}()*+?.,\\^$|#]/g, "\\$&");
+
       const regex = new RegExp(safe, "i");
 
       console.log("Applying Keyword Filter:", regex);
 
       finalServices = finalServices.filter((svc) => {
         return (
-          regex.test(svc.title) ||
-          regex.test(svc.description) ||
+          regex.test(svc.title || "") ||
+          regex.test(svc.description || "") ||
+          // service.tags search
           (svc.tags && svc.tags.some((t) => regex.test(String(t)))) ||
+          // category.tags search
+          (svc.category?.tags &&
+            svc.category.tags.some((t) => regex.test(String(t)))) ||
           regex.test(svc.city || "") ||
-          (svc.category?.name && regex.test(svc.category.name)) ||
-          (svc.owner?.name && regex.test(svc.owner.name)) ||
-          (svc.owner?.email && regex.test(svc.owner.email))
+          // category name
+          (svc.category?.name && regex.test(String(svc.category.name))) ||
+          // owner info
+          (svc.owner?.name && regex.test(String(svc.owner.name))) ||
+          (svc.owner?.email && regex.test(String(svc.owner.email)))
         );
       });
 
       console.log("After Keyword Filter:", finalServices.length);
     }
+
 
     // -----------------------------
     // DISTANCE CALCULATION

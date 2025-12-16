@@ -9,6 +9,8 @@ const { notifyOnServiceView } = require("./notificationController");
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const axios = require("axios");
 const { Types } = mongoose;
+const streamifier = require("streamifier");
+const cloudinary = require("cloudinary").v2;
 const Review = require("../model/review");
 // Helper to parse JSON safely
 function tryParse(val) {
@@ -37,7 +39,36 @@ function formatTimeToAMPM(timeStr) {
   if (!m.isValid()) return null;
   return m.format("hh:mm A");
 }
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+function uploadBufferToCloudinary(
+  buffer,
+  folder = "profile_images",
+  publicId = null
+) {
+  return new Promise((resolve, reject) => {
+    const opts = {
+      folder,
+      resource_type: "image",
+      overwrite: false,
+      use_filename: false,
+    };
+    if (publicId) opts.public_id = publicId;
 
+    const uploadStream = cloudinary.uploader.upload_stream(
+      opts,
+      (error, result) => {
+        if (error) return reject(error);
+        resolve(result);
+      }
+    );
+
+    streamifier.createReadStream(buffer).pipe(uploadStream);
+  });
+}
 // Main createService function
 exports.createService = async (req, res) => {
   try {
@@ -144,6 +175,28 @@ exports.createService = async (req, res) => {
         isSuccess: false,
         message: "No valid tags selected from this category",
       });
+
+    // ==================================================
+    // ⭐ SERVICE IMAGE LOGIC (MAIN PART)
+    // ==================================================
+    let serviceImage = null;
+    let serviceImagePublicId = null;
+
+    // 1️⃣ User uploaded image
+    if (req.file?.buffer) {
+      const uploadResult = await uploadBufferToCloudinary(
+        req.file.buffer,
+        "service_images"
+      );
+
+      serviceImage = uploadResult.secure_url;
+      serviceImagePublicId = uploadResult.public_id;
+    }
+    // 2️⃣ No image → use category image
+    else if (category.image) {
+      serviceImage = category.image;
+      serviceImagePublicId = category.imagePublicId || null;
+    }
     // ⭐ NEW: PAID SERVICE → CREATE CONNECTED ACCOUNT + KYC CHECK
     // ---------------------------
     if (!isFree) {
@@ -196,6 +249,8 @@ exports.createService = async (req, res) => {
       isFree,
       price,
       currency, // <-- NOW SAVED IN SERVICE TABLE
+      image: serviceImage,                 // ✅ added
+      imagePublicId: serviceImagePublicId, // ✅ added
       location_name: location.name,
       // city,
       isDoorstepService,
@@ -610,10 +665,9 @@ exports.getServices = async (req, res) => {
       // return all keyword matches
       listCandidates = finalServices;
     } else {
-
-    /** ----------------------------------------
-     * CASE 2: NO KEYWORD → APPLY RADIUS
-     * -------------------------------------- **/
+      /** ----------------------------------------
+       * CASE 2: NO KEYWORD → APPLY RADIUS
+       * -------------------------------------- **/
       let centerLat = null;
       let centerLng = null;
 

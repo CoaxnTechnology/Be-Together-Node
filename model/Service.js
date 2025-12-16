@@ -33,6 +33,9 @@ const serviceSchema = new mongoose.Schema({
       required: true,
     },
   },
+  image: { type: String },
+  imagePublicId: { type: String },
+
   city: { type: String, default: null },
   isDoorstepService: { type: Boolean, default: false },
 
@@ -91,13 +94,7 @@ serviceSchema.virtual("reviews", {
 
 module.exports = mongoose.model("Service", serviceSchema);
 
-
-
-
-
-
-//-------------new version with faster move get service 
-
+//-------------new version with faster move get service
 
 function escapeRegex(text) {
   return text.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&");

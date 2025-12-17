@@ -249,7 +249,7 @@ exports.createService = async (req, res) => {
       isFree,
       price,
       currency, // <-- NOW SAVED IN SERVICE TABLE
-      image: serviceImage,                 // ✅ added
+      image: serviceImage, // ✅ added
       imagePublicId: serviceImagePublicId, // ✅ added
       location_name: location.name,
       // city,
@@ -1319,6 +1319,43 @@ exports.updateService = async (req, res) => {
     // Max participants
     if (body.max_participants)
       updatePayload.max_participants = Number(body.max_participants);
+    // =========================
+    // 🖼 IMAGE UPDATE LOGIC
+    // =========================
+    if (req.file && req.file.buffer) {
+      // ✅ CASE 1: New image uploaded
+      console.log("Uploading new service image...");
+
+      if (service.imagePublicId) {
+        try {
+          await cloudinary.uploader.destroy(service.imagePublicId);
+        } catch (err) {
+          console.log("Old image delete failed:", err.message);
+        }
+      }
+
+      const uploadResult = await uploadBufferToCloudinary(
+        req.file.buffer,
+        "service_images"
+      );
+
+      updatePayload.image = uploadResult.secure_url;
+      updatePayload.imagePublicId = uploadResult.public_id;
+    } else if (body.removeImage === true || body.removeImage === "true") {
+      // ✅ CASE 3: Image removed → fallback to category image
+      console.log("Image removed, setting category image");
+
+      if (service.imagePublicId) {
+        try {
+          await cloudinary.uploader.destroy(service.imagePublicId);
+        } catch (err) {
+          console.log("Old image delete failed:", err.message);
+        }
+      }
+      const serviceCategory = await Category.findById(service.category);
+      updatePayload.image = serviceCategory?.image || null;
+      updatePayload.imagePublicId = serviceCategory?.imagePublicId || null;
+    }
 
     // ✅ Finally update
     const updatedService = await Service.findByIdAndUpdate(

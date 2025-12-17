@@ -19,7 +19,7 @@ router.post(
 router.post("/get", serviceController.getServices);
 router.post("/user/search", serviceController.getInterestedUsers);
 router.get("/getall", serviceController.getAllServices);
-router.put("/update", auth, serviceController.updateService);
+router.put("/update", auth,upload.single("image"), serviceController.updateService);
 router.post("/getbyId", serviceController.getservicbyId);
 router.post("/search", serviceController.searchServices);
 

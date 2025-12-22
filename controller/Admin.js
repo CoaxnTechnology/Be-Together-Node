@@ -462,6 +462,34 @@ exports.getServiceById = async (req, res) => {
 //const csv = require("csv-parser");
 const { Readable } = require("stream");
 
+// ✅ Check valid image URL
+function isValidImageUrl(url) {
+  return (
+    typeof url === "string" &&
+    /^https?:\/\/.+\.(jpg|jpeg|png|webp)$/i.test(url)
+  );
+}
+
+// ✅ Upload image URL to Cloudinary
+async function uploadImageFromUrlToCloudinary(imageUrl, folder) {
+  const response = await axios.get(imageUrl, {
+    responseType: "arraybuffer",
+  });
+
+  return new Promise((resolve, reject) => {
+    const uploadStream = cloudinary.uploader.upload_stream(
+      { folder },
+      (error, result) => {
+        if (error) return reject(error);
+        resolve(result);
+      }
+    );
+
+    streamifier.createReadStream(response.data).pipe(uploadStream);
+  });
+}
+
+
 exports.generateUsersFromCSV = async (req, res) => {
   try {
     if (!req.file) {
@@ -645,6 +673,38 @@ exports.generateUsersFromCSV = async (req, res) => {
                   },
                 ];
               }
+              // ================= IMAGE LOGIC =================
+let serviceImage = null;
+let serviceImagePublicId = null;
+
+// 🔹 Case 1: CSV service image URL provided
+if (s.image && isValidImageUrl(s.image)) {
+  try {
+    const uploadResult = await uploadImageFromUrlToCloudinary(
+      s.image,
+      "service_images"
+    );
+    serviceImage = uploadResult.secure_url;
+    serviceImagePublicId = uploadResult.public_id;
+  } catch (err) {
+    console.error("❌ Service image upload failed:", err.message);
+  }
+}
+
+// 🔹 Case 2: No image → use category image
+if (!serviceImage) {
+  const category = await Category.findById(s.categoryId);
+  if (category?.image) {
+    serviceImage = category.image;
+    serviceImagePublicId = category.imagePublicId || null;
+  }
+}
+
+// 🔹 Assign to serviceData
+serviceData.image = serviceImage;
+serviceData.imagePublicId = serviceImagePublicId;
+// =================================================
+
 
               const service = new Service(serviceData);
               const savedService = await service.save();

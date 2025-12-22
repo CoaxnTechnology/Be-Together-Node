@@ -57,6 +57,10 @@ const userSchema = new mongoose.Schema(
     interests: { type: [String], default: [] },
     offeredTags: { type: [String], default: [] },
     currency: { type: String, default: "EUR" },
+    country: {
+      type: String,
+      default: null,
+    },
 
     services: [{ type: mongoose.Schema.Types.ObjectId, ref: "Service" }],
     lastResendAt: { type: Date, default: null },

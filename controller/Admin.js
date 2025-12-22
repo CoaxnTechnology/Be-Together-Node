@@ -13,8 +13,8 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const fs = require("fs");
 const csv = require("csv-parser");
-const Booking=require("../model/Booking");
-const Payment=require("../model/Payment");
+const Booking = require("../model/Booking");
+const Payment = require("../model/Payment");
 // ------------------ Cloudinary Config ------------------
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -455,159 +455,6 @@ exports.getServiceById = async (req, res) => {
     res
       .status(500)
       .json({ success: false, message: "Server error", error: err.message });
-  }
-};
-//---------------fake user-------------------
-// controllers/adminController.js
-
-async function getFakerForCountry(country) {
-  const fakerModule = await import("@faker-js/faker");
-  const { fakerEN, fakerIT, fakerES, fakerFR, fakerDE, fakerPT } = fakerModule;
-
-  switch (country) {
-    case "Italy":
-      return fakerIT;
-    case "Spain":
-      return fakerES;
-    case "France":
-      return fakerFR;
-    case "Germany":
-      return fakerDE;
-    case "Portugal":
-      return fakerEN;
-    default:
-      return fakerEN;
-  }
-}
-//
-function generateMobileForCountry(country) {
-  function randDigits(n) {
-    return Array.from({ length: n }, () => Math.floor(Math.random() * 10)).join(
-      ""
-    );
-  }
-
-  switch (country) {
-    case "India":
-      // Indian mobile numbers (10 digits, starting with 6–9)
-      return `${[6, 7, 8, 9][Math.floor(Math.random() * 4)]}${randDigits(9)}`;
-    case "Italy":
-      return `3${randDigits(9)}`;
-    case "Spain":
-      return `${["6", "7"][Math.floor(Math.random() * 2)]}${randDigits(8)}`;
-    case "France":
-      return `${["6", "7"][Math.floor(Math.random() * 2)]}${randDigits(8)}`;
-    case "Germany":
-      return `${["15", "16", "17"][Math.floor(Math.random() * 3)]}${randDigits(
-        8
-      )}`;
-    case "Portugal":
-      return `9${randDigits(8)}`;
-    default:
-      return `9${randDigits(9)}`;
-  }
-}
-//
-// Predefined Indian names
-const indianFirstNames = [
-  "Amit",
-  "Priya",
-  "Ravi",
-  "Sneha",
-  "Arjun",
-  "Neha",
-  "Kiran",
-  "Pooja",
-  "Rahul",
-  "Anjali",
-  "Vikram",
-  "Meena",
-  "Sanjay",
-  "Divya",
-  "Rohit",
-  "Kavita",
-];
-
-const indianLastNames = [
-  "Patel",
-  "Sharma",
-  "Verma",
-  "Reddy",
-  "Gupta",
-  "Nair",
-  "Khan",
-  "Singh",
-  "Iyer",
-  "Chopra",
-  "Joshi",
-  "Das",
-  "Yadav",
-  "Bhat",
-  "Mehta",
-  "Pillai",
-];
-
-function cleanEmailString(str) {
-  return str
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-zA-Z0-9.]/g, "");
-}
-
-exports.generateFakeUsers = async (req, res) => {
-  try {
-    const { country = "Default", count = 10 } = req.body;
-    const domain = process.env.FAKE_USER_EMAIL_DOMAIN || "mailnesia.com";
-
-    const faker = await getFakerForCountry(country);
-
-    const fakeUsers = Array.from({ length: count }).map(() => {
-      let firstName, lastName;
-
-      if (country === "India") {
-        firstName =
-          indianFirstNames[Math.floor(Math.random() * indianFirstNames.length)];
-        lastName =
-          indianLastNames[Math.floor(Math.random() * indianLastNames.length)];
-      } else {
-        firstName = faker.person.firstName();
-        lastName = faker.person.lastName();
-      }
-
-      const cleanFirst = cleanEmailString(firstName);
-      const cleanLast = cleanEmailString(lastName);
-      const email = `${cleanFirst}.${cleanLast}.${faker.string
-        .alphanumeric(4)
-        .toLowerCase()}@${domain}`.toLowerCase();
-
-      return {
-        name: `${firstName} ${lastName}`,
-        email,
-        mobile: generateMobileForCountry(country),
-        age: faker.number.int({ min: 18, max: 60 }),
-        register_type: "manual",
-        login_type: "manual",
-        status: "active",
-        is_active: true,
-        is_fake: true,
-      };
-    });
-
-    const created = await User.insertMany(fakeUsers);
-
-    res.json({
-      success: true,
-      createdCount: created.length,
-      created: created.map((u) => ({
-        id: u._id,
-        name: u.name,
-        email: u.email,
-        mobile: u.mobile,
-      })),
-    });
-  } catch (err) {
-    console.error("generateFakeUsers error:", err);
-    res.status(500).json({ success: false, error: err.message });
   }
 };
 
@@ -1169,213 +1016,252 @@ function tryParse(val) {
   }
 }
 
-// Simple date/time validators
-function isValidTime(t) {
-  return typeof t === "string" && /^\d{2}:\d{2}(\s?(AM|PM))?$/i.test(t);
-}
 
-function isValidDateISO(d) {
-  return typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d);
-}
 
-// Helper to format time to AM/PM
-function formatTimeToAMPM(timeStr) {
-  if (!timeStr) return null;
-  const m = moment(timeStr, ["HH:mm", "hh:mm A"], true);
-  if (!m.isValid()) return null;
-  return m.format("hh:mm A");
-}
-
-// Create service API
-exports.createService = async (req, res) => {
+// edit service API
+exports.updateService = async (req, res) => {
   try {
-    console.log("===== createService called =====");
+    console.log("===== updateService (PATCH) called =====");
+    console.log("Request body:", req.body);
 
-    const userId = req.body.userId || (req.user && req.user.id);
-    if (!userId)
-      return res
-        .status(400)
-        .json({ isSuccess: false, message: "userId is required" });
+    const { serviceId, userId, ...body } = req.body;
 
-    const user = await User.findById(userId);
-    if (!user)
-      return res
-        .status(404)
-        .json({ isSuccess: false, message: "User not found" });
-    if (!user.is_active)
-      return res
-        .status(403)
-        .json({ isSuccess: false, message: "User is not active" });
+    // 🔐 Role from auth middleware
+    const role = req.user?.role; // "admin" | "user"
+    const adminId = req.user?.id;
 
-    const body = req.body;
-    const title = body.title && String(body.title).trim();
-    const description = body.description || "";
-    const language = body.language || body.Language || "English";
-    const isFree = body.isFree === true || body.isFree === "true";
-    const price = isFree ? 0 : Number(body.price || 0);
-
-    const location = tryParse(body.location);
-    const city = body.city;
-    const isDoorstepService =
-      body.isDoorstepService === true || body.isDoorstepService === "true"; // ✅ new field
-    const service_type = body.service_type || "one_time";
-    const date = body.date;
-    const start_time = body.start_time;
-    const end_time = body.end_time;
-    const max_participants = Number(body.max_participants || 1);
-    const categoryId = body.categoryId;
-    const selectedTags = tryParse(body.selectedTags) || [];
-
-    // ---- Validation ----
-    if (!title)
-      return res
-        .status(400)
-        .json({ isSuccess: false, message: "Title is required" });
-
-    if (
-      !location ||
-      !location.name ||
-      location.latitude == null ||
-      location.longitude == null
-    ) {
+    if (!serviceId) {
       return res.status(400).json({
         isSuccess: false,
-        message: "Location (name, latitude, longitude) is required",
+        message: "serviceId is required",
       });
     }
 
-    if (!city)
-      return res
-        .status(400)
-        .json({ isSuccess: false, message: "City is required" });
-
-    if (!categoryId)
-      return res
-        .status(400)
-        .json({ isSuccess: false, message: "categoryId is required" });
-
-    const category = await Category.findById(categoryId);
-    if (!category)
-      return res
-        .status(404)
-        .json({ isSuccess: false, message: "Category not found" });
-
-    if (!Array.isArray(selectedTags) || !selectedTags.length) {
-      return res.status(400).json({
+    // =========================
+    // 🔎 FETCH SERVICE
+    // =========================
+    const service = await Service.findById(serviceId);
+    if (!service) {
+      return res.status(404).json({
         isSuccess: false,
-        message: "selectedTags must be a non-empty array",
+        message: "Service not found",
       });
     }
 
-    const validTags = category.tags.filter((tag) =>
-      selectedTags.map((t) => t.toLowerCase()).includes(tag.toLowerCase())
-    );
-    if (!validTags.length)
-      return res.status(400).json({
-        isSuccess: false,
-        message: "No valid tags selected from this category",
-      });
+    let user = null;
 
-    // ---- Build payload ----
-    const servicePayload = {
-      title,
-      description,
-      Language: language,
-      isFree,
-      price,
-      location_name: location.name,
-      city,
-      isDoorstepService, // ✅ save new field
-      location: {
-        type: "Point",
-        coordinates: [Number(location.longitude), Number(location.latitude)],
-      },
-      category: category._id,
-      tags: validTags,
-      max_participants,
-      service_type,
-      owner: user._id,
-    };
-
-    // One-time service
-    if (service_type === "one_time") {
-      const formattedStart = formatTimeToAMPM(start_time);
-      const formattedEnd = formatTimeToAMPM(end_time);
-
-      if (!formattedStart || !formattedEnd) {
+    // =========================
+    // 👤 USER FLOW
+    // =========================
+    if (role === "user") {
+      if (!userId) {
         return res.status(400).json({
           isSuccess: false,
-          message:
-            "Invalid start_time or end_time (must be HH:mm or hh:mm AM/PM)",
+          message: "userId is required",
         });
       }
 
-      if (!isValidDateISO(date)) {
-        return res.status(400).json({
+      user = await User.findById(userId);
+      if (!user) {
+        return res.status(404).json({
           isSuccess: false,
-          message: "Valid date (YYYY-MM-DD) required for one_time",
+          message: "User not found",
         });
       }
 
-      servicePayload.date = date;
-      servicePayload.start_time = formattedStart;
-      servicePayload.end_time = formattedEnd;
+      if (!user.is_active) {
+        return res.status(403).json({
+          isSuccess: false,
+          message: "User is not active",
+        });
+      }
+
+      // 🚫 User can edit only own service
+      if (String(service.owner) !== String(user._id)) {
+        return res.status(403).json({
+          isSuccess: false,
+          message: "Not authorized to edit this service",
+        });
+      }
     }
 
-    // Recurring service
-    if (service_type === "recurring") {
-      const recurring_schedule = tryParse(body.recurring_schedule) || [];
-      if (!Array.isArray(recurring_schedule) || !recurring_schedule.length) {
-        return res.status(400).json({
+    // =========================
+    // 👑 ADMIN FLOW
+    // =========================
+    if (role === "admin") {
+      const admin = await Admin.findById(adminId);
+      if (!admin) {
+        return res.status(401).json({
           isSuccess: false,
-          message: "Recurring schedule is required for recurring services",
+          message: "Admin not authorized",
         });
       }
+      // ✅ No ownership check for admin
+    }
 
-      servicePayload.recurring_schedule = recurring_schedule.map((item) => {
-        const formattedStart = formatTimeToAMPM(item.start_time);
-        const formattedEnd = formatTimeToAMPM(item.end_time);
+    // =========================
+    // 🧩 BUILD UPDATE PAYLOAD
+    // =========================
+    const updatePayload = {};
 
-        if (
-          !item.day ||
-          !isValidDateISO(item.date) ||
-          !formattedStart ||
-          !formattedEnd
-        ) {
-          throw new Error(
-            "Each recurring schedule item must include day, date, start_time, end_time in HH:mm or hh:mm AM/PM format"
-          );
-        }
+    // Title
+    if (body.title) updatePayload.title = body.title.trim();
 
-        return {
-          day: item.day,
-          date: item.date,
-          start_time: formattedStart,
-          end_time: formattedEnd,
+    // Description
+    if (body.description) updatePayload.description = body.description;
+
+    // Doorstep
+    if (body.isDoorstepService !== undefined) {
+      updatePayload.isDoorstepService =
+        body.isDoorstepService === true || body.isDoorstepService === "true";
+    }
+
+    // Free / Price
+    if (body.isFree !== undefined) {
+      updatePayload.isFree = body.isFree === true || body.isFree === "true";
+    }
+
+    if (body.price !== undefined) {
+      updatePayload.price = Number(body.price || 0);
+    }
+
+    // Currency
+    if (body.currency) {
+      updatePayload.currency = body.currency;
+
+      // Only user currency update (not admin)
+      if (user) {
+        user.currency = body.currency;
+        await user.save();
+      }
+    }
+
+    // Language
+    if (body.language || body.Language) {
+      updatePayload.Language = body.language || body.Language;
+    }
+
+    // =========================
+    // 📍 LOCATION
+    // =========================
+    if (body.location) {
+      const location = tryParse(body.location);
+      if (
+        location &&
+        location.latitude != null &&
+        location.longitude != null &&
+        location.name
+      ) {
+        updatePayload.location_name = location.name;
+        updatePayload.location = {
+          type: "Point",
+          coordinates: [Number(location.longitude), Number(location.latitude)],
         };
-      });
+      } else {
+        return res.status(400).json({
+          isSuccess: false,
+          message: "Invalid location format",
+        });
+      }
     }
 
-    // ---- Save service ----
-    const createdService = new Service(servicePayload);
-    await createdService.save();
+    // =========================
+    // 🏷 CATEGORY & TAGS
+    // =========================
+    if (body.categoryId) {
+      const category = await Category.findById(body.categoryId);
+      if (!category) {
+        return res.status(404).json({
+          isSuccess: false,
+          message: "Category not found",
+        });
+      }
 
-    // Link service to user
-    user.services.push(createdService._id);
-    await user.save();
+      updatePayload.category = category._id;
 
-    console.log("Service created successfully:", createdService._id);
+      const selectedTags = tryParse(body.selectedTags) || [];
+      const validTags = category.tags.filter((tag) =>
+        selectedTags
+          .map((t) => String(t).toLowerCase())
+          .includes(tag.toLowerCase())
+      );
+
+      if (validTags.length) updatePayload.tags = validTags;
+    }
+
+    // =========================
+    // ⏱ TIME / SCHEDULE
+    // =========================
+    if (body.service_type)
+      updatePayload.service_type = body.service_type || "one_time";
+
+    if (body.date) updatePayload.date = String(body.date);
+    if (body.start_time)
+      updatePayload.start_time = body.start_time.trim().toUpperCase();
+    if (body.end_time)
+      updatePayload.end_time = body.end_time.trim().toUpperCase();
+
+    if (body.recurring_schedule) {
+      updatePayload.recurring_schedule =
+        tryParse(body.recurring_schedule) || [];
+    }
+
+    if (body.max_participants) {
+      updatePayload.max_participants = Number(body.max_participants);
+    }
+
+    // =========================
+    // 🖼 IMAGE
+    // =========================
+    if (req.file && req.file.buffer) {
+      if (service.imagePublicId) {
+        try {
+          await cloudinary.uploader.destroy(service.imagePublicId);
+        } catch (err) {
+          console.log("Old image delete failed:", err.message);
+        }
+      }
+
+      const uploadResult = await uploadBufferToCloudinary(
+        req.file.buffer,
+        "service_images"
+      );
+
+      updatePayload.image = uploadResult.secure_url;
+      updatePayload.imagePublicId = uploadResult.public_id;
+    } else if (body.removeImage === true || body.removeImage === "true") {
+      if (service.imagePublicId) {
+        try {
+          await cloudinary.uploader.destroy(service.imagePublicId);
+        } catch (err) {}
+      }
+
+      const serviceCategory = await Category.findById(service.category);
+      updatePayload.image = serviceCategory?.image || null;
+      updatePayload.imagePublicId = serviceCategory?.imagePublicId || null;
+    }
+
+    // =========================
+    // ✅ UPDATE
+    // =========================
+    const updatedService = await Service.findByIdAndUpdate(
+      serviceId,
+      { $set: updatePayload },
+      { new: true }
+    );
 
     return res.json({
       isSuccess: true,
-      message: "Service created successfully",
-      data: createdService,
+      message: "Service updated successfully",
+      data: updatedService,
     });
   } catch (err) {
-    console.error("createService error:", err);
-    return res
-      .status(500)
-      .json({ isSuccess: false, message: "Server error", error: err.message });
+    console.error("updateService error:", err);
+    return res.status(500).json({
+      isSuccess: false,
+      message: "Server error",
+      error: err.message,
+    });
   }
 };
 
@@ -1424,7 +1310,7 @@ exports.loginAdmin = async (req, res) => {
     res.status(500).json({ success: false, error: "Server error" });
   }
 };
-//admin booking 
+//admin booking
 exports.getAllBookings = async (req, res) => {
   try {
     // 1️⃣ Fetch all bookings with all details
@@ -1487,13 +1373,13 @@ exports.getAllBookings = async (req, res) => {
 //--------------------Payment INformation-------------------
 exports.getAllPayments = async (req, res) => {
   try {
-    let { 
-      page = 1, 
-      limit = 20, 
-      status, 
-      currency, 
-      providerId, 
-      userId 
+    let {
+      page = 1,
+      limit = 20,
+      status,
+      currency,
+      providerId,
+      userId,
     } = req.query;
 
     page = Number(page);
@@ -1573,7 +1459,6 @@ exports.getAllPayments = async (req, res) => {
         refundedAt: p.refundedAt,
       })),
     });
-
   } catch (err) {
     console.error("getAllPayments error:", err);
     return res.status(500).json({

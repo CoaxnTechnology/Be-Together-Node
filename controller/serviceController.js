@@ -1736,6 +1736,17 @@ exports.approveServiceDelete = async (req, res) => {
     service.deleteApprovedByAdmin = true;
     await service.save();
     console.log("💾 Service approval status saved");
+    // ===============================
+    // 🧹 REMOVE SERVICE FROM USER
+    // ===============================
+    console.log("🧹 Removing service from user.services[]");
+
+    await User.updateOne(
+      { _id: service.owner._id },
+      { $pull: { services: service._id } }
+    );
+
+    console.log("✅ Service removed from user.services array");
 
     // ===============================
     // 🔥 DELETE SERVICE

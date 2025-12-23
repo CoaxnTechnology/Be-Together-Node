@@ -543,19 +543,48 @@ async function sendServiceCancelledNotification(customer, provider, service, boo
 }
 
 async function notifyOnServiceDeleteApproved(service, bookings) {
-  try {
-    console.log("🔔 notifyOnServiceDeleteApproved CALLED");
+  console.log("🔔 ===============================");
+  console.log("🔔 notifyOnServiceDeleteApproved CALLED");
+  console.log("🆔 Service ID:", service?._id?.toString());
+  console.log("📛 Service Title:", service?.title);
 
+  try {
     // =========================
     // 1️⃣ NOTIFY CUSTOMERS
     // =========================
+    console.log("👥 Starting CUSTOMER notifications...");
+
     for (const booking of bookings) {
       const customer = booking.customer;
-      if (!customer?.fcmToken?.length) continue;
+
+      if (!customer) {
+        console.log("⚠️ Booking without customer, skipping");
+        continue;
+      }
+
+      console.log(
+        `👤 Customer Found → Name: ${customer.name}, Email: ${customer.email}`
+      );
+
+      if (!customer.fcmToken || !customer.fcmToken.length) {
+        console.log(
+          `⚠️ Customer ${customer.name} has NO FCM tokens, skipping`
+        );
+        continue;
+      }
+
+      console.log(
+        `📲 Customer FCM Tokens (${customer.fcmToken.length}):`,
+        customer.fcmToken
+      );
 
       const message = buildServiceDeletedByAdminForCustomer(service);
 
-      await admin.messaging().sendEachForMulticast({
+      console.log(
+        `📨 Sending notification to CUSTOMER: ${customer.name}`
+      );
+
+      const response = await admin.messaging().sendEachForMulticast({
         tokens: customer.fcmToken,
         notification: message,
         data: {
@@ -566,30 +595,81 @@ async function notifyOnServiceDeleteApproved(service, bookings) {
         },
       });
 
-      console.log(`✅ Customer notified: ${customer.name}`);
+      console.log(
+        `📬 Customer ${customer.name} → Success: ${response.successCount}, Failed: ${response.failureCount}`
+      );
+
+      response.responses.forEach((res, index) => {
+        const token = customer.fcmToken[index];
+        if (res.success) {
+          console.log(`✅ Sent to customer token: ${token}`);
+        } else {
+          console.log(
+            `❌ Failed customer token: ${token} - ${res.error?.message}`
+          );
+        }
+      });
     }
 
     // =========================
     // 2️⃣ NOTIFY PROVIDER
     // =========================
+    console.log("🧑‍🔧 Starting PROVIDER notification...");
+
     const provider = service.owner;
-    if (provider?.fcmToken?.length) {
-      const message = buildServiceDeleteApprovedForProvider(service);
 
-      await admin.messaging().sendEachForMulticast({
-        tokens: provider.fcmToken,
-        notification: message,
-        data: {
-          type: "service_delete_approved",
-          userType: "provider",
-          serviceId: service._id.toString(),
-        },
-      });
+    if (!provider) {
+      console.log("❌ No provider found on service");
+    } else {
+      console.log(
+        `👤 Provider Found → Name: ${provider.name}, Email: ${provider.email}`
+      );
 
-      console.log(`✅ Provider notified: ${provider.name}`);
+      if (!provider.fcmToken || !provider.fcmToken.length) {
+        console.log(
+          `⚠️ Provider ${provider.name} has NO FCM tokens, skipping`
+        );
+      } else {
+        console.log(
+          `📲 Provider FCM Tokens (${provider.fcmToken.length}):`,
+          provider.fcmToken
+        );
+
+        const message = buildServiceDeleteApprovedForProvider(service);
+
+        console.log(
+          `📨 Sending notification to PROVIDER: ${provider.name}`
+        );
+
+        const response = await admin.messaging().sendEachForMulticast({
+          tokens: provider.fcmToken,
+          notification: message,
+          data: {
+            type: "service_delete_approved",
+            userType: "provider",
+            serviceId: service._id.toString(),
+          },
+        });
+
+        console.log(
+          `📬 Provider ${provider.name} → Success: ${response.successCount}, Failed: ${response.failureCount}`
+        );
+
+        response.responses.forEach((res, index) => {
+          const token = provider.fcmToken[index];
+          if (res.success) {
+            console.log(`✅ Sent to provider token: ${token}`);
+          } else {
+            console.log(
+              `❌ Failed provider token: ${token} - ${res.error?.message}`
+            );
+          }
+        });
+      }
     }
 
-    console.log("🎉 All delete-approval notifications sent");
+    console.log("🎉 All delete-approval notifications COMPLETED");
+    console.log("🔔 ===============================");
   } catch (err) {
     console.error(
       "❌ Error in notifyOnServiceDeleteApproved:",

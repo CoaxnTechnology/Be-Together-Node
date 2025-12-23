@@ -12,6 +12,10 @@ const { Types } = mongoose;
 const streamifier = require("streamifier");
 const cloudinary = require("cloudinary").v2;
 const Review = require("../model/review");
+const Booking = require("../model/Booking");
+const { sendServiceDeleteApprovedEmail } = require("../utils/email");
+const Payment = require("../model/Payment");
+
 // Helper to parse JSON safely
 function tryParse(val) {
   if (val === undefined || val === null) return val;
@@ -1540,8 +1544,6 @@ exports.searchServices = async (req, res) => {
   }
 };
 //-------------------delete service-----------------
-const Booking = require("../model/Booking");
-const { sendServiceDeleteApprovedEmail } = require("../utils/email");
 
 exports.deleteService = async (req, res) => {
   try {

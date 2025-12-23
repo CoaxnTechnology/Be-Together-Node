@@ -19,6 +19,21 @@ function getDistanceFromLatLonInKm(lat1, lon1, lat2, lon2) {
       Math.sin(dLon / 2) ** 2;
   return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
 }
+// 🔔 Admin approved delete - Customer
+function buildServiceDeletedByAdminForCustomer(service) {
+  return {
+    title: "❌ Service Cancelled",
+    body: `The service "${service.title}" has been cancelled by admin.`,
+  };
+}
+
+// 🔔 Admin approved delete - Provider
+function buildServiceDeleteApprovedForProvider(service) {
+  return {
+    title: "✅ Delete Request Approved",
+    body: `Your request to delete "${service.title}" was approved by admin.`,
+  };
+}
 
 // Notification message templates
 function buildNewServiceMessage(service, distance) {
@@ -527,6 +542,61 @@ async function sendServiceCancelledNotification(customer, provider, service, boo
   }
 }
 
+async function notifyOnServiceDeleteApproved(service, bookings) {
+  try {
+    console.log("🔔 notifyOnServiceDeleteApproved CALLED");
+
+    // =========================
+    // 1️⃣ NOTIFY CUSTOMERS
+    // =========================
+    for (const booking of bookings) {
+      const customer = booking.customer;
+      if (!customer?.fcmToken?.length) continue;
+
+      const message = buildServiceDeletedByAdminForCustomer(service);
+
+      await admin.messaging().sendEachForMulticast({
+        tokens: customer.fcmToken,
+        notification: message,
+        data: {
+          type: "service_deleted_by_admin",
+          userType: "customer",
+          serviceId: service._id.toString(),
+          bookingId: booking._id.toString(),
+        },
+      });
+
+      console.log(`✅ Customer notified: ${customer.name}`);
+    }
+
+    // =========================
+    // 2️⃣ NOTIFY PROVIDER
+    // =========================
+    const provider = service.owner;
+    if (provider?.fcmToken?.length) {
+      const message = buildServiceDeleteApprovedForProvider(service);
+
+      await admin.messaging().sendEachForMulticast({
+        tokens: provider.fcmToken,
+        notification: message,
+        data: {
+          type: "service_delete_approved",
+          userType: "provider",
+          serviceId: service._id.toString(),
+        },
+      });
+
+      console.log(`✅ Provider notified: ${provider.name}`);
+    }
+
+    console.log("🎉 All delete-approval notifications sent");
+  } catch (err) {
+    console.error(
+      "❌ Error in notifyOnServiceDeleteApproved:",
+      err.message
+    );
+  }
+}
 
 
 // Exports
@@ -538,4 +608,6 @@ module .exports.sendBookingNotification = sendBookingNotification;
 module .exports.sendServiceStartedNotification = sendServiceStartedNotification;
 module .exports.sendServiceCompletedNotification = sendServiceCompletedNotification;
 module .exports.sendServiceCancelledNotification = sendServiceCancelledNotification;
+exports.notifyOnServiceDeleteApproved = notifyOnServiceDeleteApproved;
+
 //notificaton addd

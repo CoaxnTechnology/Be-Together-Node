@@ -227,6 +227,54 @@ async function sendServiceCancelledEmail(customer, provider, service, booking, r
   }
 }
 
+async function sendServiceDeleteApprovedEmail(
+  receiver,
+  service,
+  type = "customer"
+) {
+  try {
+    const templatePath = path.join(
+      __dirname,
+      "../templates/service_cancel_admin.html"
+    );
+
+    let html = fs.readFileSync(templatePath, "utf8");
+
+    let extraSection = "";
+
+    if (type === "customer") {
+      extraSection = `
+        <p><strong>Provider:</strong> ${service.owner.name}</p>
+      `;
+    } else {
+      extraSection = `
+        <p style="color:#2e7d32;font-weight:600">
+          ✅ Your delete request has been approved by admin.
+        </p>
+      `;
+    }
+
+    html = html
+      .replace(/{{name}}/g, receiver.name)
+      .replace(/{{service_name}}/g, service.title)
+      .replace(/{{date}}/g, new Date().toLocaleString("en-IN"))
+      .replace(/{{extra_section}}/g, extraSection);
+
+    await transporter.sendMail({
+      from: process.env.SMTP_EMAIL,
+      to: receiver.email,
+      subject:
+        type === "customer"
+          ? "Service Cancelled"
+          : "Delete Request Approved",
+      html,
+    });
+
+    console.log(`📧 Admin delete email sent to ${receiver.email}`);
+  } catch (err) {
+    console.error("❌ Admin delete email error:", err.message);
+  }
+}
 
 
 module.exports = {
@@ -235,5 +283,6 @@ module.exports = {
   sendServiceOtpEmail,
   sendServiceBookedEmail,
   sendServiceCompletedEmail,
-  sendServiceCancelledEmail
+  sendServiceCancelledEmail,
+  sendServiceDeleteApprovedEmail
 };

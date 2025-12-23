@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Service Cancelled</title>
+  </head>
+
+  <body style="margin:0;padding:0;background:#f4f7ff;font-family:Poppins,Arial,sans-serif">
+    <div style="max-width:600px;margin:0 auto;padding:30px 15px">
+
+      <!-- LOGO -->
+      <div style="text-align:center;margin-bottom:25px">
+        <img
+          src="https://be-together-node.vercel.app/logo.jpg"
+          height="55"
+          style="border-radius:10px"
+        />
+      </div>
+
+      <!-- CARD -->
+      <div style="background:#fff;border-radius:28px;padding:35px 30px;box-shadow:0 6px 20px rgba(0,0,0,0.08)">
+        <h1 style="margin:0;font-size:24px;color:#1f1f1f;text-align:center">
+          ❌ Service Cancelled
+        </h1>
+
+        <p style="margin-top:18px;font-size:16px;color:#555">
+          Hello <strong>{{name}}</strong>,
+        </p>
+
+        <p style="margin-top:10px;font-size:15px;color:#666">
+          We regret to inform you that the following service has been cancelled due to an inconvenience.
+        </p>
+
+        <div style="margin-top:25px;background:#f4f7ff;border-radius:20px;padding:22px">
+          <p><strong>Service:</strong> {{service_name}}</p>
+          {{extra_section}}
+          <p><strong>Date:</strong> {{date}}</p>
+        </div>
+
+        <p style="margin-top:25px;font-size:14px;color:#777">
+          We apologize for the inconvenience caused and appreciate your understanding.
+        </p>
+      </div>
+
+      <div style="text-align:center;margin-top:35px;font-size:13px;color:#999">
+        © 2025 Be Together — All Rights Reserved
+      </div>
+    </div>
+  </body>
+</html>

@@ -32,20 +32,19 @@ router.post("/search", serviceController.searchServices);
 // ✅ STATIC ROUTES FIRST
 router.get(
   "/delete-requests",
-   // adminAuth better
   serviceController.getDeleteServiceRequests
 );
 
 // ✅ ADMIN ACTIONS (explicit paths)
 router.post(
   "/approve-delete/:serviceId",
-  
+
   serviceController.approveServiceDelete
 );
 
 router.post(
   "/reject-delete/:serviceId",
-  
+
   serviceController.rejectServiceDelete
 );
 

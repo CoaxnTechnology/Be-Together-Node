@@ -1541,6 +1541,7 @@ exports.searchServices = async (req, res) => {
 };
 //-------------------delete service-----------------
 const Booking = require("../model/Booking");
+const { sendServiceDeleteApprovedEmail } = require("../utils/email");
 
 exports.deleteService = async (req, res) => {
   try {
@@ -1610,36 +1611,148 @@ exports.deleteService = async (req, res) => {
 
 //-----------------admin aproval-------------
 exports.approveServiceDelete = async (req, res) => {
+  console.log("🚀 [ADMIN APPROVE DELETE] API CALLED");
+
   try {
     const { serviceId } = req.params;
+    console.log("🆔 Service ID:", serviceId);
 
-    const service = await Service.findById(serviceId);
-    if (!service)
+    // ===============================
+    // 1️⃣ Fetch service + owner
+    // ===============================
+    console.log("🔍 Fetching service from DB...");
+    const service = await Service.findById(serviceId).populate(
+      "owner",
+      "name email fcmToken"
+    );
+
+    if (!service) {
+      console.log("❌ Service NOT FOUND");
       return res.status(404).json({
         isSuccess: false,
         message: "Service not found",
       });
+    }
+
+    console.log("✅ Service found:", service.title);
+    console.log("👤 Provider:", service.owner?.name, service.owner?.email);
 
     if (!service.isDeleteRequested) {
+      console.log("⚠️ Delete request NOT found for this service");
       return res.status(400).json({
         isSuccess: false,
         message: "No delete request for this service",
       });
     }
 
-    // ✅ Approve delete
+    console.log("📌 Delete request exists → proceeding");
+
+    // ===============================
+    // 2️⃣ Fetch bookings + customers
+    // ===============================
+    console.log("🔍 Fetching bookings for this service...");
+    const bookings = await Booking.find({
+      service: serviceId,
+      status: { $in: ["booked", "started"] },
+    }).populate("customer", "name email fcmToken");
+
+    console.log(`📦 Total bookings found: ${bookings.length}`);
+
+    // ===============================
+    // 📧 EMAIL → CUSTOMERS
+    // ===============================
+    console.log("📧 Sending EMAILS to CUSTOMERS...");
+
+    for (const booking of bookings) {
+      if (!booking.customer) {
+        console.log("⚠️ Booking has NO customer, skipping");
+        continue;
+      }
+
+      console.log(
+        `📨 Sending email to CUSTOMER: ${booking.customer.name} (${booking.customer.email})`
+      );
+
+      try {
+        await sendServiceDeleteApprovedEmail(
+          booking.customer,
+          service,
+          "customer"
+        );
+        console.log("✅ Customer email SENT");
+      } catch (emailErr) {
+        console.log(
+          "❌ Customer email FAILED:",
+          booking.customer.email,
+          emailErr.message
+        );
+      }
+    }
+
+    // ===============================
+    // 📧 EMAIL → PROVIDER
+    // ===============================
+    console.log(
+      `📧 Sending email to PROVIDER: ${service.owner.name} (${service.owner.email})`
+    );
+
+    try {
+      await sendServiceDeleteApprovedEmail(
+        service.owner,
+        service,
+        "provider"
+      );
+      console.log("✅ Provider email SENT");
+    } catch (emailErr) {
+      console.log(
+        "❌ Provider email FAILED:",
+        service.owner.email,
+        emailErr.message
+      );
+    }
+
+    // ===============================
+    // 🔔 FIREBASE NOTIFICATIONS
+    // ===============================
+    console.log("🔔 Sending FIREBASE notifications...");
+
+    try {
+      await notificationController.notifyOnServiceDeleteApproved(
+        service,
+        bookings
+      );
+      console.log("✅ Firebase notifications SENT");
+    } catch (notifyErr) {
+      console.log(
+        "❌ Firebase notification FAILED:",
+        notifyErr.message
+      );
+    }
+
+    // ===============================
+    // ✅ MARK APPROVED
+    // ===============================
+    console.log("✅ Marking deleteApprovedByAdmin = true");
     service.deleteApprovedByAdmin = true;
     await service.save();
+    console.log("💾 Service approval status saved");
 
-    // 🔥 Now actually delete service
+    // ===============================
+    // 🔥 DELETE SERVICE
+    // ===============================
+    console.log("🔥 Deleting service from DB...");
     await Service.findByIdAndDelete(serviceId);
+    console.log("🗑️ Service DELETED successfully");
+
+    console.log("🎉 ADMIN DELETE FLOW COMPLETED SUCCESSFULLY");
 
     return res.json({
       isSuccess: true,
-      message: "Service deleted after admin approval ✅",
+      message:
+        "Service deleted. Customers & provider notified via email and notification ✅",
     });
   } catch (err) {
-    console.error("approveServiceDelete error:", err);
+    console.error("❌ approveServiceDelete FATAL ERROR:", err);
     res.status(500).json({
       isSuccess: false,
       message: "Server error",
@@ -1647,6 +1760,7 @@ exports.approveServiceDelete = async (req, res) => {
     });
   }
 };
+
 
 exports.getDeleteServiceRequests = async (req, res) => {
   try {

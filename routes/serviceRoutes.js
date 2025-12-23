@@ -19,9 +19,38 @@ router.post(
 router.post("/get", serviceController.getServices);
 router.post("/user/search", serviceController.getInterestedUsers);
 router.get("/getall", serviceController.getAllServices);
-router.put("/update", auth,upload.single("image"), serviceController.updateService);
+router.put(
+  "/update",
+  auth,
+  upload.single("image"),
+  serviceController.updateService
+);
 router.post("/getbyId", serviceController.getservicbyId);
 router.post("/search", serviceController.searchServices);
+
+// 🧑‍🔧 Owner deletes service
+// ✅ STATIC ROUTES FIRST
+router.get(
+  "/delete-requests",
+   // adminAuth better
+  serviceController.getDeleteServiceRequests
+);
+
+// ✅ ADMIN ACTIONS (explicit paths)
+router.post(
+  "/approve-delete/:serviceId",
+  
+  serviceController.approveServiceDelete
+);
+
+router.post(
+  "/reject-delete/:serviceId",
+  
+  serviceController.rejectServiceDelete
+);
+
+// 🧑‍🔧 OWNER DELETE
+router.delete("/delete", auth, serviceController.deleteService);
 
 module.exports = router;
 //

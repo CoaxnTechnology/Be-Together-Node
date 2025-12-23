@@ -48,6 +48,16 @@ const serviceSchema = new mongoose.Schema({
     enum: ["one_time", "recurring"],
     default: "one_time",
   },
+  // Service schema me add karo
+  isDeleteRequested: {
+    type: Boolean,
+    default: false,
+  },
+  deleteApprovedByAdmin: {
+    type: Boolean,
+    default: false,
+  },
+  deleteRequestedAt: Date,
 
   // one_time service
   date: { type: String, default: null },

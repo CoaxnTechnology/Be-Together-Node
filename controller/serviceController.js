@@ -1539,3 +1539,164 @@ exports.searchServices = async (req, res) => {
     });
   }
 };
+//-------------------delete service-----------------
+const Booking = require("../model/Booking");
+
+exports.deleteService = async (req, res) => {
+  try {
+    const userId = req.user.id; // owner
+    const { serviceId } = req.body; // 👈 BODY se aayega
+
+    if (!serviceId) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "serviceId is required",
+      });
+    }
+
+    const service = await Service.findById(serviceId);
+    if (!service)
+      return res.status(404).json({
+        isSuccess: false,
+        message: "Service not found",
+      });
+
+    // ✅ Only owner can delete
+    if (service.owner.toString() !== userId) {
+      return res.status(403).json({
+        isSuccess: false,
+        message: "You are not allowed to delete this service",
+      });
+    }
+
+    // 🔍 Check if any booking exists
+    const bookingExists = await Booking.findOne({
+      service: serviceId,
+      status: { $in: ["booked", "started", "completed"] },
+    });
+
+    // ================================
+    // CASE 1: No booking → Direct delete
+    // ================================
+    if (!bookingExists) {
+      await Service.findByIdAndDelete(serviceId);
+      return res.json({
+        isSuccess: true,
+        message: "Service deleted successfully ✅",
+      });
+    }
+
+    // ==================================
+    // CASE 2: Booking exists → Admin approval
+    // ==================================
+    service.isDeleteRequested = true;
+    service.deleteRequestedAt = new Date();
+    await service.save();
+
+    return res.json({
+      isSuccess: true,
+      message:
+        "Service has bookings. Delete request sent to admin for approval ⏳",
+    });
+  } catch (err) {
+    console.error("deleteService error:", err);
+    res.status(500).json({
+      isSuccess: false,
+      message: "Server error",
+      error: err.message,
+    });
+  }
+};
+
+//-----------------admin aproval-------------
+exports.approveServiceDelete = async (req, res) => {
+  try {
+    const { serviceId } = req.params;
+
+    const service = await Service.findById(serviceId);
+    if (!service)
+      return res.status(404).json({
+        isSuccess: false,
+        message: "Service not found",
+      });
+
+    if (!service.isDeleteRequested) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "No delete request for this service",
+      });
+    }
+
+    // ✅ Approve delete
+    service.deleteApprovedByAdmin = true;
+    await service.save();
+
+    // 🔥 Now actually delete service
+    await Service.findByIdAndDelete(serviceId);
+
+    return res.json({
+      isSuccess: true,
+      message: "Service deleted after admin approval ✅",
+    });
+  } catch (err) {
+    console.error("approveServiceDelete error:", err);
+    res.status(500).json({
+      isSuccess: false,
+      message: "Server error",
+      error: err.message,
+    });
+  }
+};
+
+exports.getDeleteServiceRequests = async (req, res) => {
+  try {
+    const requests = await Service.find({
+      isDeleteRequested: true,
+      deleteApprovedByAdmin: false,
+    })
+      .populate("owner", "name email")
+      .populate("category", "name")
+      .select(
+        "title price currency isFree location_name owner category createdAt deleteRequestedAt"
+      )
+      .sort({ deleteRequestedAt: -1 })
+      .lean();
+
+    return res.json({
+      isSuccess: true,
+      total: requests.length,
+      data: requests,
+    });
+  } catch (err) {
+    res.status(500).json({
+      isSuccess: false,
+      message: err.message,
+    });
+  }
+};
+exports.rejectServiceDelete = async (req, res) => {
+  try {
+    const { serviceId } = req.params;
+
+    const service = await Service.findById(serviceId);
+    if (!service)
+      return res.status(404).json({
+        isSuccess: false,
+        message: "Service not found",
+      });
+
+    service.isDeleteRequested = false;
+    service.deleteRequestedAt = null;
+    await service.save();
+
+    return res.json({
+      isSuccess: true,
+      message: "Delete request rejected",
+    });
+  } catch (err) {
+    res.status(500).json({
+      isSuccess: false,
+      message: err.message,
+    });
+  }
+};

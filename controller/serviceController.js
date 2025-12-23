@@ -1618,153 +1618,187 @@ exports.approveServiceDelete = async (req, res) => {
     console.log("🆔 Service ID:", serviceId);
 
     // ===============================
-    // 1️⃣ Fetch service + owner
+    // 1️⃣ FETCH SERVICE + PROVIDER
     // ===============================
-    console.log("🔍 Fetching service from DB...");
+    console.log("🔍 Fetching service...");
     const service = await Service.findById(serviceId).populate(
       "owner",
-      "name email fcmToken"
+      "name email fcmToken services"
     );
 
     if (!service) {
-      console.log("❌ Service NOT FOUND");
+      console.log("❌ Service not found");
       return res.status(404).json({
         isSuccess: false,
         message: "Service not found",
       });
     }
 
-    console.log("✅ Service found:", service.title);
-    console.log("👤 Provider:", service.owner?.name, service.owner?.email);
-
     if (!service.isDeleteRequested) {
-      console.log("⚠️ Delete request NOT found for this service");
+      console.log("⚠️ No delete request found");
       return res.status(400).json({
         isSuccess: false,
         message: "No delete request for this service",
       });
     }
 
-    console.log("📌 Delete request exists → proceeding");
+    console.log("✅ Service found:", service.title);
+    console.log("👤 Provider:", service.owner.name);
 
     // ===============================
-    // 2️⃣ Fetch bookings + customers
+    // 2️⃣ FETCH BOOKINGS
     // ===============================
-    console.log("🔍 Fetching bookings for this service...");
+    console.log("🔍 Fetching bookings...");
     const bookings = await Booking.find({
       service: serviceId,
       status: { $in: ["booked", "started"] },
-    }).populate("customer", "name email fcmToken");
+    })
+      .populate("customer", "name email fcmToken")
+      .populate("provider", "name email fcmToken");
 
-    console.log(`📦 Total bookings found: ${bookings.length}`);
+    console.log(`📦 Bookings found: ${bookings.length}`);
 
     // ===============================
-    // 📧 EMAIL → CUSTOMERS
+    // 3️⃣ HANDLE REFUNDS
     // ===============================
-    console.log("📧 Sending EMAILS to CUSTOMERS...");
-
     for (const booking of bookings) {
-      if (!booking.customer) {
-        console.log("⚠️ Booking has NO customer, skipping");
+      console.log("🔁 Processing booking:", booking._id);
+
+      if (!booking.paymentId || booking.amount === 0) {
+        console.log("🟡 Free booking or no payment → skipping refund");
+        booking.status = "cancelled";
+        booking.cancelledBy = "admin";
+        booking.cancelReason = "Service deleted by admin";
+        await booking.save();
         continue;
       }
 
-      console.log(
-        `📨 Sending email to CUSTOMER: ${booking.customer.name} (${booking.customer.email})`
+      const payment = await Payment.findById(booking.paymentId);
+      if (!payment) {
+        console.log("⚠️ Payment not found, skipping");
+        continue;
+      }
+
+      console.log("💳 Payment found:", payment._id, "Status:", payment.status);
+
+      const paymentIntent = await stripe.paymentIntents.retrieve(
+        payment.paymentIntentId
       );
 
-      try {
+      console.log(
+        "💳 Stripe PaymentIntent Status:",
+        paymentIntent.status
+      );
+
+      // 🔹 CASE 1: PAYMENT NOT CAPTURED (HOLD)
+      if (paymentIntent.status === "requires_capture") {
+        console.log("⛔ Payment on HOLD → Cancelling intent");
+
+        await stripe.paymentIntents.cancel(payment.paymentIntentId);
+
+        payment.status = "canceled";
+        payment.refundReason = "Service deleted by admin";
+        payment.refundedAt = new Date();
+        await payment.save();
+
+        console.log("✅ PaymentIntent cancelled");
+
+      } else {
+        // 🔹 CASE 2: PAYMENT CAPTURED → REFUND
+        console.log("🔁 Payment captured → issuing refund");
+
+        const refund = await stripe.refunds.create({
+          payment_intent: payment.paymentIntentId,
+          amount: payment.amount * 100,
+          reason: "requested_by_customer",
+        });
+
+        payment.status = "refunded";
+        payment.refundId = refund.id;
+        payment.refundedAt = new Date();
+        await payment.save();
+
+        console.log("✅ Refund successful:", refund.id);
+      }
+
+      // UPDATE BOOKING
+      booking.status = "cancelled";
+      booking.cancelledBy = "admin";
+      booking.cancelReason = "Service deleted by admin";
+      booking.refundAmount = booking.amount;
+      booking.cancellationFee = 0;
+      await booking.save();
+
+      console.log("📦 Booking marked cancelled");
+    }
+
+    // ===============================
+    // 4️⃣ EMAIL NOTIFICATIONS
+    // ===============================
+    console.log("📧 Sending EMAILS...");
+
+    for (const booking of bookings) {
+      if (booking.customer?.email) {
         await sendServiceDeleteApprovedEmail(
           booking.customer,
           service,
           "customer"
         );
-        console.log("✅ Customer email SENT");
-      } catch (emailErr) {
-        console.log(
-          "❌ Customer email FAILED:",
-          booking.customer.email,
-          emailErr.message
-        );
+        console.log("📧 Email sent to customer:", booking.customer.email);
       }
     }
 
-    // ===============================
-    // 📧 EMAIL → PROVIDER
-    // ===============================
-    console.log(
-      `📧 Sending email to PROVIDER: ${service.owner.name} (${service.owner.email})`
+    await sendServiceDeleteApprovedEmail(
+      service.owner,
+      service,
+      "provider"
     );
-
-    try {
-      await sendServiceDeleteApprovedEmail(
-        service.owner,
-        service,
-        "provider"
-      );
-      console.log("✅ Provider email SENT");
-    } catch (emailErr) {
-      console.log(
-        "❌ Provider email FAILED:",
-        service.owner.email,
-        emailErr.message
-      );
-    }
+    console.log("📧 Email sent to provider");
 
     // ===============================
-    // 🔔 FIREBASE NOTIFICATIONS
+    // 5️⃣ FIREBASE NOTIFICATIONS
     // ===============================
-    console.log("🔔 Sending FIREBASE notifications...");
-
-    try {
-      await notificationController.notifyOnServiceDeleteApproved(
-        service,
-        bookings
-      );
-      console.log("✅ Firebase notifications SENT");
-    } catch (notifyErr) {
-      console.log(
-        "❌ Firebase notification FAILED:",
-        notifyErr.message
-      );
-    }
+    console.log("🔔 Sending Firebase notifications...");
+    await notificationController.notifyOnServiceDeleteApproved(
+      service,
+      bookings
+    );
+    console.log("✅ Firebase notifications sent");
 
     // ===============================
-    // ✅ MARK APPROVED
+    // 6️⃣ CLEAN DATABASE
     // ===============================
-    console.log("✅ Marking deleteApprovedByAdmin = true");
-    service.deleteApprovedByAdmin = true;
-    await service.save();
-    console.log("💾 Service approval status saved");
-    // ===============================
-    // 🧹 REMOVE SERVICE FROM USER
-    // ===============================
-    console.log("🧹 Removing service from user.services[]");
+    console.log("🧹 Cleaning database records...");
+
+    await Booking.deleteMany({ service: serviceId });
+    console.log("🗑️ Bookings removed");
+
+    await Payment.deleteMany({ service: serviceId });
+    console.log("🗑️ Payments removed");
 
     await User.updateOne(
       { _id: service.owner._id },
       { $pull: { services: service._id } }
     );
+    console.log("🧹 Service removed from user.services[]");
 
-    console.log("✅ Service removed from user.services array");
+    service.deleteApprovedByAdmin = true;
+    await service.save();
 
-    // ===============================
-    // 🔥 DELETE SERVICE
-    // ===============================
-    console.log("🔥 Deleting service from DB...");
     await Service.findByIdAndDelete(serviceId);
-    console.log("🗑️ Service DELETED successfully");
+    console.log("🔥 Service deleted");
 
-    console.log("🎉 ADMIN DELETE FLOW COMPLETED SUCCESSFULLY");
-
+    // ===============================
+    // ✅ RESPONSE
+    // ===============================
     return res.json({
       isSuccess: true,
       message:
-        "Service deleted. Customers & provider notified via email and notification ✅",
+        "Service deleted, refunds processed, bookings & payments cleaned successfully ✅",
     });
   } catch (err) {
-    console.error("❌ approveServiceDelete FATAL ERROR:", err);
-    res.status(500).json({
+    console.error("❌ ADMIN DELETE ERROR:", err);
+    return res.status(500).json({
       isSuccess: false,
       message: "Server error",
       error: err.message,

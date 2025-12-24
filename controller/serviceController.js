@@ -1824,10 +1824,10 @@ exports.getDeleteServiceRequests = async (req, res) => {
       isDeleteRequested: true,
       deleteApprovedByAdmin: false,
     })
-      .populate("owner", "name email")
+      .populate("owner", "name email phone")
       .populate("category", "name")
       .select(
-        "title price currency isFree location_name owner category createdAt deleteRequestedAt"
+        "title price currency isFree location_name owner category createdAt deleteRequestedAt deleteRequestReason"
       )
       .sort({ deleteRequestedAt: -1 })
       .lean();

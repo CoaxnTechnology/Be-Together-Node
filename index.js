@@ -49,6 +49,7 @@ app.use("/api/service", serviceRoutes);
 app.use("/api/onbording", userTags);
 app.use("/api/user", locationRoutes);
 app.use("/api", ReviewRoutes);
+app.use("/api/admin/profile", require("./routes/adminProfileroutes"));
 //app.use("/api/notifications", notificationRoutes);
 //----------------------Admin API ROutes
 

@@ -1626,36 +1626,43 @@ exports.deleteService = async (req, res) => {
   }
 };
 
-//-----------------admin aproval-------------
-// ================= ADMIN APPROVE SERVICE DELETE =================
+//====================================================
 exports.approveServiceDelete = async (req, res) => {
   try {
     const { serviceId } = req.params;
 
     const service = await Service.findById(serviceId).populate(
       "owner",
-      "name email services"
+      "name email"
     );
 
-    if (!service || service.deleteRequestStatus !== "pending") {
-      return res.status(400).json({
+    if (!service) {
+      return res.status(404).json({
         isSuccess: false,
-        message: "Invalid delete request",
+        message: "Service not found",
       });
     }
 
-    // 🔍 Fetch bookings
+    if (service.deleteRequestStatus !== "pending") {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Delete request already processed",
+      });
+    }
+
     const bookings = await Booking.find({
       service: serviceId,
       status: { $in: ["booked", "started"] },
     });
 
+    // =============================
+    // HANDLE BOOKINGS + PAYMENTS
+    // =============================
     for (const booking of bookings) {
-      // FREE SERVICE → JUST CANCEL
       if (!booking.paymentId || booking.amount === 0) {
         booking.status = "cancelled";
         booking.cancelledBy = "admin";
-        booking.cancelReason = "Service deleted";
+        booking.cancelReason = "Service deleted by admin";
         await booking.save();
         continue;
       }
@@ -1667,49 +1674,45 @@ exports.approveServiceDelete = async (req, res) => {
         payment.paymentIntentId
       );
 
-      // ===============================
-      // HOLD PAYMENT → CANCEL
-      // ===============================
+      // 🔑 STRIPE SAFE LOGIC
       if (paymentIntent.status === "requires_capture") {
         await stripe.paymentIntents.cancel(payment.paymentIntentId);
 
         payment.status = "canceled";
         payment.refundedAt = new Date();
         await payment.save();
-      }
-      // ===============================
-      // CAPTURED PAYMENT → SAFE REFUND
-      // ===============================
-      else {
+      } 
+      else if (paymentIntent.status === "succeeded") {
         const chargeId = paymentIntent.latest_charge;
-        if (!chargeId) continue;
+        if (chargeId) {
+          const charge = await stripe.charges.retrieve(chargeId);
+          const refundable =
+            charge.amount - charge.amount_refunded;
 
-        const charge = await stripe.charges.retrieve(chargeId);
+          if (refundable > 0) {
+            const refund = await stripe.refunds.create({
+              charge: charge.id,
+              amount: refundable,
+              reason: "requested_by_customer",
+            });
 
-        const refundable =
-          charge.amount - charge.amount_refunded;
-
-        if (refundable > 0) {
-          const refund = await stripe.refunds.create({
-            charge: charge.id,
-            amount: refundable,
-            reason: "requested_by_customer",
-          });
-
-          payment.status = "refunded";
-          payment.refundId = refund.id;
-          payment.refundedAt = new Date();
-          await payment.save();
+            payment.status = "refunded";
+            payment.refundId = refund.id;
+            payment.refundedAt = new Date();
+            await payment.save();
+          }
         }
       }
 
       booking.status = "cancelled";
       booking.cancelledBy = "admin";
-      booking.cancelReason = "Service deleted";
+      booking.cancelReason = "Service deleted by admin";
       await booking.save();
     }
 
-    // CLEANUP
+    // =============================
+    // CLEAN DATABASE
+    // =============================
     await Booking.deleteMany({ service: serviceId });
     await Payment.deleteMany({ service: serviceId });
 
@@ -1735,7 +1738,6 @@ exports.approveServiceDelete = async (req, res) => {
     });
   }
 };
-
 
 exports.getDeleteServiceRequests = async (req, res) => {
   try {

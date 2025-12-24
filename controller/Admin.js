@@ -15,6 +15,7 @@ const fs = require("fs");
 const csv = require("csv-parser");
 const Booking = require("../model/Booking");
 const Payment = require("../model/Payment");
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 // ------------------ Cloudinary Config ------------------
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,

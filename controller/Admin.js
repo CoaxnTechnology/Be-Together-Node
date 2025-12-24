@@ -1385,21 +1385,34 @@ exports.loginAdmin = async (req, res) => {
 };
 
 //admin booking
+
+
 exports.getAllBookings = async (req, res) => {
   try {
-    // 1️⃣ Fetch all bookings with all details
+    // 1️⃣ Fetch all bookings with populated references
     const bookings = await Booking.find()
-      .populate("customer") // full customer details
-      .populate("provider") // full provider details
-      .populate("service") // full service details
-      .populate("paymentId") // full payment details
+      .populate("customer")
+      .populate("provider")
+      .populate("service")
+      .populate("paymentId")
       .sort({ createdAt: -1 });
 
-    // 2️⃣ Group by service
+    // 2️⃣ Group bookings by service
     const groupedByService = {};
 
     bookings.forEach((booking) => {
+      // 🛑 SAFETY CHECK (VERY IMPORTANT)
+      if (!booking.service || !booking.customer || !booking.provider) {
+        console.log(
+          "⚠️ Skipping booking due to missing reference:",
+          booking._id
+        );
+        return;
+      }
+
       const serviceId = booking.service._id.toString();
+
+      // 3️⃣ Create service group if not exists
       if (!groupedByService[serviceId]) {
         groupedByService[serviceId] = {
           service: booking.service,
@@ -1408,13 +1421,15 @@ exports.getAllBookings = async (req, res) => {
         };
       }
 
+      // 4️⃣ Push customer + booking details
       groupedByService[serviceId].users.push({
         _id: booking.customer._id,
         name: booking.customer.name,
         email: booking.customer.email,
-        phone: booking.customer.phone,
-        profile_image: booking.customer.profile_image,
-        // Booking-specific fields
+        phone: booking.customer.phone || null,
+        profile_image: booking.customer.profile_image || null,
+
+        // booking fields
         bookingId: booking._id,
         status: booking.status,
         amount: booking.amount,
@@ -1430,20 +1445,23 @@ exports.getAllBookings = async (req, res) => {
       });
     });
 
-    return res.json({
+    // 5️⃣ Response
+    return res.status(200).json({
       isSuccess: true,
       message: "All bookings grouped by service",
       services: Object.values(groupedByService),
     });
-  } catch (err) {
-    console.error("❌ getAllBookings Error:", err);
+  } catch (error) {
+    console.error("❌ getAllBookings Error:", error);
+
     return res.status(500).json({
       isSuccess: false,
       message: "Internal server error",
-      error: err.message,
+      error: error.message,
     });
   }
 };
+
 //--------------------Payment INformation-------------------
 exports.getAllPayments = async (req, res) => {
   try {

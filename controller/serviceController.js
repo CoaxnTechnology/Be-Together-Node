@@ -1627,6 +1627,7 @@ exports.deleteService = async (req, res) => {
 };
 
 //-----------------admin aproval-------------
+// ================= ADMIN APPROVE SERVICE DELETE =================
 exports.approveServiceDelete = async (req, res) => {
   console.log("🚀 [ADMIN APPROVE DELETE] API CALLED");
 
@@ -1637,14 +1638,12 @@ exports.approveServiceDelete = async (req, res) => {
     // ===============================
     // 1️⃣ FETCH SERVICE + PROVIDER
     // ===============================
-    console.log("🔍 Fetching service...");
     const service = await Service.findById(serviceId).populate(
       "owner",
-      "name email fcmToken services"
+      "name email phone fcmToken services"
     );
 
     if (!service) {
-      console.log("❌ Service not found");
       return res.status(404).json({
         isSuccess: false,
         message: "Service not found",
@@ -1652,20 +1651,18 @@ exports.approveServiceDelete = async (req, res) => {
     }
 
     if (!service.isDeleteRequested) {
-      console.log("⚠️ No delete request found");
       return res.status(400).json({
         isSuccess: false,
-        message: "No delete request for this service",
+        message: "No delete request found",
       });
     }
 
-    console.log("✅ Service found:", service.title);
+    console.log("✅ Service:", service.title);
     console.log("👤 Provider:", service.owner.name);
 
     // ===============================
     // 2️⃣ FETCH BOOKINGS
     // ===============================
-    console.log("🔍 Fetching bookings...");
     const bookings = await Booking.find({
       service: serviceId,
       status: { $in: ["booked", "started"] },
@@ -1681,8 +1678,10 @@ exports.approveServiceDelete = async (req, res) => {
     for (const booking of bookings) {
       console.log("🔁 Processing booking:", booking._id);
 
+      // 🟢 FREE SERVICE (NO PAYMENT)
       if (!booking.paymentId || booking.amount === 0) {
-        console.log("🟡 Free booking or no payment → skipping refund");
+        console.log("🟡 Free booking → cancel only");
+
         booking.status = "cancelled";
         booking.cancelledBy = "admin";
         booking.cancelReason = "Service deleted by admin";
@@ -1692,38 +1691,61 @@ exports.approveServiceDelete = async (req, res) => {
 
       const payment = await Payment.findById(booking.paymentId);
       if (!payment) {
-        console.log("⚠️ Payment not found, skipping");
+        console.log("⚠️ Payment not found");
         continue;
       }
 
-      console.log("💳 Payment found:", payment._id, "Status:", payment.status);
-
+      // 🔹 FETCH PAYMENT INTENT FROM STRIPE
       const paymentIntent = await stripe.paymentIntents.retrieve(
-        payment.paymentIntentId
+        payment.paymentIntentId,
+        { expand: ["charges.data"] }
       );
 
-      console.log("💳 Stripe PaymentIntent Status:", paymentIntent.status);
+      console.log(
+        "💳 PaymentIntent status:",
+        paymentIntent.status
+      );
 
-      // 🔹 CASE 1: PAYMENT NOT CAPTURED (HOLD)
+      // ===================================
+      // CASE 1️⃣ PAYMENT ON HOLD (NOT CAPTURED)
+      // ===================================
       if (paymentIntent.status === "requires_capture") {
-        console.log("⛔ Payment on HOLD → Cancelling intent");
+        console.log("⛔ Payment on HOLD → cancel intent");
 
         await stripe.paymentIntents.cancel(payment.paymentIntentId);
 
         payment.status = "canceled";
-        service.deleteRequestStatus = "approved";
         payment.refundReason = "Service deleted by admin";
         payment.refundedAt = new Date();
         await payment.save();
 
-        console.log("✅ PaymentIntent cancelled");
       } else {
-        // 🔹 CASE 2: PAYMENT CAPTURED → REFUND
-        console.log("🔁 Payment captured → issuing refund");
+        // ===================================
+        // CASE 2️⃣ PAYMENT CAPTURED → SAFE REFUND
+        // ===================================
+        const charge = paymentIntent.charges.data[0];
+
+        if (!charge) {
+          console.log("⚠️ No charge found");
+          continue;
+        }
+
+        const refundableAmount =
+          charge.amount - charge.amount_refunded;
+
+        if (refundableAmount <= 0) {
+          console.log("🟡 Nothing left to refund");
+          continue;
+        }
+
+        console.log(
+          "💰 Refundable amount (paise):",
+          refundableAmount
+        );
 
         const refund = await stripe.refunds.create({
-          payment_intent: payment.paymentIntentId,
-          amount: payment.amount * 100,
+          charge: charge.id,               // ✅ CORRECT
+          amount: refundableAmount,         // ✅ SAFE
           reason: "requested_by_customer",
         });
 
@@ -1731,8 +1753,6 @@ exports.approveServiceDelete = async (req, res) => {
         payment.refundId = refund.id;
         payment.refundedAt = new Date();
         await payment.save();
-
-        console.log("✅ Refund successful:", refund.id);
       }
 
       // UPDATE BOOKING
@@ -1743,60 +1763,43 @@ exports.approveServiceDelete = async (req, res) => {
       booking.cancellationFee = 0;
       await booking.save();
 
-      console.log("📦 Booking marked cancelled");
+      console.log("📦 Booking cancelled");
     }
 
     // ===============================
-    // 4️⃣ EMAIL NOTIFICATIONS
+    // 4️⃣ UPDATE SERVICE STATUS
     // ===============================
-    console.log("📧 Sending EMAILS...");
+    service.deleteRequestStatus = "approved"; // ✅ status tracking
+    service.deleteApprovedByAdmin = true;
+    await service.save();
 
-    for (const booking of bookings) {
-      if (booking.customer?.email) {
-        await sendServiceDeleteApprovedEmail(
-          booking.customer,
-          service,
-          "customer"
-        );
-        console.log("📧 Email sent to customer:", booking.customer.email);
-      }
+    // ===============================
+    // 5️⃣ NOTIFICATIONS (OPTIONAL)
+    // ===============================
+    try {
+      await sendServiceDeleteApprovedEmail(
+        service.owner,
+        service,
+        "provider"
+      );
+    } catch (e) {
+      console.log("⚠️ Email failed (ignored)");
     }
-
-    await sendServiceDeleteApprovedEmail(service.owner, service, "provider");
-    console.log("📧 Email sent to provider");
-
-    // ===============================
-    // 5️⃣ FIREBASE NOTIFICATIONS
-    // ===============================
-    console.log("🔔 Sending Firebase notifications...");
-    await notificationController.notifyOnServiceDeleteApproved(
-      service,
-      bookings
-    );
-    console.log("✅ Firebase notifications sent");
 
     // ===============================
     // 6️⃣ CLEAN DATABASE
     // ===============================
-    console.log("🧹 Cleaning database records...");
-
     await Booking.deleteMany({ service: serviceId });
-    console.log("🗑️ Bookings removed");
-
     await Payment.deleteMany({ service: serviceId });
-    console.log("🗑️ Payments removed");
 
     await User.updateOne(
       { _id: service.owner._id },
       { $pull: { services: service._id } }
     );
-    console.log("🧹 Service removed from user.services[]");
-
-    service.deleteApprovedByAdmin = true;
-    await service.save();
 
     await Service.findByIdAndDelete(serviceId);
-    console.log("🔥 Service deleted");
+
+    console.log("🔥 Service fully deleted");
 
     // ===============================
     // ✅ RESPONSE
@@ -1804,10 +1807,10 @@ exports.approveServiceDelete = async (req, res) => {
     return res.json({
       isSuccess: true,
       status: "approved",
-
       message:
-        "Service deleted, refunds processed, bookings & payments cleaned successfully ✅",
+        "Service deleted successfully, refunds processed safely ✅",
     });
+
   } catch (err) {
     console.error("❌ ADMIN DELETE ERROR:", err);
     return res.status(500).json({
@@ -1817,6 +1820,7 @@ exports.approveServiceDelete = async (req, res) => {
     });
   }
 };
+
 
 exports.getDeleteServiceRequests = async (req, res) => {
   try {

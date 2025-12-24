@@ -32,6 +32,8 @@ async function adminAuth(req, res, next) {
       });
     }
 
+    
+
     console.log("🆔 Decoded admin ID:", decoded.id);
 
     const admin = await Admin.findById(decoded.id);

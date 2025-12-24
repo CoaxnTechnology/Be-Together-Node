@@ -1824,7 +1824,7 @@ exports.getDeleteServiceRequests = async (req, res) => {
       isDeleteRequested: true,
       deleteApprovedByAdmin: false,
     })
-      .populate("owner", "name email phone")
+      .populate("owner", "name email mobile")
       .populate("category", "name")
       .select(
         "title price currency isFree location_name owner category createdAt deleteRequestedAt deleteRequestReason"

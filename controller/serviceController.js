@@ -753,7 +753,6 @@ exports.getServices = async (req, res) => {
   }
 };
 
-
 exports.getInterestedUsers = async (req, res) => {
   try {
     const {
@@ -1548,7 +1547,7 @@ exports.searchServices = async (req, res) => {
 exports.deleteService = async (req, res) => {
   try {
     const userId = req.user.id; // owner
-    const { serviceId } = req.body; // 👈 BODY se aayega
+    const { serviceId, reason } = req.body; // 👈 reason added
 
     if (!serviceId) {
       return res.status(400).json({
@@ -1558,11 +1557,12 @@ exports.deleteService = async (req, res) => {
     }
 
     const service = await Service.findById(serviceId);
-    if (!service)
+    if (!service) {
       return res.status(404).json({
         isSuccess: false,
         message: "Service not found",
       });
+    }
 
     // ✅ Only owner can delete
     if (service.owner.toString() !== userId) {
@@ -1583,6 +1583,7 @@ exports.deleteService = async (req, res) => {
     // ================================
     if (!bookingExists) {
       await Service.findByIdAndDelete(serviceId);
+
       return res.json({
         isSuccess: true,
         message: "Service deleted successfully ✅",
@@ -1592,14 +1593,28 @@ exports.deleteService = async (req, res) => {
     // ==================================
     // CASE 2: Booking exists → Admin approval
     // ==================================
+
+    if (!reason || reason.trim().length < 5) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Delete reason is required (min 5 characters)",
+      });
+    }
+
     service.isDeleteRequested = true;
     service.deleteRequestedAt = new Date();
+
+    // 🆕 SAVE REASON
+    service.deleteRequestReason = reason.trim();
+    service.deleteRequestStatus = "pending";
+
     await service.save();
 
     return res.json({
       isSuccess: true,
+      status: "pending",
       message:
-        "Service has bookings. Delete request sent to admin for approval ⏳",
+        "Service has bookings. Delete request with reason sent to admin for approval ⏳",
     });
   } catch (err) {
     console.error("deleteService error:", err);
@@ -1687,10 +1702,7 @@ exports.approveServiceDelete = async (req, res) => {
         payment.paymentIntentId
       );
 
-      console.log(
-        "💳 Stripe PaymentIntent Status:",
-        paymentIntent.status
-      );
+      console.log("💳 Stripe PaymentIntent Status:", paymentIntent.status);
 
       // 🔹 CASE 1: PAYMENT NOT CAPTURED (HOLD)
       if (paymentIntent.status === "requires_capture") {
@@ -1699,12 +1711,12 @@ exports.approveServiceDelete = async (req, res) => {
         await stripe.paymentIntents.cancel(payment.paymentIntentId);
 
         payment.status = "canceled";
+        service.deleteRequestStatus = "approved";
         payment.refundReason = "Service deleted by admin";
         payment.refundedAt = new Date();
         await payment.save();
 
         console.log("✅ PaymentIntent cancelled");
-
       } else {
         // 🔹 CASE 2: PAYMENT CAPTURED → REFUND
         console.log("🔁 Payment captured → issuing refund");
@@ -1750,11 +1762,7 @@ exports.approveServiceDelete = async (req, res) => {
       }
     }
 
-    await sendServiceDeleteApprovedEmail(
-      service.owner,
-      service,
-      "provider"
-    );
+    await sendServiceDeleteApprovedEmail(service.owner, service, "provider");
     console.log("📧 Email sent to provider");
 
     // ===============================
@@ -1795,6 +1803,8 @@ exports.approveServiceDelete = async (req, res) => {
     // ===============================
     return res.json({
       isSuccess: true,
+      status: "approved",
+
       message:
         "Service deleted, refunds processed, bookings & payments cleaned successfully ✅",
     });
@@ -1807,7 +1817,6 @@ exports.approveServiceDelete = async (req, res) => {
     });
   }
 };
-
 
 exports.getDeleteServiceRequests = async (req, res) => {
   try {
@@ -1845,13 +1854,14 @@ exports.rejectServiceDelete = async (req, res) => {
         isSuccess: false,
         message: "Service not found",
       });
-
+    service.deleteRequestStatus = "rejected";
     service.isDeleteRequested = false;
     service.deleteRequestedAt = null;
     await service.save();
 
     return res.json({
       isSuccess: true,
+      status: "rejected",
       message: "Delete request rejected",
     });
   } catch (err) {

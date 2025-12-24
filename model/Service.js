@@ -57,6 +57,15 @@ const serviceSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
+  deleteRequestReason: {
+    type: String,
+    default: null,
+  },
+  deleteRequestStatus: {
+    type: String,
+    enum: ["pending", "approved", "rejected"],
+    default: null, // null = no delete request
+  },
   deleteRequestedAt: Date,
 
   // one_time service

@@ -64,7 +64,7 @@ router.put(
 //admin delete the service---
 router.delete(
   "/admin-force-delete/:serviceId",
-  auth, // 👈 MUST be admin
+  adminAuth, // 👈 MUST be admin
   adminForceDeleteService
 );
 // ------------------------CATEGORY------------------------

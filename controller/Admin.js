@@ -1385,8 +1385,6 @@ exports.loginAdmin = async (req, res) => {
 };
 
 //admin booking
-
-
 exports.getAllBookings = async (req, res) => {
   try {
     // 1️⃣ Fetch all bookings with populated references
@@ -1553,6 +1551,150 @@ exports.getAllPayments = async (req, res) => {
     });
   } catch (err) {
     console.error("getAllPayments error:", err);
+    return res.status(500).json({
+      isSuccess: false,
+      message: "Server error",
+      error: err.message,
+    });
+  }
+};
+//-----------------service delte by admin------
+exports.adminForceDeleteService = async (req, res) => {
+  console.log("🚀 [ADMIN FORCE DELETE] API CALLED");
+
+  try {
+    const { serviceId } = req.params;
+
+    if (!serviceId) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "serviceId is required",
+      });
+    }
+
+    // ===============================
+    // 1️⃣ FETCH SERVICE
+    // ===============================
+    const service = await Service.findById(serviceId).populate(
+      "owner",
+      "name email services"
+    );
+
+    if (!service) {
+      return res.status(404).json({
+        isSuccess: false,
+        message: "Service not found",
+      });
+    }
+
+    console.log("✅ Service:", service.title);
+    console.log("👤 Provider:", service.owner?.name);
+
+    // ===============================
+    // 2️⃣ FETCH BOOKINGS
+    // ===============================
+    const bookings = await Booking.find({
+      service: serviceId,
+      status: { $in: ["booked", "started"] },
+    });
+
+    console.log(`📦 Bookings found: ${bookings.length}`);
+
+    // ===============================
+    // 3️⃣ HANDLE PAYMENTS & BOOKINGS
+    // ===============================
+    for (const booking of bookings) {
+      console.log("🔁 Processing booking:", booking._id);
+
+      // FREE BOOKING
+      if (!booking.paymentId || booking.amount === 0) {
+        booking.status = "cancelled";
+        booking.cancelledBy = "admin";
+        booking.cancelReason = "Service removed by admin";
+        await booking.save();
+        continue;
+      }
+
+      const payment = await Payment.findById(booking.paymentId);
+      if (!payment) continue;
+
+      const paymentIntent = await stripe.paymentIntents.retrieve(
+        payment.paymentIntentId
+      );
+
+      console.log("💳 PI Status:", paymentIntent.status);
+
+      // 🟡 HOLD PAYMENT
+      if (paymentIntent.status === "requires_capture") {
+        await stripe.paymentIntents.cancel(paymentIntent.id);
+
+        payment.status = "canceled";
+        payment.refundReason = "Service removed by admin";
+        payment.refundedAt = new Date();
+        await payment.save();
+      }
+
+      // 🟢 CAPTURED PAYMENT
+      if (paymentIntent.status === "succeeded") {
+        const chargeId = paymentIntent.latest_charge;
+
+        if (chargeId) {
+          const charge = await stripe.charges.retrieve(chargeId);
+
+          const refundable =
+            charge.amount - charge.amount_refunded;
+
+          if (refundable > 0) {
+            const refund = await stripe.refunds.create({
+              charge: charge.id,
+              amount: refundable,
+              reason: "requested_by_customer",
+            });
+
+            payment.status = "refunded";
+            payment.refundId = refund.id;
+            payment.refundedAt = new Date();
+            await payment.save();
+          }
+        }
+      }
+
+      booking.status = "cancelled";
+      booking.cancelledBy = "admin";
+      booking.cancelReason = "Service removed by admin";
+      await booking.save();
+    }
+
+    // ===============================
+    // 4️⃣ CLEAN DATABASE
+    // ===============================
+    await Booking.deleteMany({ service: serviceId });
+    await Payment.deleteMany({ service: serviceId });
+
+    await User.updateOne(
+      { _id: service.owner._id },
+      { $pull: { services: service._id } }
+    );
+
+    service.deleteRequestStatus = "admin_deleted";
+    await service.save();
+
+    await Service.findByIdAndDelete(serviceId);
+
+    console.log("🔥 Service force deleted by admin");
+
+    // ===============================
+    // ✅ RESPONSE
+    // ===============================
+    return res.json({
+      isSuccess: true,
+      status: "admin_deleted",
+      message:
+        "Service force deleted by admin. Bookings & payments cleaned successfully ✅",
+    });
+  } catch (err) {
+    console.error("❌ ADMIN FORCE DELETE ERROR:", err);
+
     return res.status(500).json({
       isSuccess: false,
       message: "Server error",

@@ -3,7 +3,7 @@ const router = express.Router();
 const multer = require("multer");
 const csv = require("csv-parser");
 const fs = require("fs");
-
+const auth = require("../Middleware/authMiddleware");
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
@@ -30,6 +30,7 @@ const {
   getBookingDetails,
   getAllPayments,
   updateService,
+  adminForceDeleteService,
 } = require("../controller/Admin");
 const adminAuth = require("../Middleware/adminAuth");
 
@@ -60,7 +61,12 @@ router.put(
   upload.single("profile_image"),
   editProfile
 );
-
+//admin delete the service---
+router.delete(
+  "/admin-force-delete/:serviceId",
+  auth, // 👈 MUST be admin
+  adminForceDeleteService
+);
 // ------------------------CATEGORY------------------------
 router.post("/category/ai-tags", getAITags);
 router.post("/category/create", upload.single("image"), createCategory);

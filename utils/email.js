@@ -229,67 +229,84 @@ async function sendServiceCancelledEmail(customer, provider, service, booking, r
 
 const Admin = require("../model/Admin");
  // adjust path if needed
-
 async function sendServiceDeleteApprovedEmail(
   receiver,
   service,
   type = "customer" // customer | provider
 ) {
+  console.log("📧 ===============================");
+  console.log("📧 sendServiceDeleteApprovedEmail CALLED");
+  console.log("📧 User Type:", type);
+  console.log("📧 Receiver Email:", receiver?.email);
+
   try {
+    // ================= EMAIL VALIDATION =================
+    if (
+      !receiver?.email ||
+      typeof receiver.email !== "string" ||
+      !receiver.email.trim().includes("@")
+    ) {
+      console.log(
+        `⚠️ [EMAIL SKIPPED] Invalid or missing email → ${receiver?.email}`
+      );
+      console.log("📧 ===============================");
+      return;
+    }
+
+    console.log("✅ Email validation passed");
+
     // ================= FETCH ADMIN SUPPORT DETAILS =================
+    console.log("📧 Fetching admin support details...");
     const admin = await Admin.findOne({ is_active: true }).lean();
 
+    console.log("📧 Admin Support:", {
+      phone: admin?.supportPhone,
+      email: admin?.supportEmail,
+      time: admin?.supportTime,
+    });
+
+    // ================= LOAD TEMPLATE =================
+    console.log("📧 Loading email template...");
     const templatePath = path.join(
       __dirname,
       "../templates/service_cancel_admin.html"
     );
 
     let html = fs.readFileSync(templatePath, "utf8");
+    console.log("📧 Template loaded");
 
-    // ================= DYNAMIC CONTENT =================
+    // ================= BUILD CONTENT =================
     let heading = "";
     let commonMessage = "";
     let extraSection = "";
 
     if (type === "customer") {
+      console.log("📧 Preparing CUSTOMER email");
+
       heading = "❌ Service Cancelled & Refund Initiated";
-
       commonMessage = `
-        <p>
-          We regret to inform you that the service you subscribed to has been cancelled by the service provider.
-        </p>
-        <p>
-          We understand this may be inconvenient. Please be assured that your refund has been initiated and will be credited within a few hours.
-        </p>
-        <p>
-          If you have any questions or need assistance, our support team is always here to help.
-        </p>
-      `;
-
-      extraSection = `
-        <p><strong>Provider:</strong> ${service.owner?.name || "N/A"}</p>
+        <p>The service you subscribed to has been cancelled.</p>
+        <p>Your refund has been initiated and will be credited within a few hours.</p>
+        <p>If you need help, please contact support.</p>
       `;
     } else {
-      heading = "✅ Service Delete Request Approved";
+      console.log("📧 Preparing PROVIDER email");
 
+      heading = "✅ Service Delete Request Approved";
       commonMessage = `
-        <p>
-          Your request to delete the service has been reviewed and approved by the admin.
-        </p>
-        <p>
-          The service has been successfully removed from the platform.
-        </p>
-        <p>
-          If you need any assistance regarding your services or subscriptions, feel free to contact our support team.
-        </p>
+        <p>Your service delete request has been approved by the admin.</p>
+        <p>The service has been removed successfully.</p>
+        <p>If you need help, please contact support.</p>
       `;
     }
 
-    // ================= TEMPLATE REPLACEMENTS =================
+    // ================= TEMPLATE REPLACEMENT =================
+    console.log("📧 Replacing template variables...");
+
     html = html
       .replace(/{{heading}}/g, heading)
-      .replace(/{{name}}/g, receiver.name)
-      .replace(/{{service_name}}/g, service.title)
+      .replace(/{{name}}/g, "User")
+      .replace(/{{service_name}}/g, service?.title || "Service")
       .replace(/{{date}}/g, new Date().toLocaleString("en-IN"))
       .replace(/{{common_message}}/g, commonMessage)
       .replace(/{{extra_section}}/g, extraSection)
@@ -297,10 +314,14 @@ async function sendServiceDeleteApprovedEmail(
       .replace(/{{support_email}}/g, admin?.supportEmail || "N/A")
       .replace(/{{support_time}}/g, admin?.supportTime || "");
 
+    console.log("📧 Template ready");
+
     // ================= SEND EMAIL =================
+    console.log("📧 Sending email to:", receiver.email.trim());
+
     await transporter.sendMail({
       from: process.env.SMTP_EMAIL,
-      to: receiver.email,
+      to: receiver.email.trim(),
       subject:
         type === "customer"
           ? "Service Cancelled & Refund Initiated"
@@ -308,13 +329,15 @@ async function sendServiceDeleteApprovedEmail(
       html,
     });
 
-    console.log(`📧 Email sent to ${receiver.email}`);
+    console.log(`✅ Email sent successfully → ${receiver.email}`);
+    console.log("📧 ===============================");
   } catch (err) {
-    console.error("❌ Email send error:", err.message);
+    console.error("❌ EMAIL SEND FAILED");
+    console.error("❌ Error:", err.message);
+    console.log("📧 ===============================");
   }
 }
 
-module.exports = sendServiceDeleteApprovedEmail;
 
 
 module.exports = {

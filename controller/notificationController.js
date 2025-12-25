@@ -688,6 +688,6 @@ module .exports.sendBookingNotification = sendBookingNotification;
 module .exports.sendServiceStartedNotification = sendServiceStartedNotification;
 module .exports.sendServiceCompletedNotification = sendServiceCompletedNotification;
 module .exports.sendServiceCancelledNotification = sendServiceCancelledNotification;
-exports.notifyOnServiceDeleteApproved = notifyOnServiceDeleteApproved;
+module.exports.notifyOnServiceDeleteApproved = notifyOnServiceDeleteApproved;
 
 //notificaton addd

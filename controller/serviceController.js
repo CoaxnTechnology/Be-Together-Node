@@ -15,7 +15,7 @@ const Review = require("../model/review");
 const Booking = require("../model/Booking");
 const { sendServiceDeleteApprovedEmail } = require("../utils/email");
 const Payment = require("../model/Payment");
-
+const { notifyOnServiceDeleteApproved } = require("./notificationController");
 // Helper to parse JSON safely
 function tryParse(val) {
   if (val === undefined || val === null) return val;
@@ -1728,7 +1728,7 @@ exports.approveServiceDelete = async (req, res) => {
     // 🔔 NOTIFICATIONS + EMAILS
     // =============================
     await notifyOnServiceDeleteApproved(service, bookings);
-    await sendServiceDeleteEmails(service, bookings);
+    await sendServiceDeleteApprovedEmail(service, bookings);
 
     return res.json({
       isSuccess: true,

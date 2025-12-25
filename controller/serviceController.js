@@ -1631,12 +1631,9 @@ exports.approveServiceDelete = async (req, res) => {
   try {
     const { serviceId } = req.params;
 
+    // ✅ Only populate fields that exist in Service schema
     const service = await Service.findById(serviceId)
-      .populate("owner", "name email fcmToken")
-      .populate({
-        path: "bookings",
-        populate: { path: "customer", select: "name email fcmToken" },
-      });
+      .populate("owner", "name email fcmToken");
 
     if (!service) {
       return res.status(404).json({
@@ -1652,6 +1649,7 @@ exports.approveServiceDelete = async (req, res) => {
       });
     }
 
+    // ✅ Fetch bookings separately (correct way)
     const bookings = await Booking.find({
       service: serviceId,
       status: { $in: ["booked", "started"] },
@@ -1682,7 +1680,8 @@ exports.approveServiceDelete = async (req, res) => {
         payment.status = "canceled";
         payment.refundedAt = new Date();
         await payment.save();
-      } else if (paymentIntent.status === "succeeded") {
+      } 
+      else if (paymentIntent.status === "succeeded") {
         const chargeId = paymentIntent.latest_charge;
         if (chargeId) {
           const charge = await stripe.charges.retrieve(chargeId);
@@ -1744,6 +1743,7 @@ exports.approveServiceDelete = async (req, res) => {
     });
   }
 };
+
 
 exports.getDeleteServiceRequests = async (req, res) => {
   try {

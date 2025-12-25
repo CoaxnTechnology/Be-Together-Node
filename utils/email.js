@@ -227,12 +227,18 @@ async function sendServiceCancelledEmail(customer, provider, service, booking, r
   }
 }
 
+const Admin = require("../model/Admin");
+ // adjust path if needed
+
 async function sendServiceDeleteApprovedEmail(
   receiver,
   service,
-  type = "customer"
+  type = "customer" // customer | provider
 ) {
   try {
+    // ================= FETCH ADMIN SUPPORT DETAILS =================
+    const admin = await Admin.findOne({ is_active: true }).lean();
+
     const templatePath = path.join(
       __dirname,
       "../templates/service_cancel_admin.html"
@@ -240,41 +246,75 @@ async function sendServiceDeleteApprovedEmail(
 
     let html = fs.readFileSync(templatePath, "utf8");
 
+    // ================= DYNAMIC CONTENT =================
+    let heading = "";
+    let commonMessage = "";
     let extraSection = "";
 
     if (type === "customer") {
+      heading = "❌ Service Cancelled & Refund Initiated";
+
+      commonMessage = `
+        <p>
+          We regret to inform you that the service you subscribed to has been cancelled by the service provider.
+        </p>
+        <p>
+          We understand this may be inconvenient. Please be assured that your refund has been initiated and will be credited within a few hours.
+        </p>
+        <p>
+          If you have any questions or need assistance, our support team is always here to help.
+        </p>
+      `;
+
       extraSection = `
-        <p><strong>Provider:</strong> ${service.owner.name}</p>
+        <p><strong>Provider:</strong> ${service.owner?.name || "N/A"}</p>
       `;
     } else {
-      extraSection = `
-        <p style="color:#2e7d32;font-weight:600">
-          ✅ Your delete request has been approved by admin.
+      heading = "✅ Service Delete Request Approved";
+
+      commonMessage = `
+        <p>
+          Your request to delete the service has been reviewed and approved by the admin.
+        </p>
+        <p>
+          The service has been successfully removed from the platform.
+        </p>
+        <p>
+          If you need any assistance regarding your services or subscriptions, feel free to contact our support team.
         </p>
       `;
     }
 
+    // ================= TEMPLATE REPLACEMENTS =================
     html = html
+      .replace(/{{heading}}/g, heading)
       .replace(/{{name}}/g, receiver.name)
       .replace(/{{service_name}}/g, service.title)
       .replace(/{{date}}/g, new Date().toLocaleString("en-IN"))
-      .replace(/{{extra_section}}/g, extraSection);
+      .replace(/{{common_message}}/g, commonMessage)
+      .replace(/{{extra_section}}/g, extraSection)
+      .replace(/{{support_phone}}/g, admin?.supportPhone || "N/A")
+      .replace(/{{support_email}}/g, admin?.supportEmail || "N/A")
+      .replace(/{{support_time}}/g, admin?.supportTime || "");
 
+    // ================= SEND EMAIL =================
     await transporter.sendMail({
       from: process.env.SMTP_EMAIL,
       to: receiver.email,
       subject:
         type === "customer"
-          ? "Service Cancelled"
-          : "Delete Request Approved",
+          ? "Service Cancelled & Refund Initiated"
+          : "Service Delete Request Approved",
       html,
     });
 
-    console.log(`📧 Admin delete email sent to ${receiver.email}`);
+    console.log(`📧 Email sent to ${receiver.email}`);
   } catch (err) {
-    console.error("❌ Admin delete email error:", err.message);
+    console.error("❌ Email send error:", err.message);
   }
 }
+
+module.exports = sendServiceDeleteApprovedEmail;
 
 
 module.exports = {

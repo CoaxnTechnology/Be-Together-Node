@@ -1631,10 +1631,12 @@ exports.approveServiceDelete = async (req, res) => {
   try {
     const { serviceId } = req.params;
 
-    const service = await Service.findById(serviceId).populate(
-      "owner",
-      "name email"
-    );
+    const service = await Service.findById(serviceId)
+      .populate("owner", "name email fcmToken")
+      .populate({
+        path: "bookings",
+        populate: { path: "customer", select: "name email fcmToken" },
+      });
 
     if (!service) {
       return res.status(404).json({
@@ -1653,7 +1655,7 @@ exports.approveServiceDelete = async (req, res) => {
     const bookings = await Booking.find({
       service: serviceId,
       status: { $in: ["booked", "started"] },
-    });
+    }).populate("customer", "name email fcmToken");
 
     // =============================
     // HANDLE BOOKINGS + PAYMENTS
@@ -1674,15 +1676,13 @@ exports.approveServiceDelete = async (req, res) => {
         payment.paymentIntentId
       );
 
-      // 🔑 STRIPE SAFE LOGIC
       if (paymentIntent.status === "requires_capture") {
         await stripe.paymentIntents.cancel(payment.paymentIntentId);
 
         payment.status = "canceled";
         payment.refundedAt = new Date();
         await payment.save();
-      } 
-      else if (paymentIntent.status === "succeeded") {
+      } else if (paymentIntent.status === "succeeded") {
         const chargeId = paymentIntent.latest_charge;
         if (chargeId) {
           const charge = await stripe.charges.retrieve(chargeId);
@@ -1724,6 +1724,12 @@ exports.approveServiceDelete = async (req, res) => {
     service.deleteRequestStatus = "approved";
     await service.save();
     await Service.findByIdAndDelete(serviceId);
+
+    // =============================
+    // 🔔 NOTIFICATIONS + EMAILS
+    // =============================
+    await notifyOnServiceDeleteApproved(service, bookings);
+    await sendServiceDeleteEmails(service, bookings);
 
     return res.json({
       isSuccess: true,

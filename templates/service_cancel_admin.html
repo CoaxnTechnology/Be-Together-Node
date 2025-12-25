@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta charset="UTF-8" />
-    <title>Service Cancelled</title>
+    <title>Service Update</title>
   </head>
 
   <body style="margin:0;padding:0;background:#f4f7ff;font-family:Poppins,Arial,sans-serif">
@@ -17,34 +17,50 @@
         />
       </div>
 
-      <!-- CARD -->
+      <!-- MAIN CARD -->
       <div style="background:#fff;border-radius:28px;padding:35px 30px;box-shadow:0 6px 20px rgba(0,0,0,0.08)">
+        
+        <!-- HEADING -->
         <h1 style="margin:0;font-size:24px;color:#1f1f1f;text-align:center">
-          ❌ Service Cancelled
+          {{heading}}
         </h1>
 
+        <!-- GREETING -->
         <p style="margin-top:18px;font-size:16px;color:#555">
           Hello <strong>{{name}}</strong>,
         </p>
 
-        <p style="margin-top:10px;font-size:15px;color:#666">
-          We regret to inform you that the following service has been cancelled due to an inconvenience.
-        </p>
+        <!-- MESSAGE -->
+        <div style="margin-top:12px;font-size:15px;color:#666">
+          {{common_message}}
+        </div>
 
+        <!-- SERVICE DETAILS -->
         <div style="margin-top:25px;background:#f4f7ff;border-radius:20px;padding:22px">
           <p><strong>Service:</strong> {{service_name}}</p>
           {{extra_section}}
           <p><strong>Date:</strong> {{date}}</p>
         </div>
 
-        <p style="margin-top:25px;font-size:14px;color:#777">
-          We apologize for the inconvenience caused and appreciate your understanding.
-        </p>
+        <!-- SUPPORT DETAILS -->
+        <div style="margin-top:25px;padding-top:15px;border-top:1px dashed #ddd">
+          <p style="font-size:14px;color:#555;margin-bottom:6px">
+            📞 <strong>Support Phone:</strong> {{support_phone}}
+          </p>
+          <p style="font-size:14px;color:#555;margin-bottom:6px">
+            📧 <strong>Support Email:</strong> {{support_email}}
+          </p>
+          <p style="font-size:13px;color:#777">
+            ⏰ <strong>Support Time:</strong> {{support_time}}
+          </p>
+        </div>
       </div>
 
+      <!-- FOOTER -->
       <div style="text-align:center;margin-top:35px;font-size:13px;color:#999">
         © 2025 Be Together — All Rights Reserved
       </div>
+
     </div>
   </body>
 </html>

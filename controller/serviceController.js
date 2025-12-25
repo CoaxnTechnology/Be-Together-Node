@@ -1629,11 +1629,17 @@ exports.deleteService = async (req, res) => {
 //====================================================
 exports.approveServiceDelete = async (req, res) => {
   try {
+    console.log("🚀 approveServiceDelete CALLED");
+
     const { serviceId } = req.params;
 
-    // ✅ Only populate fields that exist in Service schema
-    const service = await Service.findById(serviceId)
-      .populate("owner", "name email fcmToken");
+    // =============================
+    // 1️⃣ FETCH SERVICE
+    // =============================
+    const service = await Service.findById(serviceId).populate(
+      "owner",
+      "name email fcmToken"
+    );
 
     if (!service) {
       return res.status(404).json({
@@ -1649,16 +1655,23 @@ exports.approveServiceDelete = async (req, res) => {
       });
     }
 
-    // ✅ Fetch bookings separately (correct way)
+    // =============================
+    // 2️⃣ FETCH BOOKINGS
+    // =============================
     const bookings = await Booking.find({
       service: serviceId,
       status: { $in: ["booked", "started"] },
     }).populate("customer", "name email fcmToken");
 
+    console.log("📦 Active bookings found:", bookings.length);
+
     // =============================
-    // HANDLE BOOKINGS + PAYMENTS
+    // 3️⃣ HANDLE PAYMENTS + BOOKINGS
     // =============================
     for (const booking of bookings) {
+      console.log("🔁 Processing booking:", booking._id);
+
+      // 🟢 Free booking OR no payment
       if (!booking.paymentId || booking.amount === 0) {
         booking.status = "cancelled";
         booking.cancelledBy = "admin";
@@ -1674,15 +1687,19 @@ exports.approveServiceDelete = async (req, res) => {
         payment.paymentIntentId
       );
 
+      // 🔴 Payment not captured yet → cancel
       if (paymentIntent.status === "requires_capture") {
         await stripe.paymentIntents.cancel(payment.paymentIntentId);
 
         payment.status = "canceled";
         payment.refundedAt = new Date();
         await payment.save();
-      } 
+      }
+
+      // 🟡 Payment captured → refund
       else if (paymentIntent.status === "succeeded") {
         const chargeId = paymentIntent.latest_charge;
+
         if (chargeId) {
           const charge = await stripe.charges.retrieve(chargeId);
           const refundable =
@@ -1710,7 +1727,37 @@ exports.approveServiceDelete = async (req, res) => {
     }
 
     // =============================
-    // CLEAN DATABASE
+    // 4️⃣ SEND EMAILS (SAFE & CLEAN)
+    // =============================
+    console.log("📧 Sending emails to customers...");
+
+    for (const booking of bookings) {
+      if (booking.customer?.email) {
+        await sendServiceDeleteApprovedEmail(
+          booking.customer,
+          service,
+          "customer"
+        );
+      }
+    }
+
+    console.log("📧 Sending email to provider...");
+
+    if (service.owner?.email) {
+      await sendServiceDeleteApprovedEmail(
+        service.owner,
+        service,
+        "provider"
+      );
+    }
+
+    // =============================
+    // 5️⃣ PUSH NOTIFICATIONS
+    // =============================
+    await notifyOnServiceDeleteApproved(service, bookings);
+
+    // =============================
+    // 6️⃣ CLEAN DATABASE
     // =============================
     await Booking.deleteMany({ service: serviceId });
     await Payment.deleteMany({ service: serviceId });
@@ -1724,11 +1771,7 @@ exports.approveServiceDelete = async (req, res) => {
     await service.save();
     await Service.findByIdAndDelete(serviceId);
 
-    // =============================
-    // 🔔 NOTIFICATIONS + EMAILS
-    // =============================
-    await notifyOnServiceDeleteApproved(service, bookings);
-    await sendServiceDeleteApprovedEmail(service, bookings);
+    console.log("✅ Service deleted completely");
 
     return res.json({
       isSuccess: true,
@@ -1736,7 +1779,7 @@ exports.approveServiceDelete = async (req, res) => {
       message: "Service deleted successfully",
     });
   } catch (err) {
-    console.error("approveServiceDelete error:", err);
+    console.error("❌ approveServiceDelete ERROR:", err);
     return res.status(500).json({
       isSuccess: false,
       message: "Server error",

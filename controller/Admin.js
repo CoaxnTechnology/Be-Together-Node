@@ -101,7 +101,7 @@ const getHrFlowTags = async (text) => {
 // ------------------ CREATE CATEGORY ------------------
 exports.createCategory = async (req, res) => {
   try {
-    const { name, tags } = req.body;
+    const { name, tags, order } = req.body;
 
     if (!name?.trim())
       return res
@@ -116,6 +116,20 @@ exports.createCategory = async (req, res) => {
       return res
         .status(400)
         .json({ isSuccess: false, message: "Category already exists" });
+    // 🔢 Decide order number
+    let finalOrder;
+    if (order) {
+      finalOrder = Number(order);
+
+      // shift categories
+      await Category.updateMany(
+        { order: { $gte: finalOrder } },
+        { $inc: { order: 1 } }
+      );
+    } else {
+      const lastCategory = await Category.findOne().sort({ order: -1 });
+      finalOrder = lastCategory ? lastCategory.order + 1 : 1;
+    }
 
     // Upload image if provided
     let imageUrl = null,
@@ -163,6 +177,7 @@ exports.createCategory = async (req, res) => {
       image: imageUrl,
       imagePublicId,
       tags: finalTags,
+      order: finalOrder,
     });
     try {
       await newCategory.save();
@@ -211,28 +226,32 @@ exports.getAITags = async (req, res) => {
 // ---------------------------------GET ALL CATEGORY With Pagination-------------------------------
 exports.getAllCategories = async (req, res) => {
   try {
-    // Read page and limit from request body (default to 1 and 10)
     const body = req.body || {};
+
     const page = parseInt(body.page) || 1;
     const limit = parseInt(body.limit) || 10;
     const skip = (page - 1) * limit;
 
-    // Count total categories
+    // 🔢 Total categories
     const total = await Category.countDocuments();
 
-    // Fetch paginated categories, sorted by creation date
+    // 🔢 FETCH ORDER-WISE CATEGORIES
     const categories = await Category.find()
-      .sort({ created_at: -1 })
+      .sort({ order: 1 }) // ✅ ORDER BASED SORT
       .skip(skip)
       .limit(limit);
 
-    // Format categories to remove unwanted fields
+    // FORMAT RESPONSE
     const formattedCategories = categories.map((cat) => ({
       _id: cat._id,
       name: cat.name,
       image: cat.image,
-      tags: cat.tags || [],
       imagePublicId: cat.imagePublicId || null,
+      tags: cat.tags || [],
+
+      // 🔢 ORDER NUMBER
+      order: cat.order,
+
       created_at: cat.created_at,
       categoryId: cat.categoryId,
       provider_share: cat.provider_share || 0,
@@ -240,7 +259,6 @@ exports.getAllCategories = async (req, res) => {
       discount_percentage: cat.discount_percentage || 0,
     }));
 
-    // Send response
     return res.status(200).json({
       isSuccess: true,
       message: "Categories fetched successfully",
@@ -264,7 +282,7 @@ exports.getAllCategories = async (req, res) => {
 exports.updateCategory = async (req, res) => {
   try {
     const { id } = req.params;
-    let { name, tags } = req.body;
+    let { name, tags, order } = req.body;
 
     if (!id) {
       return res
@@ -277,6 +295,24 @@ exports.updateCategory = async (req, res) => {
       return res
         .status(404)
         .json({ isSuccess: false, message: "Category not found" });
+    }
+    if (order && Number(order) !== category.order) {
+      const newOrder = Number(order);
+      const oldOrder = category.order;
+
+      if (newOrder > oldOrder) {
+        await Category.updateMany(
+          { order: { $gt: oldOrder, $lte: newOrder } },
+          { $inc: { order: -1 } }
+        );
+      } else {
+        await Category.updateMany(
+          { order: { $gte: newOrder, $lt: oldOrder } },
+          { $inc: { order: 1 } }
+        );
+      }
+
+      category.order = newOrder;
     }
 
     // ✅ Update name and tags safely
@@ -466,8 +502,7 @@ const { Readable } = require("stream");
 // ✅ Check valid image URL
 function isValidImageUrl(url) {
   return (
-    typeof url === "string" &&
-    /^https?:\/\/.+\.(jpg|jpeg|png|webp)$/i.test(url)
+    typeof url === "string" && /^https?:\/\/.+\.(jpg|jpeg|png|webp)$/i.test(url)
   );
 }
 
@@ -489,7 +524,6 @@ async function uploadImageFromUrlToCloudinary(imageUrl, folder) {
     streamifier.createReadStream(response.data).pipe(uploadStream);
   });
 }
-
 
 exports.generateUsersFromCSV = async (req, res) => {
   try {
@@ -675,37 +709,36 @@ exports.generateUsersFromCSV = async (req, res) => {
                 ];
               }
               // ================= IMAGE LOGIC =================
-let serviceImage = null;
-let serviceImagePublicId = null;
+              let serviceImage = null;
+              let serviceImagePublicId = null;
 
-// 🔹 Case 1: CSV service image URL provided
-if (s.image && isValidImageUrl(s.image)) {
-  try {
-    const uploadResult = await uploadImageFromUrlToCloudinary(
-      s.image,
-      "service_images"
-    );
-    serviceImage = uploadResult.secure_url;
-    serviceImagePublicId = uploadResult.public_id;
-  } catch (err) {
-    console.error("❌ Service image upload failed:", err.message);
-  }
-}
+              // 🔹 Case 1: CSV service image URL provided
+              if (s.image && isValidImageUrl(s.image)) {
+                try {
+                  const uploadResult = await uploadImageFromUrlToCloudinary(
+                    s.image,
+                    "service_images"
+                  );
+                  serviceImage = uploadResult.secure_url;
+                  serviceImagePublicId = uploadResult.public_id;
+                } catch (err) {
+                  console.error("❌ Service image upload failed:", err.message);
+                }
+              }
 
-// 🔹 Case 2: No image → use category image
-if (!serviceImage) {
-  const category = await Category.findById(s.categoryId);
-  if (category?.image) {
-    serviceImage = category.image;
-    serviceImagePublicId = category.imagePublicId || null;
-  }
-}
+              // 🔹 Case 2: No image → use category image
+              if (!serviceImage) {
+                const category = await Category.findById(s.categoryId);
+                if (category?.image) {
+                  serviceImage = category.image;
+                  serviceImagePublicId = category.imagePublicId || null;
+                }
+              }
 
-// 🔹 Assign to serviceData
-serviceData.image = serviceImage;
-serviceData.imagePublicId = serviceImagePublicId;
-// =================================================
-
+              // 🔹 Assign to serviceData
+              serviceData.image = serviceImage;
+              serviceData.imagePublicId = serviceImagePublicId;
+              // =================================================
 
               const service = new Service(serviceData);
               const savedService = await service.save();
@@ -1077,8 +1110,6 @@ function tryParse(val) {
   }
 }
 
-
-
 // edit service API
 exports.updateService = async (req, res) => {
   try {
@@ -1325,7 +1356,6 @@ exports.updateService = async (req, res) => {
     });
   }
 };
-
 
 // Admin Login
 const { createAccessToken } = require("../utils/jwt");
@@ -1642,8 +1672,7 @@ exports.adminForceDeleteService = async (req, res) => {
         if (chargeId) {
           const charge = await stripe.charges.retrieve(chargeId);
 
-          const refundable =
-            charge.amount - charge.amount_refunded;
+          const refundable = charge.amount - charge.amount_refunded;
 
           if (refundable > 0) {
             const refund = await stripe.refunds.create({

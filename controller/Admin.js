@@ -1359,6 +1359,7 @@ exports.updateService = async (req, res) => {
 
 // Admin Login
 const { createAccessToken } = require("../utils/jwt");
+const { sendServiceForceDeletedEmail } = require("../utils/email");
 
 exports.loginAdmin = async (req, res) => {
   const { email, password } = req.body;
@@ -1712,7 +1713,49 @@ exports.adminForceDeleteService = async (req, res) => {
     await Service.findByIdAndDelete(serviceId);
 
     console.log("🔥 Service force deleted by admin");
+    // ===============================
+    // 5️⃣ SEND EMAILS (NON-BLOCKING)
+    // ===============================
+    try {
+      // 🔴 PROVIDER EMAIL (ALWAYS)
+      await sendServiceForceDeletedEmail(
+        {
+          name: service.owner?.name,
+          email: service.owner?.email,
+        },
+        service,
+        "provider"
+      );
 
+      // 🟢 CUSTOMER EMAILS (ONLY IF BOOKED)
+      if (bookings.length > 0) {
+        console.log("📧 Sending customer emails...");
+
+        const customerIds = [
+          ...new Set(bookings.map((b) => b.user?.toString()).filter(Boolean)),
+        ];
+
+        const customers = await User.find({
+          _id: { $in: customerIds },
+        });
+
+        for (const customer of customers) {
+          await sendServiceForceDeletedEmail(
+            {
+              name: customer.name,
+              email: customer.email,
+            },
+            service,
+            "customer"
+          );
+        }
+      } else {
+        console.log("📧 No bookings → customer emails skipped");
+      }
+    } catch (emailErr) {
+      // 🔥 EMAIL FAILURE SHOULD NOT AFFECT API
+      console.error("📧 Email sending failed:", emailErr.message);
+    }
     // ===============================
     // ✅ RESPONSE
     // ===============================

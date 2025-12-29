@@ -338,6 +338,144 @@ async function sendServiceDeleteApprovedEmail(
   }
 }
 
+async function sendServiceForceDeletedEmail(
+  receiver,
+  service,
+  type = "customer" // customer | provider
+) {
+  console.log("📧 ===============================");
+  console.log("📧 sendServiceForceDeletedEmail CALLED");
+  console.log("📧 Type:", type);
+  console.log("📧 Receiver:", receiver?.email);
+
+  try {
+    // ================= EMAIL VALIDATION =================
+    if (
+      !receiver?.email ||
+      typeof receiver.email !== "string" ||
+      !receiver.email.trim().includes("@")
+    ) {
+      console.log("⚠️ Invalid email, skipping");
+      return;
+    }
+
+    // ================= FETCH ADMIN SUPPORT =================
+    const admin = await Admin.findOne({ is_active: true }).lean();
+
+    // ================= LOAD TEMPLATE =================
+    const templatePath = path.join(
+      __dirname,
+      "../templates/service_cancel_admin.html"
+    );
+    let html = fs.readFileSync(templatePath, "utf8");
+
+    let heading = "";
+    let subject = "";
+    let commonMessage = "";
+
+    // ================= CUSTOMER EMAIL =================
+    if (type === "customer") {
+      heading = "❌ Service Cancelled & Refund Initiated";
+      subject = "Service Cancelled & Refund Initiated";
+
+      commonMessage = `
+        <p>
+          We regret to inform you that the service you subscribed to has been cancelled
+          following an administrative review, as it did not meet our platform guidelines.
+        </p>
+
+        <p>
+          We understand this may be inconvenient, especially if you were awaiting the service.
+          Please be assured that the full payment you made will be refunded within the next few hours.
+        </p>
+
+        <p>
+          If you require any further clarification or assistance, please feel free to contact
+          our admin team at <strong>${admin?.supportPhone || "N/A"}</strong>.
+        </p>
+
+        <p>
+          Thank you for your understanding and cooperation.
+        </p>
+
+        <p>
+          Kind regards,<br />
+          <strong>Admin Team</strong>
+        </p>
+      `;
+    }
+
+    // ================= PROVIDER EMAIL =================
+    if (type === "provider") {
+      heading = "⚠️ Service Removed by Admin";
+      subject = "Service Removal Notification";
+
+      commonMessage = `
+        <p>
+          We would like to inform you that the service you listed on our platform has been
+          removed following an administrative review, as it was found to be non-compliant
+          with our platform guidelines and content policies.
+        </p>
+
+        <p>
+          As a result, any active subscriptions related to this service have been cancelled,
+          and customers have been refunded accordingly.
+        </p>
+
+        <p>
+          We encourage you to review our service listing policies carefully before submitting
+          or publishing future services to avoid similar actions. Repeated violations may
+          result in further restrictions on your account.
+        </p>
+
+        <p>
+          If you believe this action was taken in error or require clarification, you may
+          contact the admin team at <strong>${admin?.supportPhone || "N/A"}</strong> /
+          <strong>${admin?.supportEmail || "N/A"}</strong> within the specified review period.
+        </p>
+
+        <p>
+          Thank you for your cooperation.
+        </p>
+
+        <p>
+          Kind regards,<br />
+          <strong>Admin Team</strong>
+        </p>
+      `;
+    }
+
+    // ================= TEMPLATE REPLACEMENT =================
+    html = html
+      .replace(/{{heading}}/g, heading)
+      .replace(/{{name}}/g, receiver?.name || "User")
+      .replace(/{{service_name}}/g, service?.title || "Service")
+      .replace(/{{date}}/g, new Date().toLocaleString("en-IN"))
+      .replace(/{{common_message}}/g, commonMessage)
+      .replace(/{{extra_section}}/g, "")
+      .replace(/{{support_phone}}/g, admin?.supportPhone || "N/A")
+      .replace(/{{support_email}}/g, admin?.supportEmail || "N/A")
+      .replace(/{{support_time}}/g, admin?.supportTime || "");
+
+    // ================= SEND EMAIL =================
+    await transporter.sendMail({
+      from: process.env.SMTP_EMAIL,
+      to: receiver.email.trim(),
+      subject,
+      html,
+    });
+
+    console.log(`✅ Force delete email sent → ${receiver.email}`);
+    console.log("📧 ===============================");
+  } catch (err) {
+    // 🔥 IMPORTANT: Email failure should NOT affect API
+    console.error(
+      `❌ Force delete email failed for ${receiver?.email}:`,
+      err.message
+    );
+    console.log("📧 ===============================");
+  }
+}
 
 
 module.exports = {
@@ -347,5 +485,6 @@ module.exports = {
   sendServiceBookedEmail,
   sendServiceCompletedEmail,
   sendServiceCancelledEmail,
-  sendServiceDeleteApprovedEmail
+  sendServiceDeleteApprovedEmail,
+  sendServiceForceDeletedEmail
 };

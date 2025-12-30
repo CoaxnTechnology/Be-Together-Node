@@ -31,6 +31,7 @@ const {
   getAllPayments,
   updateService,
   adminForceDeleteService,
+  getPendingDeleteCount,
 } = require("../controller/Admin");
 const adminAuth = require("../Middleware/adminAuth");
 

@@ -83,14 +83,6 @@ router.get("/allbooking", getAllBookings); // specific route
 router.post("/auth/login", loginAdmin);
 //--------------------------payment----------------------------
 router.get("/payment", getAllPayments);
-//--------------------------getdelete status -------------------------
-// admin.routes.js
-router.get(
-  "/pending-delete-count",
-  adminAuth,
-  getPendingDeleteCount
-);
-
 
 module.exports = router;
 //

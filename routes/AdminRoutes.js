@@ -4,6 +4,7 @@ const multer = require("multer");
 const csv = require("csv-parser");
 const fs = require("fs");
 const auth = require("../Middleware/authMiddleware");
+const adminAuth= require("../Middleware/adminAuth");
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
@@ -84,5 +85,13 @@ router.post("/auth/login", loginAdmin);
 //--------------------------payment----------------------------
 router.get("/payment", getAllPayments);
 
+// admin.routes.js
+router.get(
+  "/pending-delete-count",
+  adminAuth,
+  getPendingDeleteCount
+);
+
+
 module.exports = router;
-//
+

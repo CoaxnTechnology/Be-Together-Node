@@ -1773,3 +1773,21 @@ exports.adminForceDeleteService = async (req, res) => {
   }
 };
 
+// admin.controller.js
+exports.getPendingDeleteCount = async (req, res) => {
+  try {
+    const count = await Service.countDocuments({
+      deleteRequestStatus: "pending",
+    });
+
+    return res.json({
+      isSuccess: true,
+      count,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      isSuccess: false,
+      message: "Server error",
+    });
+  }
+};

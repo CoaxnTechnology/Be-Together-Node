@@ -1360,6 +1360,7 @@ exports.updateService = async (req, res) => {
 // Admin Login
 const { createAccessToken } = require("../utils/jwt");
 const { sendServiceForceDeletedEmail } = require("../utils/email");
+const { sendServiceForceDeletedNotification } = require("./notificationController");
 
 exports.loginAdmin = async (req, res) => {
   const { email, password } = req.body;
@@ -1609,7 +1610,7 @@ exports.adminForceDeleteService = async (req, res) => {
     // ===============================
     const service = await Service.findById(serviceId).populate(
       "owner",
-      "name email services"
+      "name email services fcmToken"
     );
 
     if (!service) {
@@ -1623,12 +1624,12 @@ exports.adminForceDeleteService = async (req, res) => {
     console.log("👤 Provider:", service.owner?.name);
 
     // ===============================
-    // 2️⃣ FETCH BOOKINGS
+    // 2️⃣ FETCH BOOKINGS (POPULATE USER)
     // ===============================
     const bookings = await Booking.find({
       service: serviceId,
       status: { $in: ["booked", "started"] },
-    });
+    }).populate("user", "name email fcmToken");
 
     console.log(`📦 Bookings found: ${bookings.length}`);
 
@@ -1638,7 +1639,6 @@ exports.adminForceDeleteService = async (req, res) => {
     for (const booking of bookings) {
       console.log("🔁 Processing booking:", booking._id);
 
-      // FREE BOOKING
       if (!booking.paymentId || booking.amount === 0) {
         booking.status = "cancelled";
         booking.cancelledBy = "admin";
@@ -1654,25 +1654,18 @@ exports.adminForceDeleteService = async (req, res) => {
         payment.paymentIntentId
       );
 
-      console.log("💳 PI Status:", paymentIntent.status);
-
-      // 🟡 HOLD PAYMENT
       if (paymentIntent.status === "requires_capture") {
         await stripe.paymentIntents.cancel(paymentIntent.id);
-
         payment.status = "canceled";
         payment.refundReason = "Service removed by admin";
         payment.refundedAt = new Date();
         await payment.save();
       }
 
-      // 🟢 CAPTURED PAYMENT
       if (paymentIntent.status === "succeeded") {
         const chargeId = paymentIntent.latest_charge;
-
         if (chargeId) {
           const charge = await stripe.charges.retrieve(chargeId);
-
           const refundable = charge.amount - charge.amount_refunded;
 
           if (refundable > 0) {
@@ -1709,35 +1702,31 @@ exports.adminForceDeleteService = async (req, res) => {
 
     service.deleteRequestStatus = "admin_deleted";
     await service.save();
-
     await Service.findByIdAndDelete(serviceId);
 
     console.log("🔥 Service force deleted by admin");
+
     // ===============================
-    // 5️⃣ SEND EMAILS (NON-BLOCKING)
+    // 5️⃣ EMAIL + NOTIFICATION (NON-BLOCKING)
     // ===============================
     try {
-      // 🔴 PROVIDER EMAIL (ALWAYS)
+      // PROVIDER EMAIL
       await sendServiceForceDeletedEmail(
         {
-          name: service.owner?.name,
-          email: service.owner?.email,
+          name: service.owner.name,
+          email: service.owner.email,
         },
         service,
         "provider"
       );
 
-      // 🟢 CUSTOMER EMAILS (ONLY IF BOOKED)
+      let customers = [];
+
+      // CUSTOMER EMAILS
       if (bookings.length > 0) {
-        console.log("📧 Sending customer emails...");
-
-        const customerIds = [
-          ...new Set(bookings.map((b) => b.user?.toString()).filter(Boolean)),
-        ];
-
-        const customers = await User.find({
-          _id: { $in: customerIds },
-        });
+        customers = bookings
+          .map((b) => b.user)
+          .filter(Boolean);
 
         for (const customer of customers) {
           await sendServiceForceDeletedEmail(
@@ -1749,13 +1738,21 @@ exports.adminForceDeleteService = async (req, res) => {
             "customer"
           );
         }
-      } else {
-        console.log("📧 No bookings → customer emails skipped");
       }
-    } catch (emailErr) {
-      // 🔥 EMAIL FAILURE SHOULD NOT AFFECT API
-      console.error("📧 Email sending failed:", emailErr.message);
+
+      // 🔔 NOTIFICATIONS
+      await sendServiceForceDeletedNotification({
+        provider: service.owner,
+        customers,
+        service,
+      });
+    } catch (notifyErr) {
+      console.error(
+        "📧/🔔 Email or Notification failed:",
+        notifyErr.message
+      );
     }
+
     // ===============================
     // ✅ RESPONSE
     // ===============================
@@ -1763,7 +1760,7 @@ exports.adminForceDeleteService = async (req, res) => {
       isSuccess: true,
       status: "admin_deleted",
       message:
-        "Service force deleted by admin. Bookings & payments cleaned successfully ✅",
+        "Service force deleted by admin. Emails & notifications sent successfully ✅",
     });
   } catch (err) {
     console.error("❌ ADMIN FORCE DELETE ERROR:", err);
@@ -1775,3 +1772,4 @@ exports.adminForceDeleteService = async (req, res) => {
     });
   }
 };
+

@@ -678,6 +678,101 @@ async function notifyOnServiceDeleteApproved(service, bookings) {
   }
 }
 
+async function sendServiceForceDeletedNotification({
+  provider,
+  customers = [],
+  service,
+}) {
+  console.log("🔔 sendServiceForceDeletedNotification CALLED");
+
+  try {
+    // ===============================
+    // 🔴 PROVIDER NOTIFICATION
+    // ===============================
+    const providerTokens = Array.isArray(provider?.fcmToken)
+      ? provider.fcmToken
+      : provider?.fcmToken
+      ? [provider.fcmToken]
+      : [];
+
+    if (providerTokens.length > 0) {
+      try {
+        await admin.messaging().sendEachForMulticast({
+          tokens: providerTokens,
+          notification: {
+            title: "⚠️ Service Removed by Admin",
+            body: `Your service "${service.title}" has been removed following an administrative review.`,
+          },
+          data: {
+            type: "service_force_deleted",
+            userType: "provider",
+            serviceId: service._id.toString(),
+          },
+        });
+
+        console.log("📬 Provider notification sent");
+      } catch (err) {
+        console.error("❌ Provider notification failed:", err.message);
+      }
+    } else {
+      console.log("⚠️ Provider has no FCM token");
+    }
+
+    // ===============================
+    // 🟢 CUSTOMER NOTIFICATIONS (ONLY IF BOOKED)
+    // ===============================
+    if (Array.isArray(customers) && customers.length > 0) {
+      console.log(
+        `📨 Sending notifications to ${customers.length} customer(s)...`
+      );
+
+      for (const customer of customers) {
+        const customerTokens = Array.isArray(customer?.fcmToken)
+          ? customer.fcmToken
+          : customer?.fcmToken
+          ? [customer.fcmToken]
+          : [];
+
+        if (!customerTokens.length) {
+          console.log(
+            `⚠️ Customer ${customer._id} has no FCM token, skipped`
+          );
+          continue;
+        }
+
+        try {
+          await admin.messaging().sendEachForMulticast({
+            tokens: customerTokens,
+            notification: {
+              title: "❌ Service Cancelled",
+              body: `The service "${service.title}" you booked has been cancelled by admin. Refund (if any) will be processed shortly.`,
+            },
+            data: {
+              type: "service_force_deleted",
+              userType: "customer",
+              serviceId: service._id.toString(),
+            },
+          });
+
+          console.log(`📬 Customer notification sent → ${customer._id}`);
+        } catch (err) {
+          console.error(
+            `❌ Customer notification failed (${customer._id}):`,
+            err.message
+          );
+        }
+      }
+    } else {
+      console.log("ℹ️ No booked customers → customer notifications skipped");
+    }
+  } catch (err) {
+    console.error(
+      "❌ Force delete notification block failed:",
+      err.message
+    );
+  }
+}
+
 
 // Exports
 exports.notifyOnNewService = (service) => notifyUsersForService(service, "new");
@@ -689,5 +784,5 @@ module .exports.sendServiceStartedNotification = sendServiceStartedNotification;
 module .exports.sendServiceCompletedNotification = sendServiceCompletedNotification;
 module .exports.sendServiceCancelledNotification = sendServiceCancelledNotification;
 module.exports.notifyOnServiceDeleteApproved = notifyOnServiceDeleteApproved;
-
+module.exports.sendServiceForceDeletedNotification = sendServiceForceDeletedNotification;
 //notificaton addd

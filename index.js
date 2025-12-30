@@ -27,11 +27,11 @@ app.use(express.json());
 
 app.use(
   cors({
-    origin: "*", // Allow all origins (not recommended for production)
+    origin: "*",
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
-    credentials: true,
   })
 );
+
 connectDB();
 
 // Route to serve terms_and_conditions.html

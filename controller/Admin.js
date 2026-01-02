@@ -12,6 +12,8 @@ const Admin = require("../model/Admin");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const fs = require("fs");
+const path = require("path");
+
 const csv = require("csv-parser");
 const Booking = require("../model/Booking");
 const Payment = require("../model/Payment");
@@ -132,19 +134,10 @@ exports.createCategory = async (req, res) => {
     }
 
     // Upload image if provided
-    let imageUrl = null,
-      imagePublicId = null;
+    let imageUrl = null;
     if (req.file) {
-      try {
-        const uploadResult = await uploadFromBuffer(req.file.buffer);
-        imageUrl = uploadResult.secure_url;
-        imagePublicId = uploadResult.public_id;
-      } catch (err) {
-        console.error("Image upload error:", err);
-        return res
-          .status(500)
-          .json({ isSuccess: false, message: "Image upload failed" });
-      }
+      imageUrl = `/uploads/category_images/${req.file.filename}`;
+      console.log("🖼 Category image saved:", imageUrl);
     }
 
     // AI tags
@@ -329,19 +322,26 @@ exports.updateCategory = async (req, res) => {
       category.tags = tags || category.tags;
     }
 
-    // ✅ Handle image update
+    // 🖼 IMAGE UPDATE (LOCAL)
+    // =====================
     if (req.file) {
-      if (category.imagePublicId) {
-        try {
-          await cloudinary.uploader.destroy(category.imagePublicId);
-        } catch (err) {
-          console.error("Failed to delete old image from Cloudinary:", err);
+      console.log("🖼 New category image uploaded:", req.file.filename);
+
+      // delete old image
+      if (category.image) {
+        const oldPath = path.join(
+          __dirname,
+          "../",
+          category.image.replace(/^\/+/, "")
+        );
+
+        if (fs.existsSync(oldPath)) {
+          fs.unlinkSync(oldPath);
+          console.log("🗑 Old category image deleted");
         }
       }
 
-      const uploadResult = await uploadFromBuffer(req.file.buffer);
-      category.image = uploadResult.secure_url;
-      category.imagePublicId = uploadResult.public_id;
+      category.image = `/uploads/category_images/${req.file.filename}`;
     }
 
     await category.save();
@@ -360,7 +360,6 @@ exports.updateCategory = async (req, res) => {
     });
   }
 };
-
 //-------------------------------------DELETE CATEGROY from admin--------------------------
 exports.deleteCategory = async (req, res) => {
   try {
@@ -374,14 +373,22 @@ exports.deleteCategory = async (req, res) => {
     }
 
     // Delete image from Cloudinary if exists
-    if (category.imagePublicId) {
-      try {
-        await cloudinary.uploader.destroy(category.imagePublicId);
-      } catch (err) {
-        console.error("Failed to delete image from Cloudinary:", err);
+// 🖼 DELETE CATEGORY IMAGE
+    // =========================
+    if (category.image) {
+      const imagePath = path.join(
+        __dirname,
+        "../",
+        category.image.replace(/^\/+/, "")
+      );
+
+      if (fs.existsSync(imagePath)) {
+        fs.unlinkSync(imagePath);
+        console.log("🗑 Category image deleted:", imagePath);
+      } else {
+        console.log("⚠️ Category image file not found:", imagePath);
       }
     }
-
     await Category.findByIdAndDelete(id);
 
     return res.status(200).json({
@@ -504,25 +511,6 @@ function isValidImageUrl(url) {
   return (
     typeof url === "string" && /^https?:\/\/.+\.(jpg|jpeg|png|webp)$/i.test(url)
   );
-}
-
-// ✅ Upload image URL to Cloudinary
-async function uploadImageFromUrlToCloudinary(imageUrl, folder) {
-  const response = await axios.get(imageUrl, {
-    responseType: "arraybuffer",
-  });
-
-  return new Promise((resolve, reject) => {
-    const uploadStream = cloudinary.uploader.upload_stream(
-      { folder },
-      (error, result) => {
-        if (error) return reject(error);
-        resolve(result);
-      }
-    );
-
-    streamifier.createReadStream(response.data).pipe(uploadStream);
-  });
 }
 
 exports.generateUsersFromCSV = async (req, res) => {
@@ -709,35 +697,37 @@ exports.generateUsersFromCSV = async (req, res) => {
                 ];
               }
               // ================= IMAGE LOGIC =================
+              // ================= IMAGE LOGIC (CSV - NO CLOUDINARY) =================
               let serviceImage = null;
-              let serviceImagePublicId = null;
 
-              // 🔹 Case 1: CSV service image URL provided
-              if (s.image && isValidImageUrl(s.image)) {
-                try {
-                  const uploadResult = await uploadImageFromUrlToCloudinary(
-                    s.image,
-                    "service_images"
-                  );
-                  serviceImage = uploadResult.secure_url;
-                  serviceImagePublicId = uploadResult.public_id;
-                } catch (err) {
-                  console.error("❌ Service image upload failed:", err.message);
-                }
+              // CASE 1️⃣ CSV me image URL diya gaya hai
+              if (
+                s.image &&
+                typeof s.image === "string" &&
+                s.image.startsWith("http")
+              ) {
+                serviceImage = s.image.trim();
+                console.log("🖼 CSV service image URL found:", serviceImage);
               }
 
-              // 🔹 Case 2: No image → use category image
+              // CASE 2️⃣ CSV me image nahi → category image fallback
               if (!serviceImage) {
                 const category = await Category.findById(s.categoryId);
                 if (category?.image) {
                   serviceImage = category.image;
-                  serviceImagePublicId = category.imagePublicId || null;
+                  console.log(
+                    "🖼 No CSV image, using category image:",
+                    serviceImage
+                  );
+                } else {
+                  console.log("⚠️ No CSV image & no category image found");
                 }
               }
 
-              // 🔹 Assign to serviceData
+              // Assign image to service
               serviceData.image = serviceImage;
-              serviceData.imagePublicId = serviceImagePublicId;
+              // =========================================================
+
               // =================================================
 
               const service = new Service(serviceData);
@@ -761,22 +751,14 @@ exports.generateUsersFromCSV = async (req, res) => {
           }
         }
 
-        bufferStream
-          .pipe(csv())
-          .on("data", (row) => {
-            bufferStream.pause(); // pause stream
-            processRow(row).finally(() => bufferStream.resume()); // resume after processing
-          })
-          .on("end", () => {
-            res.json({
-              success: true,
-              message: "CSV processed ✅",
-              createdCount: createdUsers.length,
-              skippedCount: skippedUsers.length,
-              createdUsers,
-              skippedUsers,
-            });
-          });
+        return res.json({
+          success: true,
+          message: "CSV processed ✅",
+          createdCount: createdUsers.length,
+          skippedCount: skippedUsers.length,
+          createdUsers,
+          skippedUsers,
+        });
       });
   } catch (err) {
     console.error("generateUsersFromCSV error:", err);
@@ -900,50 +882,7 @@ exports.deleteAllFakeUsers = async (req, res) => {
   }
 };
 
-// ---------------- UPDATE Profile ----------------
-
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-});
-
-function uploadBufferToCloudinary(
-  buffer,
-  folder = "profile_images",
-  publicId = null
-) {
-  return new Promise((resolve, reject) => {
-    const opts = { folder, resource_type: "image", overwrite: false };
-    if (publicId) opts.public_id = publicId;
-
-    const uploadStream = cloudinary.uploader.upload_stream(
-      opts,
-      (err, result) => {
-        if (err) return reject(err);
-        resolve(result);
-      }
-    );
-    streamifier.createReadStream(buffer).pipe(uploadStream);
-  });
-}
-
-function extractPublicIdFromCloudinaryUrl(url) {
-  if (!url) return null;
-  const m =
-    url.match(/\/upload\/(?:.*\/)?v\d+\/(.+)\.[^/.]+$/) ||
-    url.match(/\/upload\/(.+)\.[^/.]+$/);
-  return m ? decodeURIComponent(m[1]) : null;
-}
-
-async function deleteCloudinaryImage(publicId) {
-  if (!publicId) return;
-  try {
-    await cloudinary.uploader.destroy(publicId, { resource_type: "image" });
-  } catch (err) {
-    console.error("deleteCloudinaryImage error:", err);
-  }
-}
+// ---------------- UPDATE Profile ---------------
 
 function escapeRegExp(str) {
   return String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -988,24 +927,24 @@ exports.editProfile = async (req, res) => {
     if (age !== undefined) user.age = Number(age);
 
     // ---------- Image Upload ----------
-    if (req.file?.buffer) {
-      const oldPublicId = user.profile_image_public_id;
-      const publicId = `user_${Date.now()}_${Math.random()
-        .toString(36)
-        .slice(2, 8)}`;
-      const result = await uploadBufferToCloudinary(
-        req.file.buffer,
-        "profile_images",
-        publicId
-      );
-      //console.log("Cloudinary upload result:", result);
-      user.profile_image = result.secure_url;
-      user.profile_image_public_id = result.public_id;
+    if (req.file) {
+      console.log("🖼 New profile image uploaded:", req.file.filename);
 
-      // Delete old image
-      if (oldPublicId && oldPublicId !== result.public_id) {
-        await deleteCloudinaryImage(oldPublicId);
+      // delete old image if exists
+      if (user.profile_image) {
+        const oldPath = path.join(
+          __dirname,
+          "../",
+          user.profile_image.replace(/^\/+/, "")
+        );
+
+        if (fs.existsSync(oldPath)) {
+          fs.unlinkSync(oldPath);
+          console.log("🗑 Old profile image deleted");
+        }
       }
+
+      user.profile_image = `/uploads/profile_images/${req.file.filename}`;
     }
 
     // ---------- Languages, Interests, OfferedTags ----------
@@ -1060,7 +999,7 @@ exports.editProfile = async (req, res) => {
         id: user._id,
         name: user.name,
         email: user.email,
-        profile_image: user.profile_image,
+        profile_image: getFullImageUrl(user.profile_image),
         bio: user.bio,
         city: user.city,
         languages: user.languages || [],
@@ -1305,34 +1244,36 @@ exports.updateService = async (req, res) => {
     // =========================
     // 🖼 IMAGE
     // =========================
-    if (req.file && req.file.buffer) {
-      if (service.imagePublicId) {
+    // CASE 1️⃣ New image uploaded
+    if (req.file) {
+      console.log("🖼 New image uploaded");
+
+      if (service.image && service.image.includes("/uploads/service_images/")) {
         try {
-          await cloudinary.uploader.destroy(service.imagePublicId);
+          const oldPath = service.image.replace(process.env.BASE_URL, "");
+          const fullOldPath = path.join(process.cwd(), oldPath);
+
+          if (fs.existsSync(fullOldPath)) {
+            fs.unlinkSync(fullOldPath);
+            console.log("🗑 Old service image deleted");
+          }
         } catch (err) {
-          console.log("Old image delete failed:", err.message);
+          console.log("Old image delete failed (non-fatal):", err.message);
         }
       }
 
-      const uploadResult = await uploadBufferToCloudinary(
-        req.file.buffer,
-        "service_images"
-      );
+      updatePayload.image = `${process.env.BASE_URL}/uploads/service_images/${req.file.filename}`;
+    }
 
-      updatePayload.image = uploadResult.secure_url;
-      updatePayload.imagePublicId = uploadResult.public_id;
-    } else if (body.removeImage === true || body.removeImage === "true") {
-      if (service.imagePublicId) {
-        try {
-          await cloudinary.uploader.destroy(service.imagePublicId);
-        } catch (err) {}
-      }
+    // CASE 2️⃣ removeImage → category image
+    else if (body.removeImage === true || body.removeImage === "true") {
+      console.log("🖼 Image removed → using category image");
 
       const serviceCategory = await Category.findById(service.category);
       updatePayload.image = serviceCategory?.image || null;
-      updatePayload.imagePublicId = serviceCategory?.imagePublicId || null;
     }
 
+    // CASE 3️⃣ No image change → do nothing
     // =========================
     // ✅ UPDATE
     // =========================
@@ -1360,7 +1301,9 @@ exports.updateService = async (req, res) => {
 // Admin Login
 const { createAccessToken } = require("../utils/jwt");
 const { sendServiceForceDeletedEmail } = require("../utils/email");
-const { sendServiceForceDeletedNotification } = require("./notificationController");
+const {
+  sendServiceForceDeletedNotification,
+} = require("./notificationController");
 
 exports.loginAdmin = async (req, res) => {
   const { email, password } = req.body;
@@ -1724,9 +1667,7 @@ exports.adminForceDeleteService = async (req, res) => {
 
       // CUSTOMER EMAILS
       if (bookings.length > 0) {
-        customers = bookings
-          .map((b) => b.user)
-          .filter(Boolean);
+        customers = bookings.map((b) => b.user).filter(Boolean);
 
         for (const customer of customers) {
           await sendServiceForceDeletedEmail(
@@ -1747,10 +1688,7 @@ exports.adminForceDeleteService = async (req, res) => {
         service,
       });
     } catch (notifyErr) {
-      console.error(
-        "📧/🔔 Email or Notification failed:",
-        notifyErr.message
-      );
+      console.error("📧/🔔 Email or Notification failed:", notifyErr.message);
     }
 
     // ===============================

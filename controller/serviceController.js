@@ -43,36 +43,6 @@ function formatTimeToAMPM(timeStr) {
   if (!m.isValid()) return null;
   return m.format("hh:mm A");
 }
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-});
-function uploadBufferToCloudinary(
-  buffer,
-  folder = "profile_images",
-  publicId = null
-) {
-  return new Promise((resolve, reject) => {
-    const opts = {
-      folder,
-      resource_type: "image",
-      overwrite: false,
-      use_filename: false,
-    };
-    if (publicId) opts.public_id = publicId;
-
-    const uploadStream = cloudinary.uploader.upload_stream(
-      opts,
-      (error, result) => {
-        if (error) return reject(error);
-        resolve(result);
-      }
-    );
-
-    streamifier.createReadStream(buffer).pipe(uploadStream);
-  });
-}
 // Main createService function
 exports.createService = async (req, res) => {
   try {
@@ -184,23 +154,24 @@ exports.createService = async (req, res) => {
     // ⭐ SERVICE IMAGE LOGIC (MAIN PART)
     // ==================================================
     let serviceImage = null;
-    let serviceImagePublicId = null;
 
-    // 1️⃣ User uploaded image
-    if (req.file?.buffer) {
-      const uploadResult = await uploadBufferToCloudinary(
-        req.file.buffer,
-        "service_images"
-      );
+    console.log("🖼️ Service image selection started");
 
-      serviceImage = uploadResult.secure_url;
-      serviceImagePublicId = uploadResult.public_id;
+    // 1️⃣ User uploaded image (local server)
+    if (req.file) {
+      serviceImage = `${process.env.BASE_URL}/uploads/service_images/${req.file.filename}`;
+      console.log("✅ Using uploaded service image:", serviceImage);
     }
-    // 2️⃣ No image → use category image
+    // 2️⃣ User did NOT upload image → use category image (Cloudinary URL)
     else if (category.image) {
       serviceImage = category.image;
-      serviceImagePublicId = category.imagePublicId || null;
+      console.log("ℹ️ No image uploaded, using category image:", serviceImage);
     }
+    // 3️⃣ No image at all (edge case)
+    else {
+      console.log("⚠️ No service image found (no upload, no category image)");
+    }
+
     // ⭐ NEW: PAID SERVICE → CREATE CONNECTED ACCOUNT + KYC CHECK
     // ---------------------------
     if (!isFree) {
@@ -254,7 +225,7 @@ exports.createService = async (req, res) => {
       price,
       currency, // <-- NOW SAVED IN SERVICE TABLE
       image: serviceImage, // ✅ added
-      imagePublicId: serviceImagePublicId, // ✅ added
+    
       location_name: location.name,
       // city,
       isDoorstepService,
@@ -1326,40 +1297,36 @@ exports.updateService = async (req, res) => {
     // =========================
     // 🖼 IMAGE UPDATE LOGIC
     // =========================
-    if (req.file && req.file.buffer) {
-      // ✅ CASE 1: New image uploaded
-      console.log("Uploading new service image...");
+   // CASE 1️⃣ New image uploaded → delete old local image
+    if (req.file) {
+      console.log("🖼 New image uploaded");
 
-      if (service.imagePublicId) {
+      if (service.image && service.image.includes("/uploads/service_images/")) {
         try {
-          await cloudinary.uploader.destroy(service.imagePublicId);
+          const oldPath = service.image.replace(process.env.BASE_URL, "");
+          const fullOldPath = path.join(process.cwd(), oldPath);
+
+          if (fs.existsSync(fullOldPath)) {
+            fs.unlinkSync(fullOldPath);
+            console.log("🗑 Old service image deleted");
+          }
         } catch (err) {
-          console.log("Old image delete failed:", err.message);
+          console.log("Old image delete failed (non-fatal):", err.message);
         }
       }
 
-      const uploadResult = await uploadBufferToCloudinary(
-        req.file.buffer,
-        "service_images"
-      );
+      updatePayload.image = `${process.env.BASE_URL}/uploads/service_images/${req.file.filename}`;
+    }
 
-      updatePayload.image = uploadResult.secure_url;
-      updatePayload.imagePublicId = uploadResult.public_id;
-    } else if (body.removeImage === true || body.removeImage === "true") {
-      // ✅ CASE 3: Image removed → fallback to category image
-      console.log("Image removed, setting category image");
+    // CASE 2️⃣ Remove image → fallback to category image
+    else if (body.removeImage === true || body.removeImage === "true") {
+      console.log("🖼 Image removed, using category image");
 
-      if (service.imagePublicId) {
-        try {
-          await cloudinary.uploader.destroy(service.imagePublicId);
-        } catch (err) {
-          console.log("Old image delete failed:", err.message);
-        }
-      }
       const serviceCategory = await Category.findById(service.category);
       updatePayload.image = serviceCategory?.image || null;
-      updatePayload.imagePublicId = serviceCategory?.imagePublicId || null;
     }
+
+    // CASE 3️⃣ No image change → DO NOTHING (old image remains)
 
     // ✅ Finally update
     const updatedService = await Service.findByIdAndUpdate(
@@ -1702,8 +1669,7 @@ exports.approveServiceDelete = async (req, res) => {
 
         if (chargeId) {
           const charge = await stripe.charges.retrieve(chargeId);
-          const refundable =
-            charge.amount - charge.amount_refunded;
+          const refundable = charge.amount - charge.amount_refunded;
 
           if (refundable > 0) {
             const refund = await stripe.refunds.create({
@@ -1744,11 +1710,7 @@ exports.approveServiceDelete = async (req, res) => {
     console.log("📧 Sending email to provider...");
 
     if (service.owner?.email) {
-      await sendServiceDeleteApprovedEmail(
-        service.owner,
-        service,
-        "provider"
-      );
+      await sendServiceDeleteApprovedEmail(service.owner, service, "provider");
     }
 
     // =============================
@@ -1786,7 +1748,6 @@ exports.approveServiceDelete = async (req, res) => {
     });
   }
 };
-
 
 exports.getDeleteServiceRequests = async (req, res) => {
   try {

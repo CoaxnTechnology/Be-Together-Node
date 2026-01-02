@@ -38,7 +38,7 @@ connectDB();
 app.get("/api/terms", (req, res) => {
   res.sendFile(path.join(__dirname, "templates", "terms_and_conditions.html"));
 });
-
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 app.use(express.static(path.join(__dirname, "public")));
 
 // API routes

@@ -3,61 +3,10 @@ const User = require("../model/User");
 const Category = require("../model/Category");
 const { getFullImageUrl } = require("../utils/image");
 const streamifier = require("streamifier");
-const cloudinary = require("cloudinary").v2;
 const notificationController = require("./notificationController");
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-});
-
-function uploadBufferToCloudinary(
-  buffer,
-  folder = "profile_images",
-  publicId = null
-) {
-  return new Promise((resolve, reject) => {
-    const opts = {
-      folder,
-      resource_type: "image",
-      overwrite: false,
-      use_filename: false,
-    };
-    if (publicId) opts.public_id = publicId;
-
-    const uploadStream = cloudinary.uploader.upload_stream(
-      opts,
-      (error, result) => {
-        if (error) return reject(error);
-        resolve(result);
-      }
-    );
-
-    streamifier.createReadStream(buffer).pipe(uploadStream);
-  });
-}
-
-function extractPublicIdFromCloudinaryUrl(url) {
-  if (!url || typeof url !== "string") return null;
-  try {
-    // match "/upload/.../v12345/<public_id>.<ext>" or fallback "/upload/<public_id>.<ext>"
-    let m = url.match(/\/upload\/(?:.*\/)?v\d+\/(.+)\.[^/.]+$/);
-    if (!m) m = url.match(/\/upload\/(.+)\.[^/.]+$/);
-    if (!m) return null;
-    return decodeURIComponent(m[1]);
-  } catch (e) {
-    return null;
-  }
-}
-
-async function deleteCloudinaryImage(publicId) {
-  if (!publicId) return;
-  try {
-    await cloudinary.uploader.destroy(publicId, { resource_type: "image" });
-  } catch (err) {
-    console.error("deleteCloudinaryImage error (non-fatal):", err);
-  }
-}
+const path = require("path");
+const fs = require("fs");
+const BASE_URL = process.env.BASE_URL;
 // ---------------- UPDATE Profile ----------------
 exports.editProfile = async (req, res) => {
   try {
@@ -123,78 +72,23 @@ exports.editProfile = async (req, res) => {
     }
 
     // keep track of old Cloudinary public_id (if any) to delete later
-    let oldPublicId = null;
-    if (user.profile_image) {
-      if (typeof user.profile_image === "string") {
-        oldPublicId = extractPublicIdFromCloudinaryUrl(user.profile_image);
-      } else if (user.profile_image && user.profile_image.public_id) {
-        oldPublicId = user.profile_image.public_id;
-      }
-    }
+    if (req.file) {
+      if (user.profile_image) {
+        try {
+          const oldPath = user.profile_image.replace(BASE_URL, "");
+          const fullOldPath = path.join(process.cwd(), oldPath);
 
-    // ---------- Image upload handling ----------
-    if (req.file && req.file.buffer) {
-      try {
-        if (
-          !process.env.CLOUDINARY_CLOUD_NAME ||
-          !process.env.CLOUDINARY_API_KEY ||
-          !process.env.CLOUDINARY_API_SECRET
-        ) {
-          throw new Error("Cloudinary not configured (missing env vars).");
-        }
-
-        const publicId = `user_${Date.now()}_${Math.random()
-          .toString(36)
-          .slice(2, 8)}`;
-        const result = await uploadBufferToCloudinary(
-          req.file.buffer,
-          "profile_images",
-          publicId
-        );
-
-        if (!result || !result.secure_url) {
-          throw new Error("Invalid upload response from Cloudinary");
-        }
-
-        // Save the URL string in DB (as requested)
-        user.profile_image = result.secure_url;
-
-        // Save public_id too for later deletion (optional field on User schema)
-        user.profile_image_public_id = result.public_id || publicId;
-
-        // Delete old Cloudinary image when replaced
-        if (
-          oldPublicId &&
-          result.public_id &&
-          oldPublicId !== result.public_id
-        ) {
-          try {
-            await deleteCloudinaryImage(oldPublicId);
-          } catch (e) {
-            console.error(e);
+          if (fs.existsSync(fullOldPath)) {
+            fs.unlinkSync(fullOldPath);
+            console.log("🗑️ Old profile image deleted");
           }
+        } catch (err) {
+          console.error("Old image delete failed (non-fatal):", err);
         }
-      } catch (uploadErr) {
-        console.error("Cloudinary upload failed in editProfile:", uploadErr);
-        return res.status(500).json({
-          isSuccess: false,
-          message: "Image upload failed",
-          error: uploadErr.message,
-        });
       }
-    }
 
-    // If client passed a profile_image URL (rare case), accept it (but we prefer file uploads)
-    if (
-      !req.file &&
-      req.body.profile_image &&
-      typeof req.body.profile_image === "string" &&
-      req.body.profile_image.trim() !== ""
-    ) {
-      const url = req.body.profile_image.trim();
-      user.profile_image = url;
-      const extracted = extractPublicIdFromCloudinaryUrl(url);
-      if (extracted) user.profile_image_public_id = extracted;
+      // ---------------- SAVE NEW IMAGE ----------------
+      user.profile_image = `${BASE_URL}/uploads/profile_images/${req.file.filename}`;
     }
 
     // ---------- Other fields ----------

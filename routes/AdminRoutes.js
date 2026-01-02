@@ -4,9 +4,6 @@ const multer = require("multer");
 const csv = require("csv-parser");
 const fs = require("fs");
 const auth = require("../Middleware/authMiddleware");
-const storage = multer.memoryStorage();
-const upload = multer({ storage });
-
 const {
   createCategory,
   getAllCategories,
@@ -34,6 +31,79 @@ const {
   getPendingDeleteCount,
 } = require("../controller/Admin");
 const adminAuth = require("../Middleware/adminAuth");
+const path = require("path");
+
+// ==================================================
+// 📦 MULTER CONFIGS (SEPARATE & CLEAN)
+// ==================================================
+
+// 🖼 SERVICE IMAGES (disk)
+const serviceImageStorage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, "uploads/service_images");
+  },
+  filename: function (req, file, cb) {
+    const uniqueName =
+      "service_" +
+      Date.now() +
+      "_" +
+      Math.round(Math.random() * 1e9) +
+      path.extname(file.originalname);
+    cb(null, uniqueName);
+  },
+});
+
+const uploadServiceImage = multer({
+  storage: serviceImageStorage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+});
+
+// 👤 PROFILE IMAGES (disk)
+const profileImageStorage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, "uploads/profile_images");
+  },
+  filename: function (req, file, cb) {
+    const uniqueName =
+      "profile_" +
+      Date.now() +
+      "_" +
+      Math.round(Math.random() * 1e9) +
+      path.extname(file.originalname);
+    cb(null, uniqueName);
+  },
+});
+
+const uploadProfileImage = multer({
+  storage: profileImageStorage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+});
+
+// 📄 CSV UPLOAD (memory only)
+const uploadCSV = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+});
+// 🏷 CATEGORY IMAGES (disk)
+const categoryImageStorage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, "uploads/categories");
+  },
+  filename: function (req, file, cb) {
+    const uniqueName =
+      "category_" +
+      Date.now() +
+      "_" +
+      Math.round(Math.random() * 1e9) +
+      path.extname(file.originalname);
+    cb(null, uniqueName);
+  },
+});
+
+const uploadCategoryImage = multer({
+  storage: categoryImageStorage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+});
 
 // ------------------------USER DETAILS------------------------
 router.get("/alluser", getAllUsers);
@@ -45,7 +115,7 @@ router.get("/service/:id", getServiceById);
 router.patch(
   "/service/update",
   //adminAuth,
-  upload.single("image"), // service image
+  uploadServiceImage.single("image"), // service image
   updateService
 );
 // ------------------------FAKE USERS------------------------
@@ -54,12 +124,12 @@ router.get("/fake-users/:id", getFakeUserById);
 
 router.delete("/fake-users/:id", deleteFakeUser);
 router.delete("/fake-users", deleteAllFakeUsers);
-router.post("/upload-users-csv", upload.single("file"), generateUsersFromCSV);
+router.post("/upload-users-csv", uploadCSV.single("file"), generateUsersFromCSV);
 
 // ------------------------PROFILE------------------------
 router.put(
   "/user/edit-profile/:userId",
-  upload.single("profile_image"),
+  uploadProfileImage.single("profile_image"),
   editProfile
 );
 //admin delete the service---
@@ -70,8 +140,8 @@ router.delete(
 );
 // ------------------------CATEGORY------------------------
 router.post("/category/ai-tags", getAITags);
-router.post("/category/create", upload.single("image"), createCategory);
-router.put("/category/update/:id", upload.single("image"), updateCategory);
+router.post("/category/create", uploadCategoryImage.single("image"), createCategory);
+router.put("/category/update/:id", uploadCategoryImage.single("image"), updateCategory);
 router.delete("/category/delete/:id", deleteCategory);
 router.post("/category/all", getAllCategories);
 

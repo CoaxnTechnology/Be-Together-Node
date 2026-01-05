@@ -16,8 +16,8 @@ const statsRoutes = require("./routes/statsRoutes");
 const commissionRoutes = require("./routes/adminCommissionRoutes");
 const cancellationRoutes = require("./routes/adminCancellationRoutes");
 const stripeRoutes = require("./routes/stripeConnectRoutes");
-const paymentRoutes = require("./routes/paymentRoutes")
-const paymentViolationRoutes =  require("./routes/paymentViolationRoutes")
+const paymentRoutes = require("./routes/paymentRoutes");
+const paymentViolationRoutes = require("./routes/paymentViolationRoutes");
 const connectDB = require("./utils/connect");
 const app = express();
 const crypto = require("crypto");
@@ -101,19 +101,22 @@ app.use("/api/stats", statsRoutes);
 //   }
 // });
 
- app.use("/api/admin/commission",commissionRoutes );
- app.use("/api/admin/cancellation",cancellationRoutes );
+app.use("/api/admin/commission", commissionRoutes);
+app.use("/api/admin/cancellation", cancellationRoutes);
 
- app.use("/api/stripe/connect",stripeRoutes );
- app.use("/api/payments",paymentRoutes );
- app.use("/api/payment/violation",paymentViolationRoutes);
+app.use("/api/stripe/connect", stripeRoutes);
+app.use("/api/payments", paymentRoutes);
+app.use("/api/payment/violation", paymentViolationRoutes);
 
 // Connect to MongoDB (live Atlas)
 app.use("/api/admin", AdminRoutes);
 // Start server
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT} happy`));
-
+app.listen(PORT, () =>
+  console.log(
+    `🚀 Server running on port ${PORT} now working the github webhook`
+  )
+);
 
 module.exports = app;
 //new changes

@@ -20,6 +20,44 @@ const paymentRoutes = require("./routes/paymentRoutes")
 const paymentViolationRoutes =  require("./routes/paymentViolationRoutes")
 const connectDB = require("./utils/connect");
 const app = express();
+const crypto = require("crypto");
+const { exec } = require("child_process");
+
+app.post(
+  "/webhook/github",
+  express.raw({ type: "application/json" }),
+  (req, res) => {
+    try {
+      console.log("✅ Webhook hit");
+
+      const signature = req.headers["x-hub-signature-256"];
+      if (!signature) {
+        console.log("❌ No signature");
+        return res.status(401).send("No signature");
+      }
+
+      const secret = process.env.GITHUB_WEBHOOK_SECRET;
+
+      const hmac = crypto.createHmac("sha256", secret);
+      hmac.update(req.body); // MUST be Buffer
+      const digest = "sha256=" + hmac.digest("hex");
+
+      if (signature !== digest) {
+        console.log("❌ Invalid signature");
+        return res.status(401).send("Invalid signature");
+      }
+
+      console.log("🚀 Signature verified, deploying...");
+
+      exec("bash /var/www/testing/api/deploy.sh");
+
+      return res.status(200).send("Deployment started");
+    } catch (err) {
+      console.error("❌ Webhook crash:", err);
+      return res.status(500).send("Webhook error");
+    }
+  }
+);
 
 // Middleware
 app.use(express.urlencoded({ extended: true }));

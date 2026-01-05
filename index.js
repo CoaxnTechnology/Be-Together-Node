@@ -112,11 +112,7 @@ app.use("/api/payment/violation", paymentViolationRoutes);
 app.use("/api/admin", AdminRoutes);
 // Start server
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () =>
-  console.log(
-    `🚀 Server running on port ${PORT} now working the github webhook`
-  )
-);
-
+app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT} `));
+console.log("webhook ")
 module.exports = app;
 //new changes

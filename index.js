@@ -46,6 +46,11 @@ if(!secret){
 
   res.status(200).send("received");
 });
+app.post("/webhook/frontend", (req, res) => {
+  console.log("🔥 FRONTEND DEPLOY HIT");
+  exec("bash /var/www/testing/admin/deploy.sh > /dev/null 2>&1 &");
+  res.send("received");
+});
 
 
 // Middleware

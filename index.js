@@ -59,7 +59,8 @@ app.post(
   }
 );
 app.post("/webhook/testing", (req, res) => {
-  exec("bash /var/www/testing/admin/deploy-testing.sh");
+  console.log("🔥 WEBHOOK TEST HIT");
+  exec("bash /var/www/testing/admin/deploy.sh");
   res.json({ message: "frontend testing deploy started" });
 });
 

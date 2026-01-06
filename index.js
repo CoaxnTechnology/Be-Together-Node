@@ -54,15 +54,10 @@ app.post(
       return res.status(200).send("Deployment started");
     } catch (err) {
       console.error("❌ Webhook crash:", err);
-      return res.status(500).send("Webhook errorr");
+      return res.status(500).send("Webhook error");
     }
   }
 );
-app.post("/webhook/testing", (req, res) => {
-  console.log("🔥 WEBHOOK TEST HIT");
-  exec("bash /var/www/testing/admin/deploy.sh");
-  res.json({ message: "frontend testing deploy started" });
-});
 
 // Middleware
 app.use(express.urlencoded({ extended: true }));

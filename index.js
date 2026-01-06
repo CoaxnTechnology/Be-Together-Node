@@ -58,10 +58,14 @@ app.post(
     }
   }
 );
-app.post("/webhook/testing", (req, res) => {
-  console.log("🔥 WEBHOOK TEST HIT");
-  exec("bash /var/www/testing/admin/deploy.sh");
-  res.json({ message: "frontend testing deploy started" });
+const { exec } = require("child_process");
+
+app.post("/webhook/github", (req, res) => {
+  console.log("🔥 FRONTEND WEBHOOK HIT");
+
+  exec("bash /var/www/testing/admin/deploy.sh > /dev/null 2>&1 &");
+
+  res.status(200).json({ message: "received" });
 });
 
 // Middleware

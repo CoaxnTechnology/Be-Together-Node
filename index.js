@@ -58,8 +58,6 @@ app.post(
     }
   }
 );
-const { exec } = require("child_process");
-
 app.post("/webhook/github", (req, res) => {
   console.log("🔥 FRONTEND WEBHOOK HIT");
 

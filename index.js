@@ -28,7 +28,7 @@ app.post(
   express.raw({ type: "application/json" }),
   (req, res) => {
     try {
-      console.log("✅ Webhook hit");
+      console.log("✅Backend Webhook hit");
 
       const signature = req.headers["x-hub-signature-256"];
       if (!signature) {
@@ -112,6 +112,6 @@ app.use("/api/payment/violation", paymentViolationRoutes);
 app.use("/api/admin", AdminRoutes);
 // Start server
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT} here`));
+app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
 module.exports = app;
 //new changes

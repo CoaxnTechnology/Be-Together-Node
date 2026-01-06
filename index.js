@@ -58,6 +58,10 @@ app.post(
     }
   }
 );
+app.post("/webhook/testing", (req, res) => {
+  exec("bash /var/www/testing/admin/deploy-testing.sh");
+  res.json({ message: "frontend testing deploy started" });
+});
 
 // Middleware
 app.use(express.urlencoded({ extended: true }));

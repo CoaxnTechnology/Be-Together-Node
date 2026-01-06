@@ -54,7 +54,7 @@ app.post(
       return res.status(200).send("Deployment started");
     } catch (err) {
       console.error("❌ Webhook crash:", err);
-      return res.status(500).send("Webhook error");
+      return res.status(500).send("Webhook errorr");
     }
   }
 );
@@ -113,6 +113,5 @@ app.use("/api/admin", AdminRoutes);
 // Start server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT} `));
-console.log("webhook ")
 module.exports = app;
 //new changes

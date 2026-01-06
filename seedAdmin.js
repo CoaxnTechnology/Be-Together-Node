@@ -9,7 +9,7 @@ mongoose.connect(DB_URI, { useNewUrlParser: true, useUnifiedTopology: true })
   .then(async () => {
     console.log("Connected to MongoDB");
 
-    const existingAdmin = await Admin.findOne({ email: "admin01@gmail.com" });
+    const existingAdmin = await Admin.findOne({ email: "hammadsunsara2620@gmail.com" });
     if (existingAdmin) {
       console.log("Admin already exists");
       process.exit(0);
@@ -19,7 +19,7 @@ mongoose.connect(DB_URI, { useNewUrlParser: true, useUnifiedTopology: true })
 
     const admin = new Admin({
       name: "Betogether",
-      email: "admin01@gmail.com",
+      email: "hammadsunsara2620@gmail.com",
       hashed_password: hashedPassword,
       is_active: true,
     });

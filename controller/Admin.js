@@ -135,8 +135,11 @@ exports.createCategory = async (req, res) => {
 
     // Upload image if provided
     let imageUrl = null;
+    const base = process.env.BASE_URL;
+
+
     if (req.file) {
-      imageUrl = `/uploads/category_images/${req.file.filename}`;
+      imageUrl = `${base}/uploads/category_images/${req.file.filename}`;
       console.log("🖼 Category image saved:", imageUrl);
     }
 

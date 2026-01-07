@@ -279,6 +279,8 @@ exports.updateCategory = async (req, res) => {
     const { id } = req.params;
     let { name, tags, order } = req.body;
 
+    const base = process.env.BASE_URL;   // ✔ BASE URL
+
     if (!id) {
       return res
         .status(400)
@@ -291,6 +293,8 @@ exports.updateCategory = async (req, res) => {
         .status(404)
         .json({ isSuccess: false, message: "Category not found" });
     }
+
+    // 🔢 ORDER SHIFTING LOGIC
     if (order && Number(order) !== category.order) {
       const newOrder = Number(order);
       const oldOrder = category.order;
@@ -310,10 +314,10 @@ exports.updateCategory = async (req, res) => {
       category.order = newOrder;
     }
 
-    // ✅ Update name and tags safely
+    // ➡ NAME
     category.name = name || category.name;
 
-    // ✅ Convert tags string (like '["spa"]') to array
+    // ➡ TAGS CONVERT
     if (typeof tags === "string") {
       try {
         category.tags = JSON.parse(tags);
@@ -324,26 +328,29 @@ exports.updateCategory = async (req, res) => {
       category.tags = tags || category.tags;
     }
 
-    // 🖼 IMAGE UPDATE (LOCAL)
-    // =====================
+    // 🖼 IMAGE UPDATE (LOCAL + FULL URL)
     if (req.file) {
       console.log("🖼 New category image uploaded:", req.file.filename);
 
-      // delete old image
+      // delete old local file
       if (category.image) {
-        const oldPath = path.join(
+        const oldLocalPath = path.join(
           __dirname,
-          "../",
-          category.image.replace(/^\/+/, "")
+          "..",
+          "..",
+          "uploads",
+          "category_images",
+          path.basename(category.image)   // only file name
         );
 
-        if (fs.existsSync(oldPath)) {
-          fs.unlinkSync(oldPath);
+        if (fs.existsSync(oldLocalPath)) {
+          fs.unlinkSync(oldLocalPath);
           console.log("🗑 Old category image deleted");
         }
       }
 
-      category.image = `/uploads/category_images/${req.file.filename}`;
+      // ✔ STORE FULL URL
+      category.image = `${base}/uploads/category_images/${req.file.filename}`;
     }
 
     await category.save();
@@ -354,7 +361,7 @@ exports.updateCategory = async (req, res) => {
       data: category,
     });
   } catch (err) {
-    console.error("Error updating category:", err);
+    console.error("Error updating category:", err.message);
     return res.status(500).json({
       isSuccess: false,
       message: "Internal server error",
@@ -362,6 +369,7 @@ exports.updateCategory = async (req, res) => {
     });
   }
 };
+
 //-------------------------------------DELETE CATEGROY from admin--------------------------
 exports.deleteCategory = async (req, res) => {
   try {

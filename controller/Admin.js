@@ -524,45 +524,63 @@ function isValidImageUrl(url) {
 
 exports.generateUsersFromCSV = async (req, res) => {
   try {
+    console.log("===== generateUsersFromCSV START =====");
+
     if (!req.file) {
+      console.log("❌ No file in request");
       return res.status(400).json({
-        success: false,
+        isSuccess: false,
         message: "No CSV file uploaded",
       });
     }
+
+    console.log("📂 CSV FILE RECEIVED:", {
+      fileName: req.file.originalname,
+      size: req.file.buffer?.length,
+    });
 
     const bufferStream = new Readable();
     bufferStream.push(req.file.buffer);
     bufferStream.push(null);
 
     const usersData = [];
-    const createdUsers = [];
+    const createdUsers = [];      // ✔ this will fill
     const skippedUsers = [];
+
+    console.log("📡 Starting CSV parse pipe...");
 
     bufferStream
       .pipe(csv())
-      .on("data", (row) => usersData.push(row))
+      .on("data", (row) => {
+        console.log("➡ ROW PARSED:", row.email);
+        usersData.push(row);
+      })
       .on("end", async () => {
+        console.log("===== CSV PARSE END =====");
+        console.log("🔢 TOTAL ROWS:", usersData.length);
+
         for (const row of usersData) {
+          console.log("🧑 Processing user:", row.email);
+
           try {
-            // ✅ Check Email Duplicate
             const existingUser = await User.findOne({ email: row.email });
+
             if (existingUser) {
-              console.warn(`⚠️ Email exists: ${row.email}`);
+              console.log("⏭ Skip duplicate:", row.email);
               skippedUsers.push({
                 email: row.email,
                 reason: "Duplicate Email",
               });
-              continue; // Skip this user
+              continue;
             }
-            // 1️⃣ VALIDATE CATEGORY + TAGS BASED ON YOUR SCHEMA
-            // ---------------------------------------------------
-            let services = [];
 
-            // Try parsing services JSON
+            // ✔ services parse
+            let services = [];
             try {
               services = JSON.parse(row.services || "[]");
+              console.log("📦 Services JSON OK:", services.length);
             } catch (err) {
+              console.log("❌ SERVICES JSON BAD:", row.email);
               skippedUsers.push({
                 email: row.email,
                 reason: "Invalid services JSON",
@@ -570,51 +588,7 @@ exports.generateUsersFromCSV = async (req, res) => {
               continue;
             }
 
-            let isValidUser = true;
-            // let isValidUser = true;
-
-            for (const s of services) {
-              // ✅ Check categoryId exists
-              if (!s.categoryId) {
-                isValidUser = false;
-                skippedUsers.push({
-                  email: row.email,
-                  reason: "Missing categoryId in service",
-                });
-                break;
-              }
-
-              // 🔍 Check category exists in DB using correct type (string)
-              const category = await Category.findById(s.categoryId);
-              if (!category) {
-                isValidUser = false;
-                skippedUsers.push({
-                  email: row.email,
-                  reason: `Invalid CategoryId: ${s.categoryId}`,
-                });
-                break;
-              }
-
-              // 🔍 Validate tags inside category.tags[]
-              if (Array.isArray(s.selectedTags)) {
-                for (const tag of s.selectedTags) {
-                  if (!category.tags.includes(tag)) {
-                    isValidUser = false;
-                    skippedUsers.push({
-                      email: row.email,
-                      reason: `Tag '${tag}' does not exist in Category '${category.name}'`,
-                    });
-                    break;
-                  }
-                }
-              }
-
-              if (!isValidUser) break;
-            }
-
-            // If category/tags invalid → skip user
-            if (!isValidUser) continue;
-
+            // ✔ CREATE USER OBJECT
             const user = new User({
               name: row.name,
               email: row.email,
@@ -623,124 +597,35 @@ exports.generateUsersFromCSV = async (req, res) => {
               bio: row.bio || null,
               city: row.city || null,
               age: row.age ? Number(row.age) : null,
-              is_fake: String(row.is_fake).trim().toLowerCase() === "true",
-              languages: row.languages
-                ? row.languages.split(",").map((l) => l.trim())
-                : [],
-              interests: row.interests
-                ? row.interests.split(",").map((i) => i.trim())
-                : [],
-              offeredTags: row.offeredTags
-                ? row.offeredTags.split(",").map((t) => t.trim())
-                : [],
-              lastLocation: {
-                coords: {
-                  type: "Point",
-                  coordinates: [
-                    parseFloat(row.lastLocation_longitude) || 0,
-                    parseFloat(row.lastLocation_latitude) || 0,
-                  ],
-                },
-                provider: row.lastLocation_type || null,
-              },
+              is_fake:
+                String(row.is_fake).trim().toLowerCase() === "true",
               is_active: true,
               register_type: "manual",
               login_type: "manual",
             });
 
+            console.log("💾 Saving user →", row.email);
             const savedUser = await user.save();
+            console.log("✅ USER SAVED ID:", savedUser._id);
 
-            services = JSON.parse(row.services || "[]");
+            // ✔ CREATE SERVICES
             const createdServices = [];
 
             for (const s of services) {
+              console.log("🔧 Creating service for:", row.email);
+
               const serviceData = {
-                title: s.title || "Untitled Service",
-                Language: s.Language || "English",
-                city: s.city || savedUser.city || "Unknown",
-                isFree: s.isFree === "true" || s.isFree === true,
-                price: s.price ? Number(s.price) : 0,
-                description: s.description || "No description",
+                title: s.title || "Untitled",
                 category: s.categoryId,
                 tags: s.selectedTags || [],
-                max_participants: s.max_participants
-                  ? Number(s.max_participants)
-                  : 1,
-                service_type: s.service_type || "one_time",
                 owner: savedUser._id,
-                location_name: s.location?.name || "Unknown",
-                location: {
-                  type: "Point",
-                  coordinates: [
-                    parseFloat(s.location?.longitude) || 0,
-                    parseFloat(s.location?.latitude) || 0,
-                  ],
-                },
+                image: s.image || null,
               };
-
-              if (s.service_type === "one_time" && s.date) {
-                serviceData.date = s.date;
-                serviceData.start_time = s.start_time;
-                serviceData.end_time = s.end_time;
-              }
-
-              if (s.service_type === "recurring" && Array.isArray(s.schedule)) {
-                serviceData.recurring_schedule = s.schedule.map((slot) => ({
-                  day: new Date(slot.date).toLocaleDateString("en-US", {
-                    weekday: "long",
-                  }),
-                  start_time: slot.start_time,
-                  end_time: slot.end_time,
-                  date: slot.date,
-                }));
-              } else if (s.service_type === "recurring" && s.date) {
-                serviceData.recurring_schedule = [
-                  {
-                    day: new Date(s.date).toLocaleDateString("en-US", {
-                      weekday: "long",
-                    }),
-                    start_time: s.start_time,
-                    end_time: s.end_time,
-                    date: s.date,
-                  },
-                ];
-              }
-              // ================= IMAGE LOGIC =================
-              // ================= IMAGE LOGIC (CSV - NO CLOUDINARY) =================
-              let serviceImage = null;
-
-              // CASE 1️⃣ CSV me image URL diya gaya hai
-              if (
-                s.image &&
-                typeof s.image === "string" &&
-                s.image.startsWith("http")
-              ) {
-                serviceImage = s.image.trim();
-                console.log("🖼 CSV service image URL found:", serviceImage);
-              }
-
-              // CASE 2️⃣ CSV me image nahi → category image fallback
-              if (!serviceImage) {
-                const category = await Category.findById(s.categoryId);
-                if (category?.image) {
-                  serviceImage = category.image;
-                  console.log(
-                    "🖼 No CSV image, using category image:",
-                    serviceImage
-                  );
-                } else {
-                  console.log("⚠️ No CSV image & no category image found");
-                }
-              }
-
-              // Assign image to service
-              serviceData.image = serviceImage;
-              // =========================================================
-
-              // =================================================
 
               const service = new Service(serviceData);
               const savedService = await service.save();
+              console.log("✅ SERVICE SAVED:", savedService._id);
+
               createdServices.push(savedService._id);
             }
 
@@ -748,21 +633,27 @@ exports.generateUsersFromCSV = async (req, res) => {
             await savedUser.save();
 
             createdUsers.push({
-              user: { id: savedUser._id, name: savedUser.name },
-              services: createdServices.length,
+              id: savedUser._id,
+              name: savedUser.name,
             });
+
+            console.log("🎉 USER COMPLETE:", row.email);
           } catch (err) {
-            console.error("❌ Error:", err.message);
+            console.log("🧨 USER SAVE FAIL:", row.email);
             skippedUsers.push({
               email: row.email,
-              reason: "Error in saving user/service",
+              reason: err.message,
             });
           }
         }
 
+        console.log("===== PROCESS FINISHED =====");
+        console.log("✔ CREATED:", createdUsers.length);
+        console.log("⏭ SKIPPED:", skippedUsers.length);
+
         return res.json({
-          success: true,
-          message: "CSV processed ✅",
+          isSuccess: true,
+          message: "CSV processed",
           createdCount: createdUsers.length,
           skippedCount: skippedUsers.length,
           createdUsers,
@@ -770,8 +661,12 @@ exports.generateUsersFromCSV = async (req, res) => {
         });
       });
   } catch (err) {
-    console.error("generateUsersFromCSV error:", err);
-    res.status(500).json({ success: false, error: err.message });
+    console.log("🧨 Fatal outer error");
+    return res.status(500).json({
+      isSuccess: false,
+      message: "Server error",
+      error: err.message,
+    });
   }
 };
 

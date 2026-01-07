@@ -87,7 +87,7 @@ const uploadCSV = multer({
 // 🏷 CATEGORY IMAGES (disk)
 const categoryImageStorage = multer.diskStorage({
   destination: function (req, file, cb) {
-    cb(null, "uploads/categories");
+    cb(null, "uploads/category_images");
   },
   filename: function (req, file, cb) {
     const uniqueName =

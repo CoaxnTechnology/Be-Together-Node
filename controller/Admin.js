@@ -137,7 +137,6 @@ exports.createCategory = async (req, res) => {
     let imageUrl = null;
     const base = process.env.BASE_URL;
 
-
     if (req.file) {
       imageUrl = `${base}/uploads/category_images/${req.file.filename}`;
       console.log("🖼 Category image saved:", imageUrl);
@@ -279,7 +278,7 @@ exports.updateCategory = async (req, res) => {
     const { id } = req.params;
     let { name, tags, order } = req.body;
 
-    const base = process.env.BASE_URL;   // ✔ BASE URL
+    const base = process.env.BASE_URL; // ✔ BASE URL
 
     if (!id) {
       return res
@@ -340,7 +339,7 @@ exports.updateCategory = async (req, res) => {
           "..",
           "uploads",
           "category_images",
-          path.basename(category.image)   // only file name
+          path.basename(category.image) // only file name
         );
 
         if (fs.existsSync(oldLocalPath)) {
@@ -383,7 +382,7 @@ exports.deleteCategory = async (req, res) => {
     }
 
     // Delete image from Cloudinary if exists
-// 🖼 DELETE CATEGORY IMAGE
+    // 🖼 DELETE CATEGORY IMAGE
     // =========================
     if (category.image) {
       const imagePath = path.join(
@@ -942,10 +941,13 @@ exports.editProfile = async (req, res) => {
 
       // delete old image if exists
       if (user.profile_image) {
+        const oldFile = path.basename(user.profile_image);
         const oldPath = path.join(
           __dirname,
-          "../",
-          user.profile_image.replace(/^\/+/, "")
+          "..",
+          "uploads",
+          "profile_images",
+          oldFile
         );
 
         if (fs.existsSync(oldPath)) {
@@ -953,8 +955,8 @@ exports.editProfile = async (req, res) => {
           console.log("🗑 Old profile image deleted");
         }
       }
-
-      user.profile_image = `/uploads/profile_images/${req.file.filename}`;
+      const base = process.env.BASE_URL;
+      user.profile_image = `${base}/uploads/profile_images/${req.file.filename}`;
     }
 
     // ---------- Languages, Interests, OfferedTags ----------

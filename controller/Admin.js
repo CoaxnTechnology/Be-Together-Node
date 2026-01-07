@@ -168,7 +168,6 @@ exports.createCategory = async (req, res) => {
     const newCategory = new Category({
       name,
       image: imageUrl,
-      imagePublicId,
       tags: finalTags,
       order: finalOrder,
     });
@@ -176,7 +175,7 @@ exports.createCategory = async (req, res) => {
       await newCategory.save();
     } catch (err) {
       // Rollback image if DB fails
-      if (imagePublicId) await cloudinary.uploader.destroy(imagePublicId);
+      //if (imagePublicId) await cloudinary.uploader.destroy(imagePublicId);
       throw err;
     }
 

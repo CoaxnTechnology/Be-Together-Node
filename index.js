@@ -42,7 +42,7 @@ if(!secret){
     return res.status(401).send("invalid");
   }
 
-  exec("bash /var/www/testing/api/deploy.sh > /dev/null 2>&1 &");
+  exec("bash /var/www/backend-uat/api/deploy.sh > /dev/null 2>&1 &");
 
   res.status(200).send("received");
 });

@@ -48,7 +48,7 @@ if(!secret){
 });
 app.post("/webhook/frontend", (req, res) => {
   console.log("🔥 FRONTEND DEPLOY HIT");
-  exec("bash /var/www/testing/admin/deploy.sh > /dev/null 2>&1 &");
+  exec("bash /var/www/frontend-uat-admin/deploy.sh > /dev/null 2>&1 &");
   res.send("received");
 });
 

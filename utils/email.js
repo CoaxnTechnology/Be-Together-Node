@@ -6,7 +6,7 @@ const path = require("path");
 // Create a reusable transporter object
 const transporter = nodemailer.createTransport({
   host: "smtp-relay.brevo.com",
-  port: 587,
+  port: 2525,
   secure: false, // TLS
   auth: {
     user: process.env.SMTP_EMAIL,      // 9f8e1f001@smtp-brevo.com

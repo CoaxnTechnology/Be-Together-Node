@@ -7,7 +7,7 @@ async function sendEmail({ to, subject, html }) {
       {
         sender: {
           name: "BeTogether",
-          email: "noreply@betogetherapp.com",
+          email: "coaxntechnology@gmail.com",
         },
         to: [{ email: to }],
         subject,

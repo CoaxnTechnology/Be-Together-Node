@@ -227,13 +227,8 @@ exports.register = async (req, res) => {
   } catch (err) {
     console.log("❌ STEP 33: Register Error:", err);
 
-    if (uploadedPublicId) {
-      try {
-        await cloudinary.uploader.destroy(uploadedPublicId);
-        console.log("🔵 STEP 34: Cleanup success");
-      } catch (e) {
-        console.log("❌ STEP 35: Cleanup failed", e);
-      }
+    if (typeof uploadedPublicId !== "undefined" && uploadedPublicId) {
+      await cloudinary.uploader.destroy(uploadedPublicId);
     }
 
     return res.status(500).json({ IsSucces: false, message: "Server error" });

@@ -1,7 +1,7 @@
+require("dotenv").config();
 const express = require("express");
 const path = require("path");
 const mongoose = require("mongoose");
-require("dotenv").config();
 const cors = require("cors");
 const authRoutes = require("./routes/authRoutes");
 const profileRoutes = require("./routes/profileRoutes");
@@ -22,7 +22,6 @@ const connectDB = require("./utils/connect");
 const app = express();
 const crypto = require("crypto");
 const { exec } = require("child_process");
-
 // --- KEEP RAW ONLY FOR GITHUB ---
 app.post("/webhook/github", express.raw({ type: "application/json" }), (req, res) => {
   console.log("🔥 BACKEND WEBHOOK HIT");

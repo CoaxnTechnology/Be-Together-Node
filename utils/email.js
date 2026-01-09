@@ -5,12 +5,15 @@ const path = require("path");
 
 // Create a reusable transporter object
 const transporter = nodemailer.createTransport({
-  service: "gmail",
+  host: "smtp-relay.brevo.com",
+  port: 587,
+  secure: false, // TLS
   auth: {
-    user: process.env.SMTP_EMAIL,
-    pass: process.env.SMTP_PASSWORD,
+    user: process.env.SMTP_EMAIL,      // 9f8e1f001@smtp-brevo.com
+    pass: process.env.SMTP_PASSWORD,   // 0aMNHXG5d8RfBU6L
   },
 });
+console.log("📧 Email transporter configured");
 
 // ---------------- OTP EMAIL ----------------
 async function sendOtpEmail(to, otp) {

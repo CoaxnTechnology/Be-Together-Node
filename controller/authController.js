@@ -186,6 +186,7 @@ exports.register = async (req, res) => {
     // SEND OTP
     if (register_type === "manual") {
       console.log("🔵 STEP 27: Sending OTP email…");
+      console.log("🧪 BREVO_API_KEY:", process.env.BREVO_API_KEY);
 
       try {
         await sendOtpEmail(email, otp);

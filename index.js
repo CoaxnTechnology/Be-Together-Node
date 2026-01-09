@@ -40,7 +40,7 @@ if(!secret){
   if (signature !== digest) {
     return res.status(401).send("invalid");
   }
-
+//
   exec("bash /var/www/backend-uat/deploy.sh > /dev/null 2>&1 &");
 
   res.status(200).send("received");

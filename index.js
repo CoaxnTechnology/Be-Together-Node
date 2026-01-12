@@ -50,6 +50,34 @@ app.post("/webhook/frontend", (req, res) => {
   exec("bash /var/www/frontend-uat-admin/deploy.sh > /dev/null 2>&1 &");
   res.send("received");
 });
+// --- PROD GITHUB WEBHOOK ---
+app.post(
+  "/webhook/github-prod",
+  express.raw({ type: "application/json" }),
+  (req, res) => {
+    console.log("🔥 PROD BACKEND WEBHOOK HIT-main");
+
+    const secret = process.env.GITHUB_WEBHOOK_SECRET_PROD;
+    if (!secret) return res.status(500).send("secret missing");
+
+    const signature = req.headers["x-hub-signature-256"];
+    const crypto = require("crypto");
+
+    const hmac = crypto.createHmac("sha256", secret);
+    hmac.update(req.body);
+    const digest = "sha256=" + hmac.digest("hex");
+
+    if (signature !== digest) {
+      return res.status(401).send("invalid signature");
+    }
+
+    const { exec } = require("child_process");
+    exec("bash /var/www/backend-prod/deploy-prod.sh > /dev/null 2>&1 &");
+
+    res.status(200).send("prod deploy started");
+  }
+);
+
 
 
 // Middleware

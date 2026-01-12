@@ -1,27 +1,36 @@
 // firebaseAdmin.js
 const admin = require("firebase-admin");
 
+let firebaseInitialized = false;
+
 if (!admin.apps.length) {
   if (!process.env.FIREBASE_SERVICE_ACCOUNT) {
-    throw new Error(
-      "FIREBASE_SERVICE_ACCOUNT environment variable is not set!"
-    );
+    console.warn("⚠️ FIREBASE_SERVICE_ACCOUNT not set, Firebase disabled");
+  } else {
+    try {
+      const serviceAccount = JSON.parse(
+        process.env.FIREBASE_SERVICE_ACCOUNT
+      );
+
+      // Fix newlines in private key
+      if (serviceAccount.private_key) {
+        serviceAccount.private_key =
+          serviceAccount.private_key.replace(/\\n/g, "\n");
+      }
+
+      admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount),
+      });
+
+      firebaseInitialized = true;
+      console.log("✅ Firebase Admin initialized successfully");
+    } catch (err) {
+      console.error("❌ Firebase init failed:", err.message);
+    }
   }
-
-  // Parse the service account JSON from environment variable
-  const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-
-  // Fix newlines in private_key (Vercel often strips real newlines)
-  if (serviceAccount.private_key) {
-    serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, "\n");
-  }
-
-  // Initialize Firebase Admin SDK
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount),
-  });
-
-  console.log("✅ Firebase Admin initialized successfully");
 }
 
-module.exports = admin;
+module.exports = {
+  admin,
+  firebaseInitialized,
+};

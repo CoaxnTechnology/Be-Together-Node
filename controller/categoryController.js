@@ -1,5 +1,4 @@
 // controllers/categoryController.js
-require("dotenv").config();
 const Category = require("../model/Category");
 const { getFullImageUrl } = require("../utils/image"); // adjust path if necessary
 const cloudinary = require("cloudinary").v2;

@@ -3,9 +3,24 @@ const router = express.Router();
 const serviceController = require("../controller/serviceController");
 const auth = require("../Middleware/authMiddleware");
 const checkServiceRestrictionJs = require("../Middleware/checkServiceRestriction");
+const path = require("path");
 //const authMiddleware = require("../Middleware/authMiddleware");
 const multer = require("multer");
-const storage = multer.memoryStorage();
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, "uploads/service_images");
+  },
+  filename: function (req, file, cb) {
+    const uniqueName =
+      "service_" +
+      Date.now() +
+      "_" +
+      Math.round(Math.random() * 1e9) +
+      path.extname(file.originalname);
+    cb(null, uniqueName);
+  },
+});
+
 const upload = multer({
   storage,
   limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB limit

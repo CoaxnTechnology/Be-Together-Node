@@ -12,6 +12,8 @@ const Admin = require("../model/Admin");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const fs = require("fs");
+const path = require("path");
+
 const csv = require("csv-parser");
 const Booking = require("../model/Booking");
 const Payment = require("../model/Payment");
@@ -132,19 +134,12 @@ exports.createCategory = async (req, res) => {
     }
 
     // Upload image if provided
-    let imageUrl = null,
-      imagePublicId = null;
+    let imageUrl = null;
+    const base = process.env.BASE_URL;
+
     if (req.file) {
-      try {
-        const uploadResult = await uploadFromBuffer(req.file.buffer);
-        imageUrl = uploadResult.secure_url;
-        imagePublicId = uploadResult.public_id;
-      } catch (err) {
-        console.error("Image upload error:", err);
-        return res
-          .status(500)
-          .json({ isSuccess: false, message: "Image upload failed" });
-      }
+      imageUrl = `${base}/uploads/category_images/${req.file.filename}`;
+      console.log("🖼 Category image saved:", imageUrl);
     }
 
     // AI tags
@@ -175,7 +170,6 @@ exports.createCategory = async (req, res) => {
     const newCategory = new Category({
       name,
       image: imageUrl,
-      imagePublicId,
       tags: finalTags,
       order: finalOrder,
     });
@@ -183,7 +177,7 @@ exports.createCategory = async (req, res) => {
       await newCategory.save();
     } catch (err) {
       // Rollback image if DB fails
-      if (imagePublicId) await cloudinary.uploader.destroy(imagePublicId);
+      //if (imagePublicId) await cloudinary.uploader.destroy(imagePublicId);
       throw err;
     }
 
@@ -284,6 +278,8 @@ exports.updateCategory = async (req, res) => {
     const { id } = req.params;
     let { name, tags, order } = req.body;
 
+    const base = process.env.BASE_URL; // ✔ BASE URL
+
     if (!id) {
       return res
         .status(400)
@@ -296,6 +292,8 @@ exports.updateCategory = async (req, res) => {
         .status(404)
         .json({ isSuccess: false, message: "Category not found" });
     }
+
+    // 🔢 ORDER SHIFTING LOGIC
     if (order && Number(order) !== category.order) {
       const newOrder = Number(order);
       const oldOrder = category.order;
@@ -315,10 +313,10 @@ exports.updateCategory = async (req, res) => {
       category.order = newOrder;
     }
 
-    // ✅ Update name and tags safely
+    // ➡ NAME
     category.name = name || category.name;
 
-    // ✅ Convert tags string (like '["spa"]') to array
+    // ➡ TAGS CONVERT
     if (typeof tags === "string") {
       try {
         category.tags = JSON.parse(tags);
@@ -329,19 +327,29 @@ exports.updateCategory = async (req, res) => {
       category.tags = tags || category.tags;
     }
 
-    // ✅ Handle image update
+    // 🖼 IMAGE UPDATE (LOCAL + FULL URL)
     if (req.file) {
-      if (category.imagePublicId) {
-        try {
-          await cloudinary.uploader.destroy(category.imagePublicId);
-        } catch (err) {
-          console.error("Failed to delete old image from Cloudinary:", err);
+      console.log("🖼 New category image uploaded:", req.file.filename);
+
+      // delete old local file
+      if (category.image) {
+        const oldLocalPath = path.join(
+          __dirname,
+          "..",
+          "..",
+          "uploads",
+          "category_images",
+          path.basename(category.image) // only file name
+        );
+
+        if (fs.existsSync(oldLocalPath)) {
+          fs.unlinkSync(oldLocalPath);
+          console.log("🗑 Old category image deleted");
         }
       }
 
-      const uploadResult = await uploadFromBuffer(req.file.buffer);
-      category.image = uploadResult.secure_url;
-      category.imagePublicId = uploadResult.public_id;
+      // ✔ STORE FULL URL
+      category.image = `${base}/uploads/category_images/${req.file.filename}`;
     }
 
     await category.save();
@@ -352,7 +360,7 @@ exports.updateCategory = async (req, res) => {
       data: category,
     });
   } catch (err) {
-    console.error("Error updating category:", err);
+    console.error("Error updating category:", err.message);
     return res.status(500).json({
       isSuccess: false,
       message: "Internal server error",
@@ -374,14 +382,22 @@ exports.deleteCategory = async (req, res) => {
     }
 
     // Delete image from Cloudinary if exists
-    if (category.imagePublicId) {
-      try {
-        await cloudinary.uploader.destroy(category.imagePublicId);
-      } catch (err) {
-        console.error("Failed to delete image from Cloudinary:", err);
+    // 🖼 DELETE CATEGORY IMAGE
+    // =========================
+    if (category.image) {
+      const imagePath = path.join(
+        __dirname,
+        "../",
+        category.image.replace(/^\/+/, "")
+      );
+
+      if (fs.existsSync(imagePath)) {
+        fs.unlinkSync(imagePath);
+        console.log("🗑 Category image deleted:", imagePath);
+      } else {
+        console.log("⚠️ Category image file not found:", imagePath);
       }
     }
-
     await Category.findByIdAndDelete(id);
 
     return res.status(200).json({
@@ -506,34 +522,27 @@ function isValidImageUrl(url) {
   );
 }
 
-// ✅ Upload image URL to Cloudinary
-async function uploadImageFromUrlToCloudinary(imageUrl, folder) {
-  const response = await axios.get(imageUrl, {
-    responseType: "arraybuffer",
-  });
-
-  return new Promise((resolve, reject) => {
-    const uploadStream = cloudinary.uploader.upload_stream(
-      { folder },
-      (error, result) => {
-        if (error) return reject(error);
-        resolve(result);
-      }
-    );
-
-    streamifier.createReadStream(response.data).pipe(uploadStream);
-  });
-}
-
 exports.generateUsersFromCSV = async (req, res) => {
   try {
+    console.log("\n===== 🚀 generateUsersFromCSV START =====");
+
+    // ---------- FILE CHECK ----------
     if (!req.file) {
+      console.log("❌ NO CSV FILE IN REQUEST");
       return res.status(400).json({
-        success: false,
+        isSuccess: false,
         message: "No CSV file uploaded",
       });
     }
 
+    console.log("📂 CSV FILE RECEIVED =", {
+      originalName: req.file.originalname,
+      sizeBytes: req.file.buffer?.length,
+      mimetype: req.file.mimetype,
+    });
+
+    // ---------- CREATE STREAM ----------
+    console.log("📡 CREATING READABLE STREAM FROM BUFFER...");
     const bufferStream = new Readable();
     bufferStream.push(req.file.buffer);
     bufferStream.push(null);
@@ -542,245 +551,213 @@ exports.generateUsersFromCSV = async (req, res) => {
     const createdUsers = [];
     const skippedUsers = [];
 
-    bufferStream
-      .pipe(csv())
-      .on("data", (row) => usersData.push(row))
-      .on("end", async () => {
-        for (const row of usersData) {
-          try {
-            // ✅ Check Email Duplicate
-            const existingUser = await User.findOne({ email: row.email });
-            if (existingUser) {
-              console.warn(`⚠️ Email exists: ${row.email}`);
-              skippedUsers.push({
-                email: row.email,
-                reason: "Duplicate Email",
-              });
-              continue; // Skip this user
-            }
-            // 1️⃣ VALIDATE CATEGORY + TAGS BASED ON YOUR SCHEMA
-            // ---------------------------------------------------
-            let services = [];
+    // ---------- PARSE CSV ----------
+    console.log("📡 START CSV PARSE PIPE...");
 
-            // Try parsing services JSON
-            try {
-              services = JSON.parse(row.services || "[]");
-            } catch (err) {
-              skippedUsers.push({
-                email: row.email,
-                reason: "Invalid services JSON",
-              });
-              continue;
-            }
+    await new Promise((resolve, reject) => {
+      bufferStream
+        .pipe(csv())
+        .on("data", (row) => {
+          console.log("➡ ROW PARSED RAW =", JSON.stringify(row));
+          usersData.push(row);
+        })
+        .on("end", () => {
+          console.log("===== ✅ CSV PARSE FINISHED =====");
+          console.log("🔢 TOTAL ROWS PARSED =", usersData.length);
+          resolve();
+        })
+        .on("error", (err) => {
+          console.log("❌ CSV PIPE ERROR =", err.message);
+          reject(err);
+        });
+    });
 
-            let isValidUser = true;
-            // let isValidUser = true;
+    // ---------- PROCESS EACH USER ----------
+    console.log("🧨 START PROCESS LOOP FOR USERS");
 
-            for (const s of services) {
-              // ✅ Check categoryId exists
-              if (!s.categoryId) {
-                isValidUser = false;
-                skippedUsers.push({
-                  email: row.email,
-                  reason: "Missing categoryId in service",
-                });
-                break;
-              }
+    for (const row of usersData) {
+      console.log("\n🧑 PROCESS USER =", row.email);
 
-              // 🔍 Check category exists in DB using correct type (string)
-              const category = await Category.findById(s.categoryId);
-              if (!category) {
-                isValidUser = false;
-                skippedUsers.push({
-                  email: row.email,
-                  reason: `Invalid CategoryId: ${s.categoryId}`,
-                });
-                break;
-              }
+      try {
+        // ---------- DUPLICATE CHECK ----------
+        console.log("🔍 CHECK DUPLICATE EMAIL...");
+        const existingUser = await User.findOne({ email: row.email });
 
-              // 🔍 Validate tags inside category.tags[]
-              if (Array.isArray(s.selectedTags)) {
-                for (const tag of s.selectedTags) {
-                  if (!category.tags.includes(tag)) {
-                    isValidUser = false;
-                    skippedUsers.push({
-                      email: row.email,
-                      reason: `Tag '${tag}' does not exist in Category '${category.name}'`,
-                    });
-                    break;
-                  }
-                }
-              }
+        if (existingUser) {
+          console.log("⏭ SKIPPED → DUPLICATE EMAIL =", row.email);
+          skippedUsers.push({
+            email: row.email,
+            reason: "Duplicate Email",
+          });
+          continue;
+        }
 
-              if (!isValidUser) break;
-            }
+        // ---------- PARSE SERVICES JSON ----------
+        console.log("📦 PARSE services JSON FIELD...");
 
-            // If category/tags invalid → skip user
-            if (!isValidUser) continue;
+        let services = [];
+        try {
+          services = JSON.parse(row.services || "[]");
+          console.log("📦 SERVICES PARSE OK COUNT =", services.length);
+        } catch (err) {
+          console.log("❌ SERVICES JSON BAD FOR USER =", row.email);
+          skippedUsers.push({
+            email: row.email,
+            reason: "Invalid services JSON",
+          });
+          continue;
+        }
 
-            const user = new User({
-              name: row.name,
-              email: row.email,
-              mobile: row.mobile || null,
-              profile_image: row.profile_image || null,
-              bio: row.bio || null,
-              city: row.city || null,
-              age: row.age ? Number(row.age) : null,
-              is_fake: String(row.is_fake).trim().toLowerCase() === "true",
-              languages: row.languages
-                ? row.languages.split(",").map((l) => l.trim())
-                : [],
-              interests: row.interests
-                ? row.interests.split(",").map((i) => i.trim())
-                : [],
-              offeredTags: row.offeredTags
-                ? row.offeredTags.split(",").map((t) => t.trim())
-                : [],
-              lastLocation: {
-                coords: {
-                  type: "Point",
-                  coordinates: [
-                    parseFloat(row.lastLocation_longitude) || 0,
-                    parseFloat(row.lastLocation_latitude) || 0,
-                  ],
-                },
-                provider: row.lastLocation_type || null,
-              },
-              is_active: true,
-              register_type: "manual",
-              login_type: "manual",
-            });
+        // ---------- CREATE USER ----------
+        console.log("💾 CREATE USER OBJECT...");
+        const user = new User({
+          name: row.name?.trim(),
+          email: row.email?.trim(),
+          mobile: row.mobile || null,
+          profile_image: row.profile_image || null,
+          bio: row.bio || null,
+          city: row.city || null,
+          age: row.age ? Number(row.age) : null,
+          is_fake: String(row.is_fake).trim().toLowerCase() === "true",
+          is_active: true,
+          register_type: "manual",
+          login_type: "manual",
+        });
 
-            const savedUser = await user.save();
+        console.log("💾 SAVING USER →", row.email);
+        const savedUser = await user.save();
+        console.log("🎉 USER SAVED ID =", savedUser._id);
 
-            services = JSON.parse(row.services || "[]");
-            const createdServices = [];
+        // ---------- CREATE SERVICES ----------
+        const createdServices = [];
 
-            for (const s of services) {
-              const serviceData = {
-                title: s.title || "Untitled Service",
-                Language: s.Language || "English",
-                city: s.city || savedUser.city || "Unknown",
-                isFree: s.isFree === "true" || s.isFree === true,
-                price: s.price ? Number(s.price) : 0,
-                description: s.description || "No description",
-                category: s.categoryId,
-                tags: s.selectedTags || [],
-                max_participants: s.max_participants
-                  ? Number(s.max_participants)
-                  : 1,
-                service_type: s.service_type || "one_time",
-                owner: savedUser._id,
-                location_name: s.location?.name || "Unknown",
-                location: {
-                  type: "Point",
-                  coordinates: [
-                    parseFloat(s.location?.longitude) || 0,
-                    parseFloat(s.location?.latitude) || 0,
-                  ],
-                },
-              };
+        for (const s of services) {
+          console.log("\n🔧 START SERVICE FOR USER =", row.email);
 
-              if (s.service_type === "one_time" && s.date) {
-                serviceData.date = s.date;
-                serviceData.start_time = s.start_time;
-                serviceData.end_time = s.end_time;
-              }
+          // ---------- VALIDATE CATEGORY ----------
+          console.log("🔍 VALIDATE CATEGORY ID =", s.categoryId);
+          const category = await Category.findById(s.categoryId);
 
-              if (s.service_type === "recurring" && Array.isArray(s.schedule)) {
-                serviceData.recurring_schedule = s.schedule.map((slot) => ({
-                  day: new Date(slot.date).toLocaleDateString("en-US", {
-                    weekday: "long",
-                  }),
-                  start_time: slot.start_time,
-                  end_time: slot.end_time,
-                  date: slot.date,
-                }));
-              } else if (s.service_type === "recurring" && s.date) {
-                serviceData.recurring_schedule = [
-                  {
-                    day: new Date(s.date).toLocaleDateString("en-US", {
-                      weekday: "long",
-                    }),
-                    start_time: s.start_time,
-                    end_time: s.end_time,
-                    date: s.date,
-                  },
-                ];
-              }
-              // ================= IMAGE LOGIC =================
-              let serviceImage = null;
-              let serviceImagePublicId = null;
-
-              // 🔹 Case 1: CSV service image URL provided
-              if (s.image && isValidImageUrl(s.image)) {
-                try {
-                  const uploadResult = await uploadImageFromUrlToCloudinary(
-                    s.image,
-                    "service_images"
-                  );
-                  serviceImage = uploadResult.secure_url;
-                  serviceImagePublicId = uploadResult.public_id;
-                } catch (err) {
-                  console.error("❌ Service image upload failed:", err.message);
-                }
-              }
-
-              // 🔹 Case 2: No image → use category image
-              if (!serviceImage) {
-                const category = await Category.findById(s.categoryId);
-                if (category?.image) {
-                  serviceImage = category.image;
-                  serviceImagePublicId = category.imagePublicId || null;
-                }
-              }
-
-              // 🔹 Assign to serviceData
-              serviceData.image = serviceImage;
-              serviceData.imagePublicId = serviceImagePublicId;
-              // =================================================
-
-              const service = new Service(serviceData);
-              const savedService = await service.save();
-              createdServices.push(savedService._id);
-            }
-
-            savedUser.services = createdServices;
+          if (!category) {
+            console.log("❌ SKIP USER → CATEGORY INVALID =", s.categoryId);
+            savedUser.is_active = false;
             await savedUser.save();
 
-            createdUsers.push({
-              user: { id: savedUser._id, name: savedUser.name },
-              services: createdServices.length,
-            });
-          } catch (err) {
-            console.error("❌ Error:", err.message);
             skippedUsers.push({
               email: row.email,
-              reason: "Error in saving user/service",
+              reason: `Invalid CategoryId ${s.categoryId}`,
             });
+
+            throw new Error("Category validation failed");
+          }
+
+          // ---------- BUILD SERVICE DATA ----------
+          const base = process.env.BASE_URL || "";
+
+          const serviceData = {
+            title: s.title || "Untitled Service",
+            Language: s.Language || category.Language || "English",
+            category: category._id,
+            tags: s.selectedTags || [],
+            owner: savedUser._id,
+            city: s.city || savedUser.city || null,
+
+            location_name: s.location?.name || null,
+
+            location: {
+              type: "Point",
+              coordinates: [
+                parseFloat(s.location?.longitude),
+                parseFloat(s.location?.latitude),
+              ],
+            },
+
+            image: null,
+          };
+
+          // ---------- IMAGE LOGIC ----------
+          console.log("🖼 CHECK CSV SERVICE IMAGE...");
+
+          if (s.image && typeof s.image === "string" && s.image.startsWith("http")) {
+            serviceData.image = s.image.trim();
+            console.log("✔ CSV IMAGE URL USED =", serviceData.image);
+          } else if (category.image) {
+            serviceData.image = category.image;
+            console.log("✔ FALLBACK CATEGORY IMAGE =", serviceData.image);
+          }
+
+          console.log("📦 FINAL SERVICE DATA =", JSON.stringify(serviceData));
+
+          // ---------- SAVE SERVICE ----------
+          console.log("💾 SAVING SERVICE...");
+          const service = new Service(serviceData);
+
+          try {
+            const savedService = await service.save();
+            console.log("🎉 SERVICE SAVED ID =", savedService._id);
+
+            createdServices.push(savedService._id);
+          } catch (err) {
+            console.log("❌ SERVICE SAVE ERROR =", err.message);
+            console.log("🧨 SERVICE VALIDATION ERROR OBJECT =", err);
+
+            // mark user inactive
+            savedUser.is_active = false;
+            await savedUser.save();
+
+            skippedUsers.push({
+              email: row.email,
+              reason: err.message,
+            });
+
+            throw err;
           }
         }
 
-        bufferStream
-          .pipe(csv())
-          .on("data", (row) => {
-            bufferStream.pause(); // pause stream
-            processRow(row).finally(() => bufferStream.resume()); // resume after processing
-          })
-          .on("end", () => {
-            res.json({
-              success: true,
-              message: "CSV processed ✅",
-              createdCount: createdUsers.length,
-              skippedCount: skippedUsers.length,
-              createdUsers,
-              skippedUsers,
-            });
-          });
-      });
+        // ---------- ATTACH SERVICES TO USER ----------
+        savedUser.services = createdServices;
+        await savedUser.save();
+
+        createdUsers.push({
+          id: savedUser._id,
+          name: savedUser.name,
+          servicesCreated: createdServices.length,
+        });
+
+        console.log("🎉 USER + SERVICES COMPLETE =", row.email);
+
+      } catch (err) {
+        console.log("⏭ USER SKIPPED DUE ERROR =", row.email);
+        console.log("❌ ERROR REASON =", err.message);
+
+        skippedUsers.push({
+          email: row.email,
+          reason: err.message,
+        });
+      }
+    }
+
+    console.log("\n===== ✅ PROCESS FINISHED =====");
+    console.log("✔ CREATED USERS =", createdUsers.length);
+    console.log("⏭ SKIPPED USERS =", skippedUsers.length);
+
+    return res.json({
+      isSuccess: true,
+      message: "CSV processed with console",
+      createdCount: createdUsers.length,
+      skippedCount: skippedUsers.length,
+      createdUsers,
+      skippedUsers,
+    });
+
   } catch (err) {
-    console.error("generateUsersFromCSV error:", err);
-    res.status(500).json({ success: false, error: err.message });
+    console.log("🧨 FATAL OUTER ERROR =", err.message);
+
+    return res.status(500).json({
+      isSuccess: false,
+      message: "Server error",
+      error: err.message,
+    });
   }
 };
 
@@ -900,50 +877,7 @@ exports.deleteAllFakeUsers = async (req, res) => {
   }
 };
 
-// ---------------- UPDATE Profile ----------------
-
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-});
-
-function uploadBufferToCloudinary(
-  buffer,
-  folder = "profile_images",
-  publicId = null
-) {
-  return new Promise((resolve, reject) => {
-    const opts = { folder, resource_type: "image", overwrite: false };
-    if (publicId) opts.public_id = publicId;
-
-    const uploadStream = cloudinary.uploader.upload_stream(
-      opts,
-      (err, result) => {
-        if (err) return reject(err);
-        resolve(result);
-      }
-    );
-    streamifier.createReadStream(buffer).pipe(uploadStream);
-  });
-}
-
-function extractPublicIdFromCloudinaryUrl(url) {
-  if (!url) return null;
-  const m =
-    url.match(/\/upload\/(?:.*\/)?v\d+\/(.+)\.[^/.]+$/) ||
-    url.match(/\/upload\/(.+)\.[^/.]+$/);
-  return m ? decodeURIComponent(m[1]) : null;
-}
-
-async function deleteCloudinaryImage(publicId) {
-  if (!publicId) return;
-  try {
-    await cloudinary.uploader.destroy(publicId, { resource_type: "image" });
-  } catch (err) {
-    console.error("deleteCloudinaryImage error:", err);
-  }
-}
+// ---------------- UPDATE Profile ---------------
 
 function escapeRegExp(str) {
   return String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -988,24 +922,27 @@ exports.editProfile = async (req, res) => {
     if (age !== undefined) user.age = Number(age);
 
     // ---------- Image Upload ----------
-    if (req.file?.buffer) {
-      const oldPublicId = user.profile_image_public_id;
-      const publicId = `user_${Date.now()}_${Math.random()
-        .toString(36)
-        .slice(2, 8)}`;
-      const result = await uploadBufferToCloudinary(
-        req.file.buffer,
-        "profile_images",
-        publicId
-      );
-      //console.log("Cloudinary upload result:", result);
-      user.profile_image = result.secure_url;
-      user.profile_image_public_id = result.public_id;
+    if (req.file) {
+      console.log("🖼 New profile image uploaded:", req.file.filename);
 
-      // Delete old image
-      if (oldPublicId && oldPublicId !== result.public_id) {
-        await deleteCloudinaryImage(oldPublicId);
+      // delete old image if exists
+      if (user.profile_image) {
+        const oldFile = path.basename(user.profile_image);
+        const oldPath = path.join(
+          __dirname,
+          "..",
+          "uploads",
+          "profile_images",
+          oldFile
+        );
+
+        if (fs.existsSync(oldPath)) {
+          fs.unlinkSync(oldPath);
+          console.log("🗑 Old profile image deleted");
+        }
       }
+      const base = process.env.BASE_URL;
+      user.profile_image = `${base}/uploads/profile_images/${req.file.filename}`;
     }
 
     // ---------- Languages, Interests, OfferedTags ----------
@@ -1060,7 +997,7 @@ exports.editProfile = async (req, res) => {
         id: user._id,
         name: user.name,
         email: user.email,
-        profile_image: user.profile_image,
+        profile_image: getFullImageUrl(user.profile_image),
         bio: user.bio,
         city: user.city,
         languages: user.languages || [],
@@ -1305,34 +1242,36 @@ exports.updateService = async (req, res) => {
     // =========================
     // 🖼 IMAGE
     // =========================
-    if (req.file && req.file.buffer) {
-      if (service.imagePublicId) {
+    // CASE 1️⃣ New image uploaded
+    if (req.file) {
+      console.log("🖼 New image uploaded");
+
+      if (service.image && service.image.includes("/uploads/service_images/")) {
         try {
-          await cloudinary.uploader.destroy(service.imagePublicId);
+          const oldPath = service.image.replace(process.env.BASE_URL, "");
+          const fullOldPath = path.join(process.cwd(), oldPath);
+
+          if (fs.existsSync(fullOldPath)) {
+            fs.unlinkSync(fullOldPath);
+            console.log("🗑 Old service image deleted");
+          }
         } catch (err) {
-          console.log("Old image delete failed:", err.message);
+          console.log("Old image delete failed (non-fatal):", err.message);
         }
       }
 
-      const uploadResult = await uploadBufferToCloudinary(
-        req.file.buffer,
-        "service_images"
-      );
+      updatePayload.image = `${process.env.BASE_URL}/uploads/service_images/${req.file.filename}`;
+    }
 
-      updatePayload.image = uploadResult.secure_url;
-      updatePayload.imagePublicId = uploadResult.public_id;
-    } else if (body.removeImage === true || body.removeImage === "true") {
-      if (service.imagePublicId) {
-        try {
-          await cloudinary.uploader.destroy(service.imagePublicId);
-        } catch (err) {}
-      }
+    // CASE 2️⃣ removeImage → category image
+    else if (body.removeImage === true || body.removeImage === "true") {
+      console.log("🖼 Image removed → using category image");
 
       const serviceCategory = await Category.findById(service.category);
       updatePayload.image = serviceCategory?.image || null;
-      updatePayload.imagePublicId = serviceCategory?.imagePublicId || null;
     }
 
+    // CASE 3️⃣ No image change → do nothing
     // =========================
     // ✅ UPDATE
     // =========================
@@ -1360,7 +1299,9 @@ exports.updateService = async (req, res) => {
 // Admin Login
 const { createAccessToken } = require("../utils/jwt");
 const { sendServiceForceDeletedEmail } = require("../utils/email");
-const { sendServiceForceDeletedNotification } = require("./notificationController");
+const {
+  sendServiceForceDeletedNotification,
+} = require("./notificationController");
 
 exports.loginAdmin = async (req, res) => {
   const { email, password } = req.body;
@@ -1724,9 +1665,7 @@ exports.adminForceDeleteService = async (req, res) => {
 
       // CUSTOMER EMAILS
       if (bookings.length > 0) {
-        customers = bookings
-          .map((b) => b.user)
-          .filter(Boolean);
+        customers = bookings.map((b) => b.user).filter(Boolean);
 
         for (const customer of customers) {
           await sendServiceForceDeletedEmail(
@@ -1747,10 +1686,7 @@ exports.adminForceDeleteService = async (req, res) => {
         service,
       });
     } catch (notifyErr) {
-      console.error(
-        "📧/🔔 Email or Notification failed:",
-        notifyErr.message
-      );
+      console.error("📧/🔔 Email or Notification failed:", notifyErr.message);
     }
 
     // ===============================

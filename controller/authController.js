@@ -14,42 +14,8 @@ const cloudinary = require("cloudinary").v2;
 const streamifier = require("streamifier");
 const multer = require("multer"); // for MulterError checks
 
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-});
-
-function uploadBufferToCloudinary(
-  buffer,
-  folder = "profile_images",
-  publicId = null
-) {
-  return new Promise((resolve, reject) => {
-    const opts = {
-      folder,
-      resource_type: "image",
-      overwrite: false,
-      use_filename: false,
-    };
-    if (publicId) opts.public_id = publicId;
-
-    const uploadStream = cloudinary.uploader.upload_stream(
-      opts,
-      (error, result) => {
-        if (error) return reject(error);
-        resolve(result);
-      }
-    );
-
-    streamifier.createReadStream(buffer).pipe(uploadStream);
-  });
-}
-
 // ---------------- REGISTER ----------------
 exports.register = async (req, res) => {
-  let uploadedPublicId = null;
-
   console.log("🔵 STEP 1: register() called");
 
   try {
@@ -182,32 +148,14 @@ exports.register = async (req, res) => {
 
     let profileImageUrl = null;
 
+    const baseUrl = process.env.BASE_URL;
+
     if (req.body.profile_image) {
-      console.log("🔵 STEP 20: profile_image from body");
-      profileImageUrl = String(req.body.profile_image).trim() || null;
-    } else if (req.file && req.file.buffer) {
-      console.log("🔵 STEP 21: Uploading image to Cloudinary…");
-
-      try {
-        const publicId = `user_${Date.now()}_${Math.random()
-          .toString(36)
-          .slice(2, 8)}`;
-
-        const result = await uploadBufferToCloudinary(
-          req.file.buffer,
-          "profile_images",
-          publicId
-        );
-
-        uploadedPublicId = result.public_id;
-        profileImageUrl = result.secure_url;
-
-        console.log("🔵 STEP 22: Cloudinary upload success:", profileImageUrl);
-      } catch (uploadErr) {
-        console.log("❌ STEP 23: Image upload failed:", uploadErr);
-      }
+      profileImageUrl = String(req.body.profile_image).trim();
+    } else if (req.file) {
+      profileImageUrl = `${baseUrl}/uploads/profile_images/${req.file.filename}`;
     }
-
+    console.log("🔵 STEP 20: Profile image URL:", profileImageUrl);
     // CREATE USER
     console.log("🔵 STEP 24: Creating new user document…");
 
@@ -238,6 +186,7 @@ exports.register = async (req, res) => {
     // SEND OTP
     if (register_type === "manual") {
       console.log("🔵 STEP 27: Sending OTP email…");
+      console.log("🧪 BREVO_API_KEY:", process.env.BREVO_API_KEY);
 
       try {
         await sendOtpEmail(email, otp);
@@ -279,19 +228,13 @@ exports.register = async (req, res) => {
   } catch (err) {
     console.log("❌ STEP 33: Register Error:", err);
 
-    if (uploadedPublicId) {
-      try {
-        await cloudinary.uploader.destroy(uploadedPublicId);
-        console.log("🔵 STEP 34: Cleanup success");
-      } catch (e) {
-        console.log("❌ STEP 35: Cleanup failed", e);
-      }
+    if (typeof uploadedPublicId !== "undefined" && uploadedPublicId) {
+      await cloudinary.uploader.destroy(uploadedPublicId);
     }
 
     return res.status(500).json({ IsSucces: false, message: "Server error" });
   }
 };
-
 
 // ---------------- VERIFY OTP (REGISTER) ----------------
 exports.verifyOtpRegister = async (req, res) => {
@@ -389,12 +332,11 @@ exports.login = async (req, res) => {
       profile_image,
     } = body;
 
-
-
-    
     if (!email) {
       console.log("❌ Email missing in request");
-      return res.status(400).json({ IsSucces: false, message: "Email required" });
+      return res
+        .status(400)
+        .json({ IsSucces: false, message: "Email required" });
     }
 
     // Use email directly without converting to lowercase
@@ -407,20 +349,29 @@ exports.login = async (req, res) => {
 
       if (!user) {
         console.log("❌ Manual login failed: user not found");
-        return res.status(404).json({ IsSucces: false, message: "User not found" });
+        return res
+          .status(404)
+          .json({ IsSucces: false, message: "User not found" });
       }
 
       if (!user.hashed_password || !password) {
         console.log("❌ Password missing for manual login");
-        return res.status(400).json({ IsSucces: false, message: "Password required" });
+        return res
+          .status(400)
+          .json({ IsSucces: false, message: "Password required" });
       }
 
-      const valid = await bcrypt.compare(String(password), user.hashed_password);
+      const valid = await bcrypt.compare(
+        String(password),
+        user.hashed_password
+      );
       console.log("🔑 Password valid?", valid);
 
       if (!valid) {
         console.log("❌ Manual login failed: invalid password");
-        return res.status(401).json({ IsSucces: false, message: "Invalid password" });
+        return res
+          .status(401)
+          .json({ IsSucces: false, message: "Invalid password" });
       }
 
       const { otp, expiry } = generateOTP();
@@ -481,15 +432,20 @@ exports.login = async (req, res) => {
         console.log("🔄 Existing user found:", user._id);
 
         if (user.register_type === "manual") {
-          console.log("❌ Conflict: existing manual registration prevents Google login");
+          console.log(
+            "❌ Conflict: existing manual registration prevents Google login"
+          );
           return res.status(409).json({
             IsSucces: false,
-            message: "Account exists with manual registration. Use manual login.",
+            message:
+              "Account exists with manual registration. Use manual login.",
           });
         }
 
         if (!user.name || user.name === "No Name") {
-          console.log(`✏️ Updating user name from '${user.name}' to '${userName}'`);
+          console.log(
+            `✏️ Updating user name from '${user.name}' to '${userName}'`
+          );
           user.name = userName;
         }
 
@@ -535,15 +491,14 @@ exports.login = async (req, res) => {
     }
 
     console.log("❌ Invalid login_type:", login_type);
-    return res.status(400).json({ IsSucces: false, message: "Invalid login_type" });
-
+    return res
+      .status(400)
+      .json({ IsSucces: false, message: "Invalid login_type" });
   } catch (err) {
     console.error("❌ Login Error:", err);
     return res.status(500).json({ IsSucces: false, message: "Server error" });
   }
 };
-
-
 
 // ---------------- VERIFY OTP (LOGIN) ----------------
 exports.verifyOtpLogin = async (req, res) => {
@@ -563,9 +518,7 @@ exports.verifyOtpLogin = async (req, res) => {
 
     if (!otp) {
       console.log("❌ STEP 4: OTP missing");
-      return res
-        .status(400)
-        .json({ IsSucces: false, message: "OTP required" });
+      return res.status(400).json({ IsSucces: false, message: "OTP required" });
     }
 
     console.log("🟦 STEP 5: Checking user in DB");
@@ -601,9 +554,7 @@ exports.verifyOtpLogin = async (req, res) => {
 
     if (String(user.otp_code) !== String(otp)) {
       console.log("❌ STEP 13: OTP not matched");
-      return res
-        .status(400)
-        .json({ IsSucces: false, message: "Invalid OTP" });
+      return res.status(400).json({ IsSucces: false, message: "Invalid OTP" });
     }
 
     console.log("🟦 STEP 14: OTP matched successfully");
@@ -639,7 +590,6 @@ exports.verifyOtpLogin = async (req, res) => {
         otp_verified: user.otp_verified,
       },
     });
-
   } catch (err) {
     console.log("❌ STEP 18: verifyOtpLogin Error:", err);
     return res.status(500).json({ IsSucces: false, message: "Server error" });
@@ -905,12 +855,16 @@ exports.logout = async (req, res) => {
   try {
     const { email } = req.body;
     if (!email) {
-      return res.status(400).json({ IsSucces: false, message: "Email required" });
+      return res
+        .status(400)
+        .json({ IsSucces: false, message: "Email required" });
     }
 
     const user = await User.findOne({ email: String(email).toLowerCase() });
     if (!user) {
-      return res.status(404).json({ IsSucces: false, message: "User not found" });
+      return res
+        .status(404)
+        .json({ IsSucces: false, message: "User not found" });
     }
 
     // Clear all FCM tokens

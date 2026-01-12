@@ -13,7 +13,7 @@ const mongoose = require("mongoose");
 const minimist = require("minimist");
 const path = require("path");
 const fs = require("fs");
-const cloudinary = require("cloudinary").v2;
+
 
 const slugify = (s) =>
   String(s)
@@ -28,12 +28,27 @@ const FORCE_UPDATE = argv.force || argv.f === true;
 const ICON_SOURCE_DIR = path.join(__dirname, "uploads", "icons");
 
 const Category = require("./model/Category");
+async function buildLocalUrl(fileName) {
+  if (!fileName) return null;
 
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-});
+  // already URL — keep as is
+  if (
+    typeof fileName === "string" &&
+    (fileName.startsWith("http://") || fileName.startsWith("https://"))
+  ) {
+    return fileName;
+  }
+
+  const localPath = path.join(ICON_SOURCE_DIR, fileName);
+
+  if (!fs.existsSync(localPath)) {
+    console.warn(`⚠️ Local icon file not found: ${localPath}`);
+    return null;
+  }
+
+  return `${process.env.BASE_URL || process.env.MY_URL}/uploads/icons/${fileName}`;
+}
+
 
 const default_categories = [
   {
@@ -250,60 +265,13 @@ const default_categories = [
   },
 ];
 
-async function uploadIconIfLocal(imageValue, publicIdBase) {
-  // If imageValue already looks like an http/https URL — return as-is
-  if (!imageValue) return null;
-  if (
-    typeof imageValue === "string" &&
-    (imageValue.startsWith("http://") || imageValue.startsWith("https://"))
-  ) {
-    return imageValue;
-  }
-
-  // If imageValue is a filename (e.g., "pet.png"), try to upload local file
-  const localPath = path.join(ICON_SOURCE_DIR, imageValue);
-  if (!fs.existsSync(localPath)) {
-    console.warn(
-      `⚠️ Local icon file not found: ${localPath} — skipping upload, keeping original value if any.`
-    );
-    return null;
-  }
-
-  const pubId = `${publicIdBase}`; // e.g., categories/pet-care
-  try {
-    console.log(`⬆️ Uploading ${localPath} to Cloudinary as ${pubId} ...`);
-    const res = await cloudinary.uploader.upload(localPath, {
-      folder: "categories",
-      public_id: pubId.replace(/^categories\/?/, ""), // cloudinary will place into folder
-      overwrite: true,
-      resource_type: "image",
-    });
-    if (res && res.secure_url) {
-      console.log(`  -> uploaded: ${res.secure_url}`);
-      return res.secure_url;
-    }
-    console.warn("  -> upload returned no secure_url, result:", res);
-    return null;
-  } catch (err) {
-    console.error("  -> Cloudinary upload error:", err);
-    return null;
-  }
-}
 
 async function seed() {
   const mongoUri = process.env.MONGO_URI;
-  if (!mongoUri) {
-    console.error("ERROR: set MONGO_URI env var before running.");
-    process.exit(1);
-  }
-  if (
-    !process.env.CLOUDINARY_CLOUD_NAME ||
-    !process.env.CLOUDINARY_API_KEY ||
-    !process.env.CLOUDINARY_API_SECRET
-  ) {
-    console.error(
-      "ERROR: set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET env vars."
-    );
+  const baseUrl = process.env.BASE_URL;
+
+  if (!mongoUri || !baseUrl) {
+    console.error("ERROR: set MONGO_URI and BASE_URL");
     process.exit(1);
   }
 
@@ -311,69 +279,59 @@ async function seed() {
     useNewUrlParser: true,
     useUnifiedTopology: true,
   });
+
   console.log("✅ Connected to MongoDB");
+
+  let index = 1;   // 🔴 ORDER INDEX
 
   for (const cat of default_categories) {
     try {
-      const slug = slugify(cat.name);
-      const publicIdBase = `categories/${slug}`;
+      const imageUrl = await buildLocalUrl(cat.image);
 
       const existing = await Category.findOne({ name: cat.name });
-
-      if (existing && !FORCE_UPDATE) {
-        console.log(`⏭️ Category exists: ${cat.name} (skipping)`);
-        continue;
-      }
-
-      // upload local icon if provided as filename; otherwise if cat.image is already URL, keep it
-      let imageUrl = cat.image;
-      // If cat.image looks like a filename (no http) try local upload
-      if (
-        imageUrl &&
-        !imageUrl.startsWith("http://") &&
-        !imageUrl.startsWith("https://")
-      ) {
-        const uploaded = await uploadIconIfLocal(imageUrl, publicIdBase);
-        if (uploaded) imageUrl = uploaded;
-        else {
-          // fallback: if upload failed and the original value was a filename, set imageUrl null so DB stores null
-          imageUrl = null;
-        }
-      }
 
       const payload = {
         name: cat.name,
         image: imageUrl,
         tags: Array.isArray(cat.tags) ? cat.tags : [],
+        order: index,               // ✅ NEW FIELD
+        slug: slugify(cat.name),    // optional
       };
 
+      index++;   // increment
+
       if (DRY_RUN) {
-        console.log("DRY RUN -> would create/update category:", payload);
+        console.log("DRY RUN ->", payload);
         continue;
       }
 
-      if (existing) {
-        // update existing
+      if (existing && FORCE_UPDATE) {
         existing.image = payload.image;
         existing.tags = payload.tags;
+        existing.order = payload.order;
         await existing.save();
+
         console.log(`🔁 Updated category: ${cat.name}`);
-      } else {
-        const created = new Category(payload);
-        await created.save();
+      } 
+      else if (!existing) {
+        await Category.create(payload);
         console.log(`✅ Created category: ${cat.name}`);
       }
-    } catch (errCat) {
-      console.error(`❌ Error handling category ${cat.name}:`, errCat);
+      else {
+        console.log(`⏭️ Category exists: ${cat.name}`);
+      }
+
+    } catch (e) {
+      console.error(`❌ Error ${cat.name}:`, e.message);
     }
   }
 
-  console.log("🎉 Seeding complete.");
   await mongoose.disconnect();
+  console.log("🎉 Seeding complete");
   process.exit(0);
 }
 
 seed().catch((err) => {
-  console.error("Fatal error:", err);
+  console.error("Fatal error:", err.message);
   process.exit(1);
 });

@@ -2,16 +2,7 @@
 const nodemailer = require("nodemailer");
 const fs = require("fs");
 const path = require("path");
-
-// Create a reusable transporter object
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.SMTP_EMAIL,
-    pass: process.env.SMTP_PASSWORD,
-  },
-});
-
+const {sendEmail}=require('./brevoMailer');
 // ---------------- OTP EMAIL ----------------
 async function sendOtpEmail(to, otp) {
   const templatePath = path.join(__dirname, "../templates/email_otp.html");
@@ -20,8 +11,8 @@ async function sendOtpEmail(to, otp) {
   html = html.replace("{{otp_code}}", otp);
   html = html.replace("{{date}}", new Date().toLocaleDateString());
 
-  await transporter.sendMail({
-    from: process.env.SMTP_EMAIL,
+  await sendEmail({
+  
     to,
     subject: "Your OTP Code",
     html,
@@ -41,8 +32,7 @@ async function sendResetEmail(to, token) {
   html = html.replace("{{reset_link}}", resetLink);
   html = html.replace("{{date}}", new Date().toLocaleString());
 
-  await transporter.sendMail({
-    from: process.env.SMTP_EMAIL,
+  await sendEmail({
     to,
     subject: "Reset your password",
     html,
@@ -62,8 +52,8 @@ async function sendServiceOtpEmail(to, data) {
     .replace(/{{otp}}/g, data.otp)
     .replace(/{{date}}/g, new Date().toLocaleDateString());
 
-  await transporter.sendMail({
-    from: process.env.SMTP_EMAIL,
+  await sendEmail({
+  
     to,
     subject: "Your Service Start OTP",
     html,
@@ -126,8 +116,8 @@ async function sendServiceBookedEmail(
     // --- Debug: Send plain text test email first ---
 
     // --- Send actual HTML email ---
-    const info = await transporter.sendMail({
-      from: process.env.SMTP_EMAIL,
+    const info = await sendEmail({
+      
       to: toEmail,
       subject: "Service Booked",
       html,
@@ -170,8 +160,7 @@ async function sendServiceCompletedEmail(customer, provider, service, booking) {
       
       .replace("{{amount}}", booking.amount);
 
-    await transporter.sendMail({
-      from: process.env.SMTP_EMAIL,
+    await sendEmail({
       to: customer.email,
       subject: "Service Completed",
       html,
@@ -214,8 +203,7 @@ async function sendServiceCancelledEmail(customer, provider, service, booking, r
 
     console.log("📧 Email Ready — Sending…");
 
-    await transporter.sendMail({
-      from: process.env.SMTP_EMAIL,
+    await sendEmail({
       to: customer.email,
       subject: "Service Cancelled",
       html,
@@ -319,8 +307,7 @@ async function sendServiceDeleteApprovedEmail(
     // ================= SEND EMAIL =================
     console.log("📧 Sending email to:", receiver.email.trim());
 
-    await transporter.sendMail({
-      from: process.env.SMTP_EMAIL,
+    await sendEmail({
       to: receiver.email.trim(),
       subject:
         type === "customer"
@@ -458,8 +445,7 @@ async function sendServiceForceDeletedEmail(
       .replace(/{{support_time}}/g, admin?.supportTime || "");
 
     // ================= SEND EMAIL =================
-    await transporter.sendMail({
-      from: process.env.SMTP_EMAIL,
+    await sendEmail({
       to: receiver.email.trim(),
       subject,
       html,

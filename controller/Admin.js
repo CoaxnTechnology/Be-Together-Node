@@ -105,23 +105,36 @@ exports.createCategory = async (req, res) => {
   try {
     const { name, tags, order } = req.body;
 
-    if (!name?.trim())
-      return res
-        .status(400)
-        .json({ isSuccess: false, message: "Category name is required" });
+    if (!name?.trim()) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Category name is required",
+      });
+    }
 
-    // Prevent duplicate names
+    // ❌ Duplicate check
     const existing = await Category.findOne({
       name: { $regex: `^${name}$`, $options: "i" },
     });
-    if (existing)
-      return res
-        .status(400)
-        .json({ isSuccess: false, message: "Category already exists" });
-    // 🔢 Decide order number
+    if (existing) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Category already exists",
+      });
+    }
+
     /* ----------------------------------
-     * 3️⃣ ORDER LOGIC (FIXED)
+     * 📁 ENSURE FOLDER EXISTS
      * ---------------------------------- */
+    const uploadDir = path.join(process.cwd(), "uploads", "category_images");
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+
+    /* ----------------------------------
+     * 🔢 ORDER LOGIC (100% SAFE)
+     * ---------------------------------- */
+    const totalCategories = await Category.countDocuments();
     let finalOrder;
 
     if (order !== undefined && order !== "") {
@@ -134,43 +147,33 @@ exports.createCategory = async (req, res) => {
         });
       }
 
-      // Shift existing categories DOWN
+      // clamp value (important)
+      if (finalOrder > totalCategories + 1) {
+        finalOrder = totalCategories + 1;
+      }
+
+      // shift categories AFTER this order
       await Category.updateMany(
         { order: { $gte: finalOrder } },
         { $inc: { order: 1 } }
       );
     } else {
-      const lastCategory = await Category.findOne().sort({ order: -1 });
-      finalOrder = lastCategory ? lastCategory.order + 1 : 1;
+      finalOrder = totalCategories + 1;
     }
-/* ----------------------------------
-     * 📁 ENSURE FOLDER EXISTS (🔥 FIX)
+
+    /* ----------------------------------
+     * 🖼 IMAGE
      * ---------------------------------- */
-    const uploadsRoot = path.join(__dirname, "..", "uploads");
-    const categoryImageDir = path.join(uploadsRoot, "category_images");
-
-    if (!fs.existsSync(uploadsRoot)) {
-      fs.mkdirSync(uploadsRoot, { recursive: true });
-      console.log("📁 uploads folder created");
-    }
-
-    if (!fs.existsSync(categoryImageDir)) {
-      fs.mkdirSync(categoryImageDir, { recursive: true });
-      console.log("📁 category_images folder created");
-    }
-    // Upload image if provided
     let imageUrl = null;
-    const base = process.env.BASE_URL;
-
     if (req.file) {
-      imageUrl = `${base}/uploads/category_images/${req.file.filename}`;
-      console.log("🖼 Category image saved:", imageUrl);
+      imageUrl = `${process.env.BASE_URL}/uploads/category_images/${req.file.filename}`;
     }
 
-    // AI tags
+    /* ----------------------------------
+     * 🏷 TAGS
+     * ---------------------------------- */
     const autoTags = await getHrFlowTags(name);
 
-    // Manual tags
     let userTags = [];
     if (Array.isArray(tags)) userTags = tags;
     else if (typeof tags === "string") {
@@ -181,7 +184,6 @@ exports.createCategory = async (req, res) => {
       }
     }
 
-    // Merge & deduplicate
     let finalTags = [
       ...new Set(
         [...autoTags, ...userTags.map((t) => t.trim().toLowerCase())].filter(
@@ -191,26 +193,22 @@ exports.createCategory = async (req, res) => {
     ];
     finalTags = deduplicateSimilarTags(finalTags);
 
-    // Save category
+    /* ----------------------------------
+     * 💾 SAVE
+     * ---------------------------------- */
     const newCategory = new Category({
       name,
       image: imageUrl,
       tags: finalTags,
       order: finalOrder,
     });
-    try {
-      await newCategory.save();
-    } catch (err) {
-      // Rollback image if DB fails
-      //if (imagePublicId) await cloudinary.uploader.destroy(imagePublicId);
-      throw err;
-    }
+
+    await newCategory.save();
 
     return res.status(201).json({
       isSuccess: true,
       message: "Category created successfully",
       data: newCategory,
-      autoTags,
     });
   } catch (err) {
     console.error("❌ createCategory error:", err);
@@ -221,6 +219,7 @@ exports.createCategory = async (req, res) => {
     });
   }
 };
+
 
 // ------------------ GET AI TAGS ------------------
 exports.getAITags = async (req, res) => {

@@ -539,7 +539,6 @@ function parseCSVJSON(value) {
   return JSON.parse(cleaned);
 }
 
-
 exports.generateUsersFromCSV = async (req, res) => {
   console.log("\n🚀 ===== CSV UPLOAD STARTED =====");
 
@@ -553,7 +552,7 @@ exports.generateUsersFromCSV = async (req, res) => {
     }
 
     console.log("📂 FILE RECEIVED:", req.file.originalname);
- const categories = await Category.find({}, { tags: 1 });
+    const categories = await Category.find({}, { tags: 1 });
     const validCategoryTags = new Set();
 
     categories.forEach((cat) => {
@@ -623,9 +622,7 @@ exports.generateUsersFromCSV = async (req, res) => {
           continue;
         }
         /* ---------- PARSE TAG ARRAYS ---------- */
-        const rawInterests = row.interests
-          ? parseCSVJSON(row.interests)
-          : [];
+        const rawInterests = row.interests ? parseCSVJSON(row.interests) : [];
 
         const rawOfferedTags = row.offeredTags
           ? parseCSVJSON(row.offeredTags)
@@ -656,10 +653,9 @@ exports.generateUsersFromCSV = async (req, res) => {
             console.log("❌ Removed offeredTags:", removedOffered);
         }
 
-
         // ---------- CREATE USER ----------
         const user = await User.create({
-         name: row.name?.trim(),
+          name: row.name?.trim(),
           email: row.email?.trim(),
           mobile: row.mobile || null,
           profile_image: row.profile_image || null,
@@ -690,7 +686,6 @@ exports.generateUsersFromCSV = async (req, res) => {
           status: "active",
           is_active: true,
         });
-
 
         console.log("✅ USER CREATED:", user.email);
 
@@ -1616,7 +1611,9 @@ exports.adminForceDeleteService = async (req, res) => {
     const bookings = await Booking.find({
       service: serviceId,
       status: { $in: ["booked", "started"] },
-    }).populate("user", "name email fcmToken");
+    })
+      .populate("customer", "name email fcmToken")
+      .populate("provider", "name email fcmToken");
 
     console.log(`📦 Bookings found: ${bookings.length}`);
 
@@ -1711,7 +1708,7 @@ exports.adminForceDeleteService = async (req, res) => {
 
       // CUSTOMER EMAILS
       if (bookings.length > 0) {
-        customers = bookings.map((b) => b.user).filter(Boolean);
+        customers = bookings.map((b) => b.customer).filter(Boolean);
 
         for (const customer of customers) {
           await sendServiceForceDeletedEmail(

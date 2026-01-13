@@ -87,8 +87,22 @@ const uploadCSV = multer({
 // 🏷 CATEGORY IMAGES (disk)
 const categoryImageStorage = multer.diskStorage({
   destination: function (req, file, cb) {
-    cb(null, "uploads/category_images");
+    // ✅ Absolute path (VERY IMPORTANT)
+    const uploadDir = path.join(
+      process.cwd(),
+      "uploads",
+      "category_images"
+    );
+
+    // ✅ Auto-create folder if missing
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+      console.log("📁 uploads/category_images folder auto-created");
+    }
+
+    cb(null, uploadDir);
   },
+
   filename: function (req, file, cb) {
     const uniqueName =
       "category_" +
@@ -96,9 +110,11 @@ const categoryImageStorage = multer.diskStorage({
       "_" +
       Math.round(Math.random() * 1e9) +
       path.extname(file.originalname);
+
     cb(null, uniqueName);
   },
 });
+
 
 const uploadCategoryImage = multer({
   storage: categoryImageStorage,

@@ -521,7 +521,20 @@ function isValidImageUrl(url) {
     typeof url === "string" && /^https?:\/\/.+\.(jpg|jpeg|png|webp)$/i.test(url)
   );
 }
+function parseCSVJSON(value) {
+  if (typeof value !== "string") return value;
 
+  // remove outer quotes if present
+  let cleaned = value;
+  if (cleaned.startsWith('"') && cleaned.endsWith('"')) {
+    cleaned = cleaned.slice(1, -1);
+  }
+
+  // unescape CSV double quotes
+  cleaned = cleaned.replace(/""/g, '"');
+
+  return JSON.parse(cleaned);
+}
 
 exports.generateUsersFromCSV = async (req, res) => {
   console.log("\n🚀 ===== CSV UPLOAD STARTED =====");
@@ -579,13 +592,7 @@ exports.generateUsersFromCSV = async (req, res) => {
         console.log("🧪 RAW SERVICES:", row.services);
 
         try {
-          let once =
-            typeof row.services === "string"
-              ? JSON.parse(row.services)
-              : row.services;
-
-          parsedServices =
-            typeof once === "string" ? JSON.parse(once) : once;
+          parsedServices = parseCSVJSON(row.services);
 
           if (!Array.isArray(parsedServices)) {
             throw new Error("services is not array");
@@ -594,9 +601,11 @@ exports.generateUsersFromCSV = async (req, res) => {
           console.log("📦 SERVICES COUNT:", parsedServices.length);
         } catch (e) {
           console.log("❌ SERVICES JSON INVALID:", row.email);
+          console.log("❌ RAW VALUE:", row.services);
+
           skippedUsers.push({
             email: row.email,
-            reason: "Invalid services JSON",
+            reason: "Invalid services JSON (CSV escaped)",
           });
           continue;
         }
@@ -677,9 +686,7 @@ exports.generateUsersFromCSV = async (req, res) => {
 
           // ---- RECURRING ----
           if (serviceData.service_type === "recurring") {
-            serviceData.recurring_schedule = Array.isArray(
-              s.recurring_schedule
-            )
+            serviceData.recurring_schedule = Array.isArray(s.recurring_schedule)
               ? s.recurring_schedule
               : [];
           }
@@ -705,7 +712,6 @@ exports.generateUsersFromCSV = async (req, res) => {
           email: user.email,
           servicesCreated: createdServiceIds.length,
         });
-
       } catch (err) {
         console.log("⛔ USER FAILED:", row.email, err.message);
         skippedUsers.push({ email: row.email, reason: err.message });
@@ -721,7 +727,6 @@ exports.generateUsersFromCSV = async (req, res) => {
       createdUsers,
       skippedUsers,
     });
-
   } catch (err) {
     console.log("🔥 FATAL ERROR:", err.message);
     return res.status(500).json({
@@ -730,8 +735,6 @@ exports.generateUsersFromCSV = async (req, res) => {
     });
   }
 };
-
-
 
 // ✅ Get all fake users
 exports.getFakeUsers = async (req, res) => {

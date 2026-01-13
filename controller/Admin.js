@@ -555,72 +555,51 @@ exports.generateUsersFromCSV = async (req, res) => {
           console.log("✅ CSV PARSE COMPLETE. TOTAL ROWS:", rows.length);
           resolve();
         })
-        .on("error", (err) => {
-          console.log("❌ CSV PARSE ERROR:", err.message);
-          reject(err);
-        });
+        .on("error", reject);
     });
 
     const createdUsers = [];
     const skippedUsers = [];
 
-    // ---- LOOP EACH ROW ----
+    // ---- PROCESS EACH ROW ----
     for (const row of rows) {
       console.log("\n👤 PROCESSING USER:", row.email);
 
       try {
         // ---------- DUPLICATE CHECK ----------
         const existingUser = await User.findOne({ email: row.email });
-
         if (existingUser) {
-          console.log("⏭ SKIPPED USER → DUPLICATE EMAIL:", row.email);
-
-          skippedUsers.push({
-            email: row.email,
-            reason: "Duplicate email",
-          });
+          console.log("⏭ DUPLICATE USER:", row.email);
+          skippedUsers.push({ email: row.email, reason: "Duplicate email" });
           continue;
         }
 
-        // ---------- PARSE SERVICES ----------
-        // ---------- PARSE SERVICES (CSV SAFE FIX) ----------
-let servicesRaw = row.services;
+        // ---------- PARSE SERVICES (DOUBLE JSON SAFE) ----------
+        let parsedServices;
+        console.log("🧪 RAW SERVICES:", row.services);
 
-console.log("🧪 RAW SERVICES VALUE:", servicesRaw);
+        try {
+          let once =
+            typeof row.services === "string"
+              ? JSON.parse(row.services)
+              : row.services;
 
-// Step 1: remove outer quotes if added by CSV/Excel
-if (
-  typeof servicesRaw === "string" &&
-  servicesRaw.startsWith('"') &&
-  servicesRaw.endsWith('"')
-) {
-  servicesRaw = servicesRaw.slice(1, -1);
-}
+          parsedServices =
+            typeof once === "string" ? JSON.parse(once) : once;
 
-// Step 2: fix escaped quotes
-servicesRaw = servicesRaw.replace(/""/g, '"');
+          if (!Array.isArray(parsedServices)) {
+            throw new Error("services is not array");
+          }
 
-// Step 3: parse JSON
-let services;
-try {
-  services = JSON.parse(servicesRaw);
-
-  if (!Array.isArray(services)) {
-    throw new Error("services is not an array");
-  }
-
-  console.log("📦 SERVICES COUNT:", services.length);
-} catch (err) {
-  console.log("❌ INVALID SERVICES JSON FOR:", row.email);
-  console.log("❌ FINAL PARSE VALUE:", servicesRaw);
-
-  skippedUsers.push({
-    email: row.email,
-    reason: "Invalid services JSON (after cleanup)",
-  });
-  continue;
-}
-
+          console.log("📦 SERVICES COUNT:", parsedServices.length);
+        } catch (e) {
+          console.log("❌ SERVICES JSON INVALID:", row.email);
+          skippedUsers.push({
+            email: row.email,
+            reason: "Invalid services JSON",
+          });
+          continue;
+        }
 
         // ---------- CREATE USER ----------
         const user = await User.create({
@@ -633,26 +612,18 @@ try {
           login_type: "manual",
         });
 
-        console.log("✅ USER CREATED:", user.email, "ID:", user._id);
+        console.log("✅ USER CREATED:", user.email);
 
         const createdServiceIds = [];
 
         // ---------- CREATE SERVICES ----------
-        for (const s of services) {
+        for (const s of parsedServices) {
           console.log("🔧 CREATING SERVICE:", s.title);
 
           const category = await Category.findById(s.categoryId);
           if (!category) {
-            console.log(
-              "❌ INVALID CATEGORY:",
-              s.categoryId,
-              "FOR USER:",
-              row.email
-            );
-
             user.is_active = false;
             await user.save();
-
             throw new Error(`Invalid categoryId: ${s.categoryId}`);
           }
 
@@ -667,10 +638,7 @@ try {
 
             category: category._id,
             tags: s.selectedTags || [],
-
-            max_participants: s.max_participants
-              ? Number(s.max_participants)
-              : 1,
+            max_participants: Number(s.max_participants) || 1,
 
             owner: user._id,
             city: s.city || user.city || null,
@@ -705,30 +673,15 @@ try {
             serviceData.date = s.date || null;
             serviceData.start_time = s.start_time || null;
             serviceData.end_time = s.end_time || null;
-
-            console.log("🕒 ONE TIME SERVICE:", s.date, s.start_time, s.end_time);
           }
 
           // ---- RECURRING ----
           if (serviceData.service_type === "recurring") {
-            try {
-              serviceData.recurring_schedule = Array.isArray(
-                s.recurring_schedule
-              )
-                ? s.recurring_schedule
-                : JSON.parse(s.recurring_schedule || "[]");
-
-              console.log(
-                "🔁 RECURRING SLOTS:",
-                serviceData.recurring_schedule.length
-              );
-            } catch {
-              console.log(
-                "❌ INVALID RECURRING JSON FOR USER:",
-                row.email
-              );
-              throw new Error("Invalid recurring_schedule JSON");
-            }
+            serviceData.recurring_schedule = Array.isArray(
+              s.recurring_schedule
+            )
+              ? s.recurring_schedule
+              : [];
           }
 
           const service = await Service.create(serviceData);
@@ -742,7 +695,7 @@ try {
         await user.save();
 
         console.log(
-          "🎉 USER FULLY SAVED:",
+          "🎉 USER COMPLETED:",
           user.email,
           "SERVICES:",
           createdServiceIds.length
@@ -754,13 +707,8 @@ try {
         });
 
       } catch (err) {
-        console.log("⛔ USER SKIPPED:", row.email);
-        console.log("❗ REASON:", err.message);
-
-        skippedUsers.push({
-          email: row.email,
-          reason: err.message,
-        });
+        console.log("⛔ USER FAILED:", row.email, err.message);
+        skippedUsers.push({ email: row.email, reason: err.message });
       }
     }
 
@@ -770,21 +718,19 @@ try {
 
     return res.json({
       isSuccess: true,
-      message: "CSV processed with detailed logs",
       createdUsers,
       skippedUsers,
     });
 
   } catch (err) {
     console.log("🔥 FATAL ERROR:", err.message);
-
     return res.status(500).json({
       isSuccess: false,
       message: "Server error",
-      error: err.message,
     });
   }
 };
+
 
 
 // ✅ Get all fake users

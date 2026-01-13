@@ -553,7 +553,16 @@ exports.generateUsersFromCSV = async (req, res) => {
     }
 
     console.log("📂 FILE RECEIVED:", req.file.originalname);
+ const categories = await Category.find({}, { tags: 1 });
+    const validCategoryTags = new Set();
 
+    categories.forEach((cat) => {
+      (cat.tags || []).forEach((tag) =>
+        validCategoryTags.add(tag.toLowerCase())
+      );
+    });
+
+    console.log("✅ VALID CATEGORY TAGS:", validCategoryTags.size);
     // ---- BUFFER → STREAM ----
     const bufferStream = new Readable();
     bufferStream.push(req.file.buffer);
@@ -613,17 +622,75 @@ exports.generateUsersFromCSV = async (req, res) => {
           });
           continue;
         }
+        /* ---------- PARSE TAG ARRAYS ---------- */
+        const rawInterests = row.interests
+          ? parseCSVJSON(row.interests)
+          : [];
+
+        const rawOfferedTags = row.offeredTags
+          ? parseCSVJSON(row.offeredTags)
+          : [];
+
+        /* ---------- AUTO-CLEAN TAGS ---------- */
+        const cleanInterests = rawInterests.filter((t) =>
+          validCategoryTags.has(String(t).toLowerCase())
+        );
+
+        const cleanOfferedTags = rawOfferedTags.filter((t) =>
+          validCategoryTags.has(String(t).toLowerCase())
+        );
+
+        const removedInterests = rawInterests.filter(
+          (t) => !cleanInterests.includes(t)
+        );
+
+        const removedOffered = rawOfferedTags.filter(
+          (t) => !cleanOfferedTags.includes(t)
+        );
+
+        if (removedInterests.length || removedOffered.length) {
+          console.log("🧹 TAGS AUTO-CLEANED FOR:", row.email);
+          if (removedInterests.length)
+            console.log("❌ Removed interests:", removedInterests);
+          if (removedOffered.length)
+            console.log("❌ Removed offeredTags:", removedOffered);
+        }
+
 
         // ---------- CREATE USER ----------
         const user = await User.create({
-          name: row.name?.trim(),
+         name: row.name?.trim(),
           email: row.email?.trim(),
           mobile: row.mobile || null,
+          profile_image: row.profile_image || null,
+          bio: row.bio || null,
           city: row.city || null,
-          is_active: true,
+          age: row.age ? Number(row.age) : null,
+
+          is_fake: true, // 🔴 CSV user always fake
+
+          languages: row.languages ? parseCSVJSON(row.languages) : [],
+          interests: cleanInterests,
+          offeredTags: cleanOfferedTags,
+
+          lastLocation: {
+            coords: {
+              type: row.lastLocation_type || "Point",
+              coordinates: [
+                Number(row.lastLocation_longitude) || 0,
+                Number(row.lastLocation_latitude) || 0,
+              ],
+            },
+            recordedAt: new Date(),
+            updatedAt: new Date(),
+          },
+
           register_type: "manual",
           login_type: "manual",
+          status: "active",
+          is_active: true,
         });
+
 
         console.log("✅ USER CREATED:", user.email);
 

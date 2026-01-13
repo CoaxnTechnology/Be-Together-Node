@@ -583,19 +583,44 @@ exports.generateUsersFromCSV = async (req, res) => {
         }
 
         // ---------- PARSE SERVICES ----------
-        let services = [];
-        try {
-          services = JSON.parse(row.services || "[]");
-          console.log("📦 SERVICES COUNT:", services.length);
-        } catch (err) {
-          console.log("❌ INVALID SERVICES JSON FOR:", row.email);
+        // ---------- PARSE SERVICES (CSV SAFE FIX) ----------
+let servicesRaw = row.services;
 
-          skippedUsers.push({
-            email: row.email,
-            reason: "Invalid services JSON",
-          });
-          continue;
-        }
+console.log("🧪 RAW SERVICES VALUE:", servicesRaw);
+
+// Step 1: remove outer quotes if added by CSV/Excel
+if (
+  typeof servicesRaw === "string" &&
+  servicesRaw.startsWith('"') &&
+  servicesRaw.endsWith('"')
+) {
+  servicesRaw = servicesRaw.slice(1, -1);
+}
+
+// Step 2: fix escaped quotes
+servicesRaw = servicesRaw.replace(/""/g, '"');
+
+// Step 3: parse JSON
+let services;
+try {
+  services = JSON.parse(servicesRaw);
+
+  if (!Array.isArray(services)) {
+    throw new Error("services is not an array");
+  }
+
+  console.log("📦 SERVICES COUNT:", services.length);
+} catch (err) {
+  console.log("❌ INVALID SERVICES JSON FOR:", row.email);
+  console.log("❌ FINAL PARSE VALUE:", servicesRaw);
+
+  skippedUsers.push({
+    email: row.email,
+    reason: "Invalid services JSON (after cleanup)",
+  });
+  continue;
+}
+
 
         // ---------- CREATE USER ----------
         const user = await User.create({

@@ -143,7 +143,21 @@ exports.createCategory = async (req, res) => {
       const lastCategory = await Category.findOne().sort({ order: -1 });
       finalOrder = lastCategory ? lastCategory.order + 1 : 1;
     }
+/* ----------------------------------
+     * 📁 ENSURE FOLDER EXISTS (🔥 FIX)
+     * ---------------------------------- */
+    const uploadsRoot = path.join(__dirname, "..", "uploads");
+    const categoryImageDir = path.join(uploadsRoot, "category_images");
 
+    if (!fs.existsSync(uploadsRoot)) {
+      fs.mkdirSync(uploadsRoot, { recursive: true });
+      console.log("📁 uploads folder created");
+    }
+
+    if (!fs.existsSync(categoryImageDir)) {
+      fs.mkdirSync(categoryImageDir, { recursive: true });
+      console.log("📁 category_images folder created");
+    }
     // Upload image if provided
     let imageUrl = null;
     const base = process.env.BASE_URL;

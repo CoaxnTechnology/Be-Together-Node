@@ -119,11 +119,22 @@ exports.createCategory = async (req, res) => {
         .status(400)
         .json({ isSuccess: false, message: "Category already exists" });
     // 🔢 Decide order number
+    /* ----------------------------------
+     * 3️⃣ ORDER LOGIC (FIXED)
+     * ---------------------------------- */
     let finalOrder;
-    if (order) {
+
+    if (order !== undefined && order !== "") {
       finalOrder = Number(order);
 
-      // shift categories
+      if (isNaN(finalOrder) || finalOrder < 1) {
+        return res.status(400).json({
+          isSuccess: false,
+          message: "Invalid order number",
+        });
+      }
+
+      // Shift existing categories DOWN
       await Category.updateMany(
         { order: { $gte: finalOrder } },
         { $inc: { order: 1 } }

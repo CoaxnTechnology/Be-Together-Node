@@ -522,85 +522,74 @@ function isValidImageUrl(url) {
   );
 }
 
-exports.generateUsersFromCSV = async (req, res) => {
-  try {
-    console.log("\n===== 🚀 generateUsersFromCSV START =====");
 
-    // ---------- FILE CHECK ----------
+exports.generateUsersFromCSV = async (req, res) => {
+  console.log("\n🚀 ===== CSV UPLOAD STARTED =====");
+
+  try {
     if (!req.file) {
-      console.log("❌ NO CSV FILE IN REQUEST");
+      console.log("❌ NO FILE RECEIVED");
       return res.status(400).json({
         isSuccess: false,
-        message: "No CSV file uploaded",
+        message: "CSV file not uploaded",
       });
     }
 
-    console.log("📂 CSV FILE RECEIVED =", {
-      originalName: req.file.originalname,
-      sizeBytes: req.file.buffer?.length,
-      mimetype: req.file.mimetype,
-    });
+    console.log("📂 FILE RECEIVED:", req.file.originalname);
 
-    // ---------- CREATE STREAM ----------
-    console.log("📡 CREATING READABLE STREAM FROM BUFFER...");
+    // ---- BUFFER → STREAM ----
     const bufferStream = new Readable();
     bufferStream.push(req.file.buffer);
     bufferStream.push(null);
 
-    const usersData = [];
-    const createdUsers = [];
-    const skippedUsers = [];
-
-    // ---------- PARSE CSV ----------
-    console.log("📡 START CSV PARSE PIPE...");
+    const rows = [];
 
     await new Promise((resolve, reject) => {
       bufferStream
         .pipe(csv())
         .on("data", (row) => {
-          console.log("➡ ROW PARSED RAW =", JSON.stringify(row));
-          usersData.push(row);
+          console.log("➡ CSV ROW READ:", row.email);
+          rows.push(row);
         })
         .on("end", () => {
-          console.log("===== ✅ CSV PARSE FINISHED =====");
-          console.log("🔢 TOTAL ROWS PARSED =", usersData.length);
+          console.log("✅ CSV PARSE COMPLETE. TOTAL ROWS:", rows.length);
           resolve();
         })
         .on("error", (err) => {
-          console.log("❌ CSV PIPE ERROR =", err.message);
+          console.log("❌ CSV PARSE ERROR:", err.message);
           reject(err);
         });
     });
 
-    // ---------- PROCESS EACH USER ----------
-    console.log("🧨 START PROCESS LOOP FOR USERS");
+    const createdUsers = [];
+    const skippedUsers = [];
 
-    for (const row of usersData) {
-      console.log("\n🧑 PROCESS USER =", row.email);
+    // ---- LOOP EACH ROW ----
+    for (const row of rows) {
+      console.log("\n👤 PROCESSING USER:", row.email);
 
       try {
         // ---------- DUPLICATE CHECK ----------
-        console.log("🔍 CHECK DUPLICATE EMAIL...");
         const existingUser = await User.findOne({ email: row.email });
 
         if (existingUser) {
-          console.log("⏭ SKIPPED → DUPLICATE EMAIL =", row.email);
+          console.log("⏭ SKIPPED USER → DUPLICATE EMAIL:", row.email);
+
           skippedUsers.push({
             email: row.email,
-            reason: "Duplicate Email",
+            reason: "Duplicate email",
           });
           continue;
         }
 
-        // ---------- PARSE SERVICES JSON ----------
-        console.log("📦 PARSE services JSON FIELD...");
-
+        // ---------- PARSE SERVICES ----------
         let services = [];
         try {
           services = JSON.parse(row.services || "[]");
-          console.log("📦 SERVICES PARSE OK COUNT =", services.length);
+          console.log("📦 SERVICES COUNT:", services.length);
         } catch (err) {
-          console.log("❌ SERVICES JSON BAD FOR USER =", row.email);
+          console.log("❌ INVALID SERVICES JSON FOR:", row.email);
+
           skippedUsers.push({
             email: row.email,
             reason: "Invalid services JSON",
@@ -609,126 +598,139 @@ exports.generateUsersFromCSV = async (req, res) => {
         }
 
         // ---------- CREATE USER ----------
-        console.log("💾 CREATE USER OBJECT...");
-        const user = new User({
+        const user = await User.create({
           name: row.name?.trim(),
           email: row.email?.trim(),
           mobile: row.mobile || null,
-          profile_image: row.profile_image || null,
-          bio: row.bio || null,
           city: row.city || null,
-          age: row.age ? Number(row.age) : null,
-          is_fake: String(row.is_fake).trim().toLowerCase() === "true",
           is_active: true,
           register_type: "manual",
           login_type: "manual",
         });
 
-        console.log("💾 SAVING USER →", row.email);
-        const savedUser = await user.save();
-        console.log("🎉 USER SAVED ID =", savedUser._id);
+        console.log("✅ USER CREATED:", user.email, "ID:", user._id);
+
+        const createdServiceIds = [];
 
         // ---------- CREATE SERVICES ----------
-        const createdServices = [];
-
         for (const s of services) {
-          console.log("\n🔧 START SERVICE FOR USER =", row.email);
+          console.log("🔧 CREATING SERVICE:", s.title);
 
-          // ---------- VALIDATE CATEGORY ----------
-          console.log("🔍 VALIDATE CATEGORY ID =", s.categoryId);
           const category = await Category.findById(s.categoryId);
-
           if (!category) {
-            console.log("❌ SKIP USER → CATEGORY INVALID =", s.categoryId);
-            savedUser.is_active = false;
-            await savedUser.save();
+            console.log(
+              "❌ INVALID CATEGORY:",
+              s.categoryId,
+              "FOR USER:",
+              row.email
+            );
 
-            skippedUsers.push({
-              email: row.email,
-              reason: `Invalid CategoryId ${s.categoryId}`,
-            });
+            user.is_active = false;
+            await user.save();
 
-            throw new Error("Category validation failed");
+            throw new Error(`Invalid categoryId: ${s.categoryId}`);
           }
-
-          // ---------- BUILD SERVICE DATA ----------
-          const base = process.env.BASE_URL || "";
 
           const serviceData = {
             title: s.title || "Untitled Service",
-            Language: s.Language || category.Language || "English",
+            Language: s.Language || "English",
+
+            isFree: String(s.isFree).toLowerCase() === "true",
+            price: s.price ? Number(s.price) : 0,
+            currency: s.currency || "EUR",
+            description: s.description || null,
+
             category: category._id,
             tags: s.selectedTags || [],
-            owner: savedUser._id,
-            city: s.city || savedUser.city || null,
+
+            max_participants: s.max_participants
+              ? Number(s.max_participants)
+              : 1,
+
+            owner: user._id,
+            city: s.city || user.city || null,
 
             location_name: s.location?.name || null,
-
             location: {
               type: "Point",
               coordinates: [
-                parseFloat(s.location?.longitude),
-                parseFloat(s.location?.latitude),
+                Number(s.location?.longitude),
+                Number(s.location?.latitude),
               ],
             },
 
-            image: null,
+            isDoorstepService:
+              String(s.isDoorstepService).toLowerCase() === "true",
+
+            image:
+              s.image && s.image.startsWith("http")
+                ? s.image
+                : category.image || null,
+
+            service_type: s.service_type || "one_time",
+
+            date: null,
+            start_time: null,
+            end_time: null,
+            recurring_schedule: [],
           };
 
-          // ---------- IMAGE LOGIC ----------
-          console.log("🖼 CHECK CSV SERVICE IMAGE...");
+          // ---- ONE TIME ----
+          if (serviceData.service_type === "one_time") {
+            serviceData.date = s.date || null;
+            serviceData.start_time = s.start_time || null;
+            serviceData.end_time = s.end_time || null;
 
-          if (s.image && typeof s.image === "string" && s.image.startsWith("http")) {
-            serviceData.image = s.image.trim();
-            console.log("✔ CSV IMAGE URL USED =", serviceData.image);
-          } else if (category.image) {
-            serviceData.image = category.image;
-            console.log("✔ FALLBACK CATEGORY IMAGE =", serviceData.image);
+            console.log("🕒 ONE TIME SERVICE:", s.date, s.start_time, s.end_time);
           }
 
-          console.log("📦 FINAL SERVICE DATA =", JSON.stringify(serviceData));
+          // ---- RECURRING ----
+          if (serviceData.service_type === "recurring") {
+            try {
+              serviceData.recurring_schedule = Array.isArray(
+                s.recurring_schedule
+              )
+                ? s.recurring_schedule
+                : JSON.parse(s.recurring_schedule || "[]");
 
-          // ---------- SAVE SERVICE ----------
-          console.log("💾 SAVING SERVICE...");
-          const service = new Service(serviceData);
-
-          try {
-            const savedService = await service.save();
-            console.log("🎉 SERVICE SAVED ID =", savedService._id);
-
-            createdServices.push(savedService._id);
-          } catch (err) {
-            console.log("❌ SERVICE SAVE ERROR =", err.message);
-            console.log("🧨 SERVICE VALIDATION ERROR OBJECT =", err);
-
-            // mark user inactive
-            savedUser.is_active = false;
-            await savedUser.save();
-
-            skippedUsers.push({
-              email: row.email,
-              reason: err.message,
-            });
-
-            throw err;
+              console.log(
+                "🔁 RECURRING SLOTS:",
+                serviceData.recurring_schedule.length
+              );
+            } catch {
+              console.log(
+                "❌ INVALID RECURRING JSON FOR USER:",
+                row.email
+              );
+              throw new Error("Invalid recurring_schedule JSON");
+            }
           }
+
+          const service = await Service.create(serviceData);
+          console.log("✅ SERVICE SAVED:", service._id);
+
+          createdServiceIds.push(service._id);
         }
 
-        // ---------- ATTACH SERVICES TO USER ----------
-        savedUser.services = createdServices;
-        await savedUser.save();
+        // ---------- ATTACH SERVICES ----------
+        user.services = createdServiceIds;
+        await user.save();
+
+        console.log(
+          "🎉 USER FULLY SAVED:",
+          user.email,
+          "SERVICES:",
+          createdServiceIds.length
+        );
 
         createdUsers.push({
-          id: savedUser._id,
-          name: savedUser.name,
-          servicesCreated: createdServices.length,
+          email: user.email,
+          servicesCreated: createdServiceIds.length,
         });
 
-        console.log("🎉 USER + SERVICES COMPLETE =", row.email);
-
       } catch (err) {
-        console.log("⏭ USER SKIPPED DUE ERROR =", row.email);
-        console.log("❌ ERROR REASON =", err.message);
+        console.log("⛔ USER SKIPPED:", row.email);
+        console.log("❗ REASON:", err.message);
 
         skippedUsers.push({
           email: row.email,
@@ -737,21 +739,19 @@ exports.generateUsersFromCSV = async (req, res) => {
       }
     }
 
-    console.log("\n===== ✅ PROCESS FINISHED =====");
-    console.log("✔ CREATED USERS =", createdUsers.length);
-    console.log("⏭ SKIPPED USERS =", skippedUsers.length);
+    console.log("\n✅ ===== CSV PROCESS FINISHED =====");
+    console.log("✔ USERS CREATED:", createdUsers.length);
+    console.log("⏭ USERS SKIPPED:", skippedUsers.length);
 
     return res.json({
       isSuccess: true,
-      message: "CSV processed with console",
-      createdCount: createdUsers.length,
-      skippedCount: skippedUsers.length,
+      message: "CSV processed with detailed logs",
       createdUsers,
       skippedUsers,
     });
 
   } catch (err) {
-    console.log("🧨 FATAL OUTER ERROR =", err.message);
+    console.log("🔥 FATAL ERROR:", err.message);
 
     return res.status(500).json({
       isSuccess: false,
@@ -760,6 +760,7 @@ exports.generateUsersFromCSV = async (req, res) => {
     });
   }
 };
+
 
 // ✅ Get all fake users
 exports.getFakeUsers = async (req, res) => {

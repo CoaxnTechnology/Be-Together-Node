@@ -524,17 +524,21 @@ function isValidImageUrl(url) {
 function parseCSVJSON(value) {
   if (typeof value !== "string") return value;
 
-  // remove outer quotes if present
-  let cleaned = value;
+  let cleaned = value
+    .replace(/\r?\n|\r/g, "") // ⬅️ VERY IMPORTANT (CSV newline fix)
+    .trim();
+
+  // remove outer quotes added by CSV
   if (cleaned.startsWith('"') && cleaned.endsWith('"')) {
     cleaned = cleaned.slice(1, -1);
   }
 
-  // unescape CSV double quotes
+  // convert CSV escaped quotes "" → "
   cleaned = cleaned.replace(/""/g, '"');
 
   return JSON.parse(cleaned);
 }
+
 
 exports.generateUsersFromCSV = async (req, res) => {
   console.log("\n🚀 ===== CSV UPLOAD STARTED =====");

@@ -1,5 +1,5 @@
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
-
+const User = require("../models/User");
 // Promotion subscription plans (Stripe PRICE IDs)
 const SUBSCRIPTION_PLANS = {
   basic: {

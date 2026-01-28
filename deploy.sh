@@ -10,7 +10,8 @@ git fetch origin
 
 echo "🧹 Resetting to origin/testing"
 git reset --hard origin/testing
-git clean -fd
+git clean -fd -e uploads/
+
 
 echo "📦 Installing dependencies"
 npm install --production

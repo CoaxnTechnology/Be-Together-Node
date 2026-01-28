@@ -1,4 +1,6 @@
 #!/bin/bash
+#!/bin/bash
+echo "DEPLOY FILE: $(realpath $0)" >> /tmp/deploy-proof.log
 set -e
 
 echo "🚀 Deploy started at $(date)"
@@ -10,7 +12,7 @@ git fetch origin
 
 echo "🧹 Resetting to origin/testing"
 git reset --hard origin/testing
-git clean -fd -e uploads/
+git clean -fd -e uploads/ -e .env
 
 
 echo "📦 Installing dependencies"

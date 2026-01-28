@@ -258,6 +258,8 @@ exports.createService = async (req, res) => {
           message: "Invalid promotion plan",
         });
       }
+      const startTs = subscription.current_period_start;
+      const endTs = subscription.current_period_end;
 
       promotionData = {
         isPromoted: true,
@@ -270,8 +272,11 @@ exports.createService = async (req, res) => {
 
         promotionAmount: subscription.items.data[0].price.unit_amount / 100,
 
-        promotionStart: new Date(subscription.current_period_start * 1000),
-        promotionEnd: new Date(subscription.current_period_end * 1000),
+        promotionStart: startTs ? new Date(startTs * 1000) : new Date(),
+
+        promotionEnd: endTs
+          ? new Date(endTs * 1000)
+          : new Date(Date.now() + plan.days * 24 * 60 * 60 * 1000),
       };
     }
 

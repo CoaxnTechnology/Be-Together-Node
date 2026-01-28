@@ -1,9 +1,9 @@
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
-const User = require("../model/User");
+
 // Promotion subscription plans (Stripe PRICE IDs)
 const SUBSCRIPTION_PLANS = {
   basic: {
-    priceId: "price_basic_7days", // Stripe dashboard
+    priceId: "price_basic_7days",   // Stripe dashboard
     days: 7,
   },
   standard: {

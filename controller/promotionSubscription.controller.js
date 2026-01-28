@@ -16,6 +16,8 @@ const SUBSCRIPTION_PLANS = {
   },
 };
 
+
+
 exports.createPromotionSubscription = async (req, res) => {
   try {
     const { userId, promotionPlan, paymentMethodId } = req.body;

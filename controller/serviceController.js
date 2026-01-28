@@ -661,14 +661,24 @@ exports.getServices = async (req, res) => {
     // SORT + PAGINATION
     // -----------------------------
     listCandidates.sort((a, b) => {
+      // 1️⃣ Promoted first
+      if (a.isPromoted && !b.isPromoted) return -1;
+      if (!a.isPromoted && b.isPromoted) return 1;
+
+      // 2️⃣ If both same promotion status → distance sort
       if (a.distance_km === null) return 1;
       if (b.distance_km === null) return -1;
+
       return a.distance_km - b.distance_km;
     });
 
     mapServices.sort((a, b) => {
+      if (a.isPromoted && !b.isPromoted) return -1;
+      if (!a.isPromoted && b.isPromoted) return 1;
+
       if (a.distance_km === null) return 1;
       if (b.distance_km === null) return -1;
+
       return a.distance_km - b.distance_km;
     });
 

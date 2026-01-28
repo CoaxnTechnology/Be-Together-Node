@@ -12,11 +12,7 @@ git fetch origin
 echo "🧹 Resetting to origin/testing"
 git reset --hard origin/testing
 git clean -fd -e uploads/ -e .env
-echo "📁 Ensuring upload folders exist"
-mkdir -p uploads/profile_images
-mkdir -p uploads/service_images
-mkdir -p uploads/icons
-chmod -R 755 uploads
+
 
 echo "📦 Installing dependencies"
 npm install --production

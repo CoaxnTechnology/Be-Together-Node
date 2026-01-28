@@ -681,6 +681,16 @@ exports.getServices = async (req, res) => {
 
       return a.distance_km - b.distance_km;
     });
+    const promotedServices = finalServices
+      .filter((svc) => svc.isPromoted === true)
+      .sort((a, b) => {
+        // jinke paas distance nahi hai, unko last me bhejo
+        if (a.distance_km === null) return 1;
+        if (b.distance_km === null) return -1;
+
+        // nearest first
+        return a.distance_km - b.distance_km;
+      });
 
     const start = (pageNum - 1) * limitNum;
     const paginated = listCandidates.slice(start, start + limitNum);
@@ -702,6 +712,7 @@ exports.getServices = async (req, res) => {
       limit: limitNum,
       listServices: paginated,
       mapServices,
+      promotedServices,
     });
   } catch (err) {
     console.error("ERROR in getServices:", err);

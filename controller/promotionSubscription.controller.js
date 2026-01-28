@@ -3,20 +3,18 @@ const User = require("../model/User");
 // Promotion subscription plans (Stripe PRICE IDs)
 const SUBSCRIPTION_PLANS = {
   basic: {
-    priceId: "price_basic_7days",   // Stripe dashboard
+    priceId: "price_1SuBhHRic3VtmD7tZJ7O7806", // Stripe dashboard
     days: 7,
   },
   standard: {
-    priceId: "price_standard_15days",
+    priceId: "price_1SuBk3Ric3VtmD7tJ23qLcMP",
     days: 15,
   },
   premium: {
-    priceId: "price_premium_30days",
+    priceId: "price_1SuBkmRic3VtmD7tnXtXQbnI",
     days: 30,
   },
 };
-
-
 
 exports.createPromotionSubscription = async (req, res) => {
   try {

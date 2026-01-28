@@ -85,18 +85,29 @@ const serviceSchema = new mongoose.Schema({
     ],
     default: [],
   },
-  isPromoted: { type: Boolean, default: false },
-  promotionStart: { type: Date, default: null },
-  promotionEnd: { type: Date, default: null },
-  promotionBy: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "User",
-    default: null,
-  },
-  promotionAmount: { type: Number, default: 0 },
-  promotionPaymentId: { type: String, default: null },
-  created_at: { type: Date, default: Date.now },
-  updated_at: { type: Date, default: Date.now },
+  // PROMOTION
+isPromoted: { type: Boolean, default: false },
+
+promotionType: { type: String, enum: ["one_time", "subscription"], default: null },
+promotionPlanDays: { type: Number, default: null },
+
+promotionStart: { type: Date, default: null },
+promotionEnd: { type: Date, default: null },
+
+promotionAmount: { type: Number, default: 0 },
+promotionPaymentId: { type: String, default: null },
+
+promotionSubscriptionId: { type: String, default: null },
+promotionPriceId: { type: String, default: null },
+
+promotionAutoRenew: { type: Boolean, default: false },
+promotionStatus: {
+  type: String,
+  enum: ["active", "cancelled", "expired", "payment_failed"],
+  default: null,
+},
+promotionCancelledAt: { type: Date, default: null },
+
 });
 
 serviceSchema.index({ location: "2dsphere" });

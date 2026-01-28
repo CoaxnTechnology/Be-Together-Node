@@ -22,6 +22,7 @@ const connectDB = require("./utils/connect");
 const app = express();
 const crypto = require("crypto");
 const { exec } = require("child_process");
+const promotionSubscription = require("./routes/promotionSubscription.Routes");
 // --- KEEP RAW ONLY FOR GITHUB ---
 app.post("/webhook/github", express.raw({ type: "application/json" }), (req, res) => {
   console.log("🔥 BACKEND WEBHOOK HIT");
@@ -100,7 +101,7 @@ app.use("/api/admin/cancellation", cancellationRoutes);
 app.use("/api/stripe/connect", stripeRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/payment/violation", paymentViolationRoutes);
-
+app.use("/api/pramotion",promotionSubscription)
 // Connect to MongoDB (live Atlas)
 app.use("/api/admin", AdminRoutes);
 // Start server

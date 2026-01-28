@@ -43,6 +43,12 @@ function formatTimeToAMPM(timeStr) {
   if (!m.isValid()) return null;
   return m.format("hh:mm A");
 }
+const SUBSCRIPTION_PLANS = {
+  basic: { days: 7 },
+  standard: { days: 15 },
+  premium: { days: 30 },
+};
+
 // Main createService function
 exports.createService = async (req, res) => {
   try {
@@ -97,8 +103,7 @@ exports.createService = async (req, res) => {
     const selectedTags = tryParse(body.selectedTags) || [];
     const promoteService =
       body.promoteService === true || body.promoteService === "true";
-    const promotionAmount = Number(body.amount || 0);
-    const paymentMethodId = body.paymentMethodId;
+
     // ⭐ GET CURRENCY (service-level)
     const currency = body.currency || user.currency || "EUR";
 
@@ -142,7 +147,7 @@ exports.createService = async (req, res) => {
       });
 
     const validTags = category.tags.filter((tag) =>
-      selectedTags.map((t) => t.toLowerCase()).includes(tag.toLowerCase())
+      selectedTags.map((t) => t.toLowerCase()).includes(tag.toLowerCase()),
     );
     if (!validTags.length)
       return res.status(400).json({
@@ -215,6 +220,60 @@ exports.createService = async (req, res) => {
 
       // If KYC OK → allow service creation
     }
+    let promotionData = null;
+
+    if (promoteService) {
+      if (!body.promotionSubscriptionId || !body.promotionPlan) {
+        return res.status(400).json({
+          isSuccess: false,
+          message: "promotionSubscriptionId & promotionPlan required",
+        });
+      }
+
+      // 🔒 VERIFY subscription from Stripe
+      const subscription = await stripe.subscriptions.retrieve(
+        body.promotionSubscriptionId,
+      );
+      if (subscription.customer !== user.stripeCustomerId) {
+        return res.status(403).json({
+          isSuccess: false,
+          message: "Subscription does not belong to this user",
+        });
+      }
+
+      if (
+        subscription.status !== "active" &&
+        subscription.status !== "trialing"
+      ) {
+        return res.status(400).json({
+          isSuccess: false,
+          message: "Promotion subscription is not active",
+        });
+      }
+
+      const plan = SUBSCRIPTION_PLANS[body.promotionPlan];
+      if (!plan) {
+        return res.status(400).json({
+          isSuccess: false,
+          message: "Invalid promotion plan",
+        });
+      }
+
+      promotionData = {
+        isPromoted: true,
+        promotionType: "subscription",
+        promotionPlanDays: plan.days,
+        promotionSubscriptionId: subscription.id,
+        promotionPriceId: subscription.items.data[0].price.id,
+        promotionAutoRenew: true,
+        promotionStatus: "active",
+
+        promotionAmount: subscription.items.data[0].price.unit_amount / 100,
+
+        promotionStart: new Date(subscription.current_period_start * 1000),
+        promotionEnd: new Date(subscription.current_period_end * 1000),
+      };
+    }
 
     // Build service payload
     const servicePayload = {
@@ -225,7 +284,7 @@ exports.createService = async (req, res) => {
       price,
       currency, // <-- NOW SAVED IN SERVICE TABLE
       image: serviceImage, // ✅ added
-    
+
       location_name: location.name,
       // city,
       isDoorstepService,
@@ -238,6 +297,7 @@ exports.createService = async (req, res) => {
       max_participants,
       service_type,
       owner: user._id,
+      ...(promotionData || {}),
     };
 
     // Handle time/date for one-time service
@@ -261,92 +321,6 @@ exports.createService = async (req, res) => {
 
     // Save base service
     const createdService = new Service(servicePayload);
-
-    // ---- Promotion Stripe flow ----
-    // if (promoteService && promotionAmount > 0) {
-    //   let customerId = user.stripeCustomerId;
-
-    //   // Create customer in Stripe if not exists
-    //   if (!customerId) {
-    //     const customer = await stripe.customers.create({
-    //       email: user.email,
-    //       name: user.name,
-    //     });
-    //     user.stripeCustomerId = customer.id;
-    //     await user.save();
-    //     customerId = customer.id;
-    //     console.log("Created new Stripe customer:", customerId);
-    //   }
-
-    //   // Ensure payment method is attached
-    //   if (paymentMethodId) {
-    //     const existingPMs = await stripe.paymentMethods.list({
-    //       customer: customerId,
-    //       type: "card",
-    //     });
-    //     console.log(
-    //       "Existing Payment Methods before attach:",
-    //       existingPMs.data.map((pm) => pm.id)
-    //     );
-
-    //     const isAttached = existingPMs.data.some(
-    //       (pm) => pm.id === paymentMethodId
-    //     );
-
-    //     if (!isAttached) {
-    //       try {
-    //         await stripe.paymentMethods.attach(paymentMethodId, {
-    //           customer: customerId,
-    //         });
-    //         console.log(
-    //           "Payment method attached successfully:",
-    //           paymentMethodId
-    //         );
-    //       } catch (err) {
-    //         console.error("Failed to attach payment method:", err);
-    //         return res.status(400).json({
-    //           isSuccess: false,
-    //           message: "Failed to attach payment method",
-    //           error: err.message,
-    //         });
-    //       }
-    //     } else {
-    //       console.log("Payment method already attached:", paymentMethodId);
-    //     }
-
-    //     // Set default payment method
-    //     await stripe.customers.update(customerId, {
-    //       invoice_settings: { default_payment_method: paymentMethodId },
-    //     });
-    //     console.log("Set default payment method:", paymentMethodId);
-
-    //     // Create PaymentIntent
-    //     const paymentIntent = await stripe.paymentIntents.create({
-    //       amount: Math.round(promotionAmount * 100),
-    //       currency: "inr",
-    //       customer: customerId,
-    //       payment_method: paymentMethodId,
-    //       confirm: true,
-    //       off_session: true,
-    //       description: `Promotion payment for service: ${title}`,
-    //     });
-    //     console.log("PaymentIntent created:", paymentIntent.id);
-
-    //     // Mark service as promoted
-    //     const start = new Date();
-    //     const end = new Date();
-    //     end.setDate(start.getDate() + 30);
-
-    //     createdService.isPromoted = true;
-    //     createdService.promotionStart = start;
-    //     createdService.promotionEnd = end;
-    //     createdService.promotionBy = user._id;
-    //     createdService.promotionAmount = promotionAmount;
-    //     createdService.promotionPaymentId = paymentIntent.id;
-    //   }
-    // }
-
-    // Save service
     await createdService.save();
 
     // Link to user
@@ -585,7 +559,7 @@ exports.getServices = async (req, res) => {
         Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
 
       return Number(
-        (R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))).toFixed(2)
+        (R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))).toFixed(2),
       );
     }
 
@@ -596,7 +570,7 @@ exports.getServices = async (req, res) => {
           userLat,
           userLng,
           Number(coords[1]),
-          Number(coords[0])
+          Number(coords[0]),
         );
       } else {
         svc.distance_km = null;
@@ -667,7 +641,7 @@ exports.getServices = async (req, res) => {
             centerLat,
             centerLng,
             Number(coords[1]),
-            Number(coords[0])
+            Number(coords[0]),
           );
           return dist <= maxRadius;
         });
@@ -1272,7 +1246,7 @@ exports.updateService = async (req, res) => {
       const validTags = category.tags.filter((tag) =>
         selectedTags
           .map((t) => String(t).toLowerCase())
-          .includes(tag.toLowerCase())
+          .includes(tag.toLowerCase()),
       );
       if (validTags.length) updatePayload.tags = validTags;
     }
@@ -1297,7 +1271,7 @@ exports.updateService = async (req, res) => {
     // =========================
     // 🖼 IMAGE UPDATE LOGIC
     // =========================
-   // CASE 1️⃣ New image uploaded → delete old local image
+    // CASE 1️⃣ New image uploaded → delete old local image
     if (req.file) {
       console.log("🖼 New image uploaded");
 
@@ -1332,15 +1306,14 @@ exports.updateService = async (req, res) => {
     const updatedService = await Service.findByIdAndUpdate(
       serviceId,
       { $set: updatePayload },
-      { new: true }
+      { new: true },
     );
     console.log("Sending notification...");
-    const notifiedCount = await notificationController.notifyOnUpdate(
-      updatedService
-    );
+    const notifiedCount =
+      await notificationController.notifyOnUpdate(updatedService);
     console.log("Notification triggered");
     console.log(
-      `📣 Total users notified for service "${updatedService.title}": ${notifiedCount}`
+      `📣 Total users notified for service "${updatedService.title}": ${notifiedCount}`,
     );
     console.log("Notification process completed no errors ✅");
 
@@ -1401,13 +1374,13 @@ exports.getservicbyId = async (req, res) => {
     // Populate owner and category
     await service.populate(
       "owner",
-      "name profile_image notifyOnProfileView fcmToken"
+      "name profile_image notifyOnProfileView fcmToken",
     );
     await service.populate("category", "name");
 
     console.log(`✅ Service found: ${service.title}`);
     console.log(
-      `📌 Owner: ${service.owner.name}, notifyOnProfileView: ${service.owner.notifyOnProfileView}`
+      `📌 Owner: ${service.owner.name}, notifyOnProfileView: ${service.owner.notifyOnProfileView}`,
     );
 
     // Notify owner if viewerId is provided
@@ -1415,10 +1388,10 @@ exports.getservicbyId = async (req, res) => {
       const viewer = await User.findById(viewerId).select("name profile_image");
       if (viewer) {
         console.log(
-          `🚀 Sending view notification to owner for viewer ${viewerId}`
+          `🚀 Sending view notification to owner for viewer ${viewerId}`,
         );
         notifyOnServiceView(service, viewer).catch((err) =>
-          console.error("Notification error:", err)
+          console.error("Notification error:", err),
         );
       } else {
         console.log(`⚠️ Viewer not found: ${viewerId}`);
@@ -1444,7 +1417,7 @@ exports.getservicbyId = async (req, res) => {
       avgRating = Number((total / reviews.length).toFixed(1));
     }
     console.log(
-      `⭐ Reviews fetched: ${reviews.length}, averageRating: ${avgRating}`
+      `⭐ Reviews fetched: ${reviews.length}, averageRating: ${avgRating}`,
     );
 
     return res.json({
@@ -1605,7 +1578,7 @@ exports.approveServiceDelete = async (req, res) => {
     // =============================
     const service = await Service.findById(serviceId).populate(
       "owner",
-      "name email fcmToken"
+      "name email fcmToken",
     );
 
     if (!service) {
@@ -1651,7 +1624,7 @@ exports.approveServiceDelete = async (req, res) => {
       if (!payment) continue;
 
       const paymentIntent = await stripe.paymentIntents.retrieve(
-        payment.paymentIntentId
+        payment.paymentIntentId,
       );
 
       // 🔴 Payment not captured yet → cancel
@@ -1702,7 +1675,7 @@ exports.approveServiceDelete = async (req, res) => {
         await sendServiceDeleteApprovedEmail(
           booking.customer,
           service,
-          "customer"
+          "customer",
         );
       }
     }
@@ -1726,7 +1699,7 @@ exports.approveServiceDelete = async (req, res) => {
 
     await User.updateOne(
       { _id: service.owner._id },
-      { $pull: { services: service._id } }
+      { $pull: { services: service._id } },
     );
 
     service.deleteRequestStatus = "approved";
@@ -1758,7 +1731,7 @@ exports.getDeleteServiceRequests = async (req, res) => {
       .populate("owner", "name email mobile")
       .populate("category", "name")
       .select(
-        "title price currency isFree location_name owner category createdAt deleteRequestedAt deleteRequestReason"
+        "title price currency isFree location_name owner category createdAt deleteRequestedAt deleteRequestReason",
       )
       .sort({ deleteRequestedAt: -1 })
       .lean();

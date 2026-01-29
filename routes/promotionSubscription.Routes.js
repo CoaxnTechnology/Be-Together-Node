@@ -13,7 +13,7 @@ router.post(
 );
 
 router.post(
-  "/subscription/session/session",
+  "/subscription/session",
   getPromotionSubscriptionFromSession,
 );
 

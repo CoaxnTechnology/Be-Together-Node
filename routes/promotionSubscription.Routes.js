@@ -8,15 +8,15 @@ const {
 } = require("../controller/promotionSubscription.controller");
 
 router.post(
-  "/promotion/subscription/checkout",
+  "/subscription/checkout",
   createPromotionSubscriptionCheckout,
 );
 
 router.get(
-  "/promotion/subscription/session/:sessionId",
+  "/subscription/session/:sessionId",
   getPromotionSubscriptionFromSession,
 );
 
-router.post("/promotion/subscription/cancel", cancelPromotionSubscription);
+router.post("/subscription/cancel", cancelPromotionSubscription);
 
 module.exports = router;

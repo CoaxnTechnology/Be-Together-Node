@@ -101,7 +101,7 @@ app.use("/api/admin/cancellation", cancellationRoutes);
 app.use("/api/stripe/connect", stripeRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/payment/violation", paymentViolationRoutes);
-app.use("/api/pramotion",promotionSubscription)
+app.use("/api/promotion",promotionSubscription)
 // Connect to MongoDB (live Atlas)
 app.use("/api/admin", AdminRoutes);
 // Start server

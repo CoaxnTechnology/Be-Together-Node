@@ -220,20 +220,39 @@ exports.createService = async (req, res) => {
 
       // If KYC OK → allow service creation
     }
+    // ===============================
+    // ⭐ PROMOTION (FRAUD-SAFE)
+    // ===============================
     let promotionData = null;
 
     if (promoteService) {
-      if (!body.promotionSubscriptionId || !body.promotionPlan) {
+      const { promotionSubscriptionId, promotionPlan } = body;
+
+      if (!promotionSubscriptionId || !promotionPlan) {
         return res.status(400).json({
           isSuccess: false,
           message: "promotionSubscriptionId & promotionPlan required",
         });
       }
 
-      // 🔒 VERIFY subscription from Stripe
+      // 🚫 ONE SUBSCRIPTION = ONE SERVICE (DB CHECK)
+      const alreadyUsed = await Service.findOne({
+        promotionSubscriptionId,
+      });
+
+      if (alreadyUsed) {
+        return res.status(400).json({
+          isSuccess: false,
+          message:
+            "This promotion subscription is already used. Please make a new payment to promote another service.",
+        });
+      }
+
+      // 🔐 STRIPE SOURCE OF TRUTH
       const subscription = await stripe.subscriptions.retrieve(
-        body.promotionSubscriptionId,
+        promotionSubscriptionId,
       );
+
       if (subscription.customer !== user.stripeCustomerId) {
         return res.status(403).json({
           isSuccess: false,
@@ -241,100 +260,92 @@ exports.createService = async (req, res) => {
         });
       }
 
-      if (
-        subscription.status !== "active" &&
-        subscription.status !== "trialing"
-      ) {
+      const allowedStatuses = ["active", "trialing"];
+      if (!allowedStatuses.includes(subscription.status)) {
         return res.status(400).json({
           isSuccess: false,
           message: "Promotion subscription is not active",
         });
       }
 
-      const plan = SUBSCRIPTION_PLANS[body.promotionPlan];
+      const plan = SUBSCRIPTION_PLANS[promotionPlan];
       if (!plan) {
         return res.status(400).json({
           isSuccess: false,
           message: "Invalid promotion plan",
         });
       }
-      const startTs = subscription.current_period_start;
-      const endTs = subscription.current_period_end;
+
+      // 🛑 PLAN MISMATCH FRAUD BLOCK
+      const stripePriceId = subscription.items.data[0].price.id;
+      if (stripePriceId !== plan.priceId) {
+        return res.status(400).json({
+          isSuccess: false,
+          message: "Promotion plan does not match subscription",
+        });
+      }
 
       promotionData = {
         isPromoted: true,
         promotionType: "subscription",
         promotionPlanDays: plan.days,
         promotionSubscriptionId: subscription.id,
-        promotionPriceId: subscription.items.data[0].price.id,
+        promotionPriceId: stripePriceId,
         promotionAutoRenew: true,
         promotionStatus: "active",
-
         promotionAmount: subscription.items.data[0].price.unit_amount / 100,
-
-        promotionStart: startTs ? new Date(startTs * 1000) : new Date(),
-
-        promotionEnd: endTs
-          ? new Date(endTs * 1000)
-          : new Date(Date.now() + plan.days * 24 * 60 * 60 * 1000),
+        promotionStart: new Date(subscription.current_period_start * 1000),
+        promotionEnd: new Date(subscription.current_period_end * 1000),
       };
     }
 
     // Build service payload
+    // 📦 BUILD SERVICE PAYLOAD
+    // ===============================
     const servicePayload = {
       title,
       description,
       Language: language,
       isFree,
       price,
-      currency, // <-- NOW SAVED IN SERVICE TABLE
-      image: serviceImage, // ✅ added
+      currency,
+      image: serviceImage,
 
       location_name: location.name,
-      // city,
       isDoorstepService,
       location: {
         type: "Point",
         coordinates: [Number(location.longitude), Number(location.latitude)],
       },
+
       category: category._id,
       tags: validTags,
       max_participants,
       service_type,
       owner: user._id,
+
       ...(promotionData || {}),
     };
 
-    // Handle time/date for one-time service
     if (service_type === "one_time") {
-      const formattedStart = formatTimeToAMPM(start_time);
-      const formattedEnd = formatTimeToAMPM(end_time);
-      if (!formattedStart || !formattedEnd)
-        return res.status(400).json({
-          isSuccess: false,
-          message: "Invalid start_time or end_time",
-        });
-      if (!isValidDateISO(date))
-        return res.status(400).json({
-          isSuccess: false,
-          message: "Valid date (YYYY-MM-DD) required",
-        });
       servicePayload.date = date;
-      servicePayload.start_time = formattedStart;
-      servicePayload.end_time = formattedEnd;
+      servicePayload.start_time = formatTimeToAMPM(start_time);
+      servicePayload.end_time = formatTimeToAMPM(end_time);
     }
 
-    // Save base service
+    // ===============================
+    // 💾 SAVE SERVICE (DB LOCK SAFE)
+    // ===============================
     const createdService = new Service(servicePayload);
     await createdService.save();
 
-    // Link to user
     user.services.push(createdService._id);
     await user.save();
 
-    // Send notifications
-    const notifiedCount = await notifyOnNewService(createdService);
-    console.log(`📣 Notified ${notifiedCount} users`);
+    console.log("✅ Service created", {
+      serviceId: createdService._id,
+      promoted: !!promotionData,
+    });
 
     return res.json({
       isSuccess: true,
@@ -345,9 +356,21 @@ exports.createService = async (req, res) => {
     });
   } catch (err) {
     console.error("createService error:", err);
-    return res
-      .status(500)
-      .json({ isSuccess: false, message: "Server error", error: err.message });
+
+    // 🔒 FINAL DB-LEVEL SAFETY
+    if (err.code === 11000 && err.keyPattern?.promotionSubscriptionId) {
+      return res.status(400).json({
+        isSuccess: false,
+        message:
+          "This promotion subscription was already used. Please purchase a new promotion.",
+      });
+    }
+
+    return res.status(500).json({
+      isSuccess: false,
+      message: "Server error",
+      error: err.message,
+    });
   }
 };
 

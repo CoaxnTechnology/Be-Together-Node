@@ -102,8 +102,13 @@ exports.createPromotionSubscriptionCheckout = async (req, res) => {
 // ==================================================
 exports.getPromotionSubscriptionFromSession = async (req, res) => {
   try {
-    const { sessionId } = req.params;
-
+    const { sessionId } = req.body;
+    if (!sessionId) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "sessionId is required",
+      });
+    }
     const session = await stripe.checkout.sessions.retrieve(sessionId, {
       expand: ["subscription"],
     });

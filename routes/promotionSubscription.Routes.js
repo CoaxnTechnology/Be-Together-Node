@@ -12,8 +12,8 @@ router.post(
   createPromotionSubscriptionCheckout,
 );
 
-router.get(
-  "/subscription/session/:sessionId",
+router.post(
+  "/subscription/session/session",
   getPromotionSubscriptionFromSession,
 );
 

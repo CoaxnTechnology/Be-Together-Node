@@ -1,9 +1,12 @@
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const User = require("../model/User");
-// Promotion subscription plans (Stripe PRICE IDs)
+
+// ===============================
+// PROMOTION SUBSCRIPTION PLANS
+// ===============================
 const SUBSCRIPTION_PLANS = {
   basic: {
-    priceId: "price_1SuBhHRic3VtmD7tZJ7O7806", // Stripe dashboard
+    priceId: "price_1SuBhHRic3VtmD7tZJ7O7806",
     days: 7,
   },
   standard: {
@@ -16,14 +19,17 @@ const SUBSCRIPTION_PLANS = {
   },
 };
 
-exports.createPromotionSubscription = async (req, res) => {
+// ==================================================
+// 1️⃣ CREATE PROMOTION SUBSCRIPTION (CHECKOUT URL)
+// ==================================================
+exports.createPromotionSubscriptionCheckout = async (req, res) => {
   try {
-    const { userId, promotionPlan, paymentMethodId } = req.body;
+    const { userId, promotionPlan } = req.body;
 
-    if (!userId || !promotionPlan || !paymentMethodId) {
+    if (!userId || !promotionPlan) {
       return res.status(400).json({
         isSuccess: false,
-        message: "userId, promotionPlan, paymentMethodId required",
+        message: "userId & promotionPlan required",
       });
     }
 
@@ -35,62 +41,126 @@ exports.createPromotionSubscription = async (req, res) => {
       });
     }
 
-    // 1️⃣ Get / create Stripe customer
-    let customerId;
     const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        isSuccess: false,
+        message: "User not found",
+      });
+    }
 
-    if (!user.stripeCustomerId) {
+    // 🔹 Create Stripe customer if not exists
+    let customerStripeId = user.stripeCustomerId;
+    if (!customerStripeId) {
       const customer = await stripe.customers.create({
         email: user.email,
         name: user.name,
       });
       user.stripeCustomerId = customer.id;
       await user.save();
+      customerStripeId = customer.id;
     }
 
-    customerId = user.stripeCustomerId;
+    // 🔹 Create Checkout Session (SUBSCRIPTION)
+    const session = await stripe.checkout.sessions.create({
+      mode: "subscription",
+      customer: customerStripeId,
+      payment_method_types: ["card"],
 
-    // 2️⃣ Attach payment method (MANDATE CREATED HERE)
-    await stripe.paymentMethods.attach(paymentMethodId, {
-      customer: customerId,
-    });
+      line_items: [
+        {
+          price: plan.priceId,
+          quantity: 1,
+        },
+      ],
 
-    await stripe.customers.update(customerId, {
-      invoice_settings: {
-        default_payment_method: paymentMethodId,
-      },
-    });
-
-    // 3️⃣ Create subscription (AUTO-RENEW)
-    const subscription = await stripe.subscriptions.create({
-      customer: customerId,
-      items: [{ price: plan.priceId }],
-      payment_settings: {
-        payment_method_types: ["card", "sepa_debit"],
-        save_default_payment_method: "on_subscription",
-      },
-      expand: ["latest_invoice.payment_intent"],
       metadata: {
         userId,
         promotionPlan,
       },
+
+      success_url:
+        "https://yourapp.com/promotion-success?session_id={CHECKOUT_SESSION_ID}",
+      cancel_url: "https://yourapp.com/promotion-cancel",
     });
 
     return res.json({
       isSuccess: true,
-      message: "Promotion subscription created (auto-renew enabled)",
-      data: {
-        subscriptionId: subscription.id,
-        status: subscription.status,
-        promotionPlan,
-      },
+      redirectUrl: session.url, // 🔥 Mobile WebView uses this
     });
   } catch (err) {
-    console.error("createPromotionSubscription error:", err);
+    console.error("createPromotionSubscriptionCheckout error:", err);
     return res.status(500).json({
       isSuccess: false,
-      message: "Server error",
-      error: err.message,
+      message: err.message,
+    });
+  }
+};
+
+// ==================================================
+// 2️⃣ GET SUBSCRIPTION ID FROM CHECKOUT SESSION
+// ==================================================
+exports.getPromotionSubscriptionFromSession = async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+
+    const session = await stripe.checkout.sessions.retrieve(sessionId, {
+      expand: ["subscription"],
+    });
+
+    if (!session.subscription) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Subscription not found for this session",
+      });
+    }
+
+    return res.json({
+      isSuccess: true,
+      subscriptionId: session.subscription.id,
+      promotionPlan: session.metadata.promotionPlan,
+      status: session.subscription.status,
+      currentPeriodStart: session.subscription.current_period_start,
+      currentPeriodEnd: session.subscription.current_period_end,
+    });
+  } catch (err) {
+    console.error("getPromotionSubscriptionFromSession error:", err);
+    return res.status(500).json({
+      isSuccess: false,
+      message: err.message,
+    });
+  }
+};
+
+// ==================================================
+// 3️⃣ CANCEL PROMOTION SUBSCRIPTION (OPTIONAL)
+// ==================================================
+exports.cancelPromotionSubscription = async (req, res) => {
+  try {
+    const { subscriptionId } = req.body;
+
+    if (!subscriptionId) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "subscriptionId required",
+      });
+    }
+
+    const subscription = await stripe.subscriptions.update(subscriptionId, {
+      cancel_at_period_end: true,
+    });
+
+    return res.json({
+      isSuccess: true,
+      message: "Subscription will be cancelled at period end",
+      status: subscription.status,
+      cancelAt: subscription.cancel_at,
+    });
+  } catch (err) {
+    console.error("cancelPromotionSubscription error:", err);
+    return res.status(500).json({
+      isSuccess: false,
+      message: err.message,
     });
   }
 };

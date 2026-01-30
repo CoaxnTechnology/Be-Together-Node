@@ -120,7 +120,7 @@ exports.createPromotionSubscriptionCheckout = async (req, res) => {
 // ==================================================
 // 2️⃣ CONFIRM PROMOTION AFTER PAYMENT SUCCESS
 // ==================================================
-exports.getPromotionSubscriptionFromSession = async (req, res) => {
+exports.confirmPromotionAfterPayment = async (req, res) => {
   try {
     const { sessionId } = req.body;
 
@@ -131,19 +131,40 @@ exports.getPromotionSubscriptionFromSession = async (req, res) => {
       });
     }
 
-    const session = await stripe.checkout.sessions.retrieve(sessionId, {
-      expand: ["subscription"],
-    });
+    // 1️⃣ Retrieve checkout session
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
 
     if (!session.subscription) {
       return res.status(400).json({
         isSuccess: false,
-        message: "Subscription not found",
+        message: "Subscription not found in session",
+      });
+    }
+
+    // 2️⃣ Retrieve full subscription safely
+    const subscriptionId =
+      typeof session.subscription === "string"
+        ? session.subscription
+        : session.subscription.id;
+
+    const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+
+    // 3️⃣ Validate subscription status
+    if (!["active", "trialing"].includes(subscription.status)) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Subscription not active",
       });
     }
 
     const { userId, serviceId, promotionPlan } = session.metadata;
-    const subscription = session.subscription;
+
+    if (!userId || !serviceId || !promotionPlan) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Invalid metadata",
+      });
+    }
 
     const plan = SUBSCRIPTION_PLANS[promotionPlan];
     if (!plan) {
@@ -169,13 +190,7 @@ exports.getPromotionSubscriptionFromSession = async (req, res) => {
       });
     }
 
-    if (!["active", "trialing"].includes(subscription.status)) {
-      return res.status(400).json({
-        isSuccess: false,
-        message: "Subscription not active",
-      });
-    }
-
+    // 4️⃣ Plan fraud protection
     const stripePriceId = subscription.items.data[0].price.id;
 
     if (stripePriceId !== plan.priceId) {
@@ -185,7 +200,28 @@ exports.getPromotionSubscriptionFromSession = async (req, res) => {
       });
     }
 
-    // ✅ APPLY PROMOTION
+    // 5️⃣ Safe Date Validation
+    const startTs = subscription.current_period_start;
+    const endTs = subscription.current_period_end;
+
+    if (!startTs || !endTs) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Stripe subscription period missing",
+      });
+    }
+
+    const startDate = new Date(startTs * 1000);
+    const endDate = new Date(endTs * 1000);
+
+    if (isNaN(startDate) || isNaN(endDate)) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Invalid subscription dates",
+      });
+    }
+
+    // 6️⃣ APPLY PROMOTION
     service.isPromoted = true;
     service.promotionType = "subscription";
     service.promotionSubscriptionId = subscription.id;
@@ -195,20 +231,6 @@ exports.getPromotionSubscriptionFromSession = async (req, res) => {
     service.promotionStatus = "active";
     service.promotionAmount =
       subscription.items.data[0].price.unit_amount / 100;
-
-    const startTs = subscription.current_period_start;
-    const endTs = subscription.current_period_end;
-
-    const startDate = startTs ? new Date(startTs * 1000) : null;
-    const endDate = endTs ? new Date(endTs * 1000) : null;
-
-    if (!startDate || !endDate || isNaN(startDate) || isNaN(endDate)) {
-      return res.status(400).json({
-        isSuccess: false,
-        message: "Stripe returned invalid promotion period",
-      });
-    }
-
     service.promotionStart = startDate;
     service.promotionEnd = endDate;
 
@@ -227,10 +249,12 @@ exports.getPromotionSubscriptionFromSession = async (req, res) => {
   }
 };
 
+
+
 // ==================================================
 // 3️⃣ CANCEL PROMOTION (AT PERIOD END)
 // ==================================================
-exports.cancelPromotionSubscription = async (req, res) => {
+exports.getPromotionSubscriptionFromSession = async (req, res) => {
   try {
     const { subscriptionId } = req.body;
 

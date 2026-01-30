@@ -101,9 +101,6 @@ exports.createService = async (req, res) => {
     const max_participants = Number(body.max_participants || 1);
     const categoryId = body.categoryId;
     const selectedTags = tryParse(body.selectedTags) || [];
-    const promoteService =
-      body.promoteService === true || body.promoteService === "true";
-
     // ⭐ GET CURRENCY (service-level)
     const currency = body.currency || user.currency || "EUR";
 
@@ -220,84 +217,6 @@ exports.createService = async (req, res) => {
 
       // If KYC OK → allow service creation
     }
-    // ===============================
-    // ⭐ PROMOTION (FRAUD-SAFE)
-    // ===============================
-    let promotionData = null;
-
-    if (promoteService) {
-      const { promotionSubscriptionId, promotionPlan } = body;
-
-      if (!promotionSubscriptionId || !promotionPlan) {
-        return res.status(400).json({
-          isSuccess: false,
-          message: "promotionSubscriptionId & promotionPlan required",
-        });
-      }
-
-      // 🚫 ONE SUBSCRIPTION = ONE SERVICE (DB CHECK)
-      const alreadyUsed = await Service.findOne({
-        promotionSubscriptionId,
-      });
-
-      if (alreadyUsed) {
-        return res.status(400).json({
-          isSuccess: false,
-          message:
-            "This promotion subscription is already used. Please make a new payment to promote another service.",
-        });
-      }
-
-      // 🔐 STRIPE SOURCE OF TRUTH
-      const subscription = await stripe.subscriptions.retrieve(
-        promotionSubscriptionId,
-      );
-
-      if (subscription.customer !== user.stripeCustomerId) {
-        return res.status(403).json({
-          isSuccess: false,
-          message: "Subscription does not belong to this user",
-        });
-      }
-
-      const allowedStatuses = ["active", "trialing"];
-      if (!allowedStatuses.includes(subscription.status)) {
-        return res.status(400).json({
-          isSuccess: false,
-          message: "Promotion subscription is not active",
-        });
-      }
-
-      const plan = SUBSCRIPTION_PLANS[promotionPlan];
-      if (!plan) {
-        return res.status(400).json({
-          isSuccess: false,
-          message: "Invalid promotion plan",
-        });
-      }
-
-      // 🛑 PLAN MISMATCH FRAUD BLOCK
-      const stripePriceId = subscription.items.data[0].price.id;
-      if (stripePriceId !== plan.priceId) {
-        return res.status(400).json({
-          isSuccess: false,
-          message: "Promotion plan does not match subscription",
-        });
-      }
-
-      promotionData = {
-        isPromoted: true,
-        promotionType: "subscription",
-        promotionPlanDays: plan.days,
-        promotionSubscriptionId: subscription.id,
-        promotionPriceId: stripePriceId,
-        promotionAutoRenew: true,
-        promotionStatus: "active",
-        promotionAmount: subscription.items.data[0].price.unit_amount / 100,
-        promotionStart: new Date(subscription.current_period_start * 1000),
-        promotionEnd: new Date(subscription.current_period_end * 1000),
-      };
-    }
 
     // Build service payload
     // 📦 BUILD SERVICE PAYLOAD
@@ -323,8 +242,6 @@ exports.createService = async (req, res) => {
       max_participants,
       service_type,
       owner: user._id,
-
-      ...(promotionData || {}),
     };
 
     if (service_type === "one_time") {
@@ -344,27 +261,15 @@ exports.createService = async (req, res) => {
 
     console.log("✅ Service created", {
       serviceId: createdService._id,
-      promoted: !!promotionData,
     });
 
     return res.json({
       isSuccess: true,
-      message: promoteService
-        ? "Service created & promoted successfully 🎉"
-        : "Service created successfully ✅",
+      message: "Service created successfully ✅",
       data: createdService,
     });
   } catch (err) {
     console.error("createService error:", err);
-
-    // 🔒 FINAL DB-LEVEL SAFETY
-    if (err.code === 11000 && err.keyPattern?.promotionSubscriptionId) {
-      return res.status(400).json({
-        isSuccess: false,
-        message:
-          "This promotion subscription was already used. Please purchase a new promotion.",
-      });
-    }
 
     return res.status(500).json({
       isSuccess: false,

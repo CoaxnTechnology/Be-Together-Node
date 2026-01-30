@@ -1,5 +1,6 @@
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const User = require("../model/User");
+const Service = require("../model/Service");
 
 // ===============================
 // PROMOTION SUBSCRIPTION PLANS
@@ -19,17 +20,19 @@ const SUBSCRIPTION_PLANS = {
   },
 };
 
+
+
 // ==================================================
-// 1️⃣ CREATE PROMOTION SUBSCRIPTION (CHECKOUT URL)
+// 1️⃣ CREATE PROMOTION SUBSCRIPTION CHECKOUT (SERVICE REQUIRED)
 // ==================================================
 exports.createPromotionSubscriptionCheckout = async (req, res) => {
   try {
-    const { userId, promotionPlan } = req.body;
+    const { userId, serviceId, promotionPlan } = req.body;
 
-    if (!userId || !promotionPlan) {
+    if (!userId || !serviceId || !promotionPlan) {
       return res.status(400).json({
         isSuccess: false,
-        message: "userId & promotionPlan required",
+        message: "userId, serviceId & promotionPlan required",
       });
     }
 
@@ -49,19 +52,36 @@ exports.createPromotionSubscriptionCheckout = async (req, res) => {
       });
     }
 
+    const service = await Service.findById(serviceId);
+    if (!service || service.owner.toString() !== userId) {
+      return res.status(403).json({
+        isSuccess: false,
+        message: "Invalid service",
+      });
+    }
+
+    if (service.isPromoted) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Service already promoted",
+      });
+    }
+
     // 🔹 Create Stripe customer if not exists
     let customerStripeId = user.stripeCustomerId;
+
     if (!customerStripeId) {
       const customer = await stripe.customers.create({
         email: user.email,
         name: user.name,
       });
+
       user.stripeCustomerId = customer.id;
       await user.save();
       customerStripeId = customer.id;
     }
 
-    // 🔹 Create Checkout Session (SUBSCRIPTION)
+    // 🔹 Create Checkout Session
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       customer: customerStripeId,
@@ -76,20 +96,24 @@ exports.createPromotionSubscriptionCheckout = async (req, res) => {
 
       metadata: {
         userId,
+        serviceId,
         promotionPlan,
       },
 
       success_url:
         "https://yourapp.com/promotion-success?session_id={CHECKOUT_SESSION_ID}",
-      cancel_url: "https://yourapp.com/promotion-cancel",
+
+      cancel_url:
+        "https://yourapp.com/promotion-cancel?serviceId=" + serviceId,
     });
 
     return res.json({
       isSuccess: true,
-      redirectUrl: session.url, // 🔥 Mobile WebView uses this
+      redirectUrl: session.url,
     });
+
   } catch (err) {
-    console.error("createPromotionSubscriptionCheckout error:", err);
+    console.error("createPromotionCheckout error:", err);
     return res.status(500).json({
       isSuccess: false,
       message: err.message,
@@ -97,18 +121,22 @@ exports.createPromotionSubscriptionCheckout = async (req, res) => {
   }
 };
 
+
+
 // ==================================================
-// 2️⃣ GET SUBSCRIPTION ID FROM CHECKOUT SESSION
+// 2️⃣ CONFIRM PROMOTION AFTER PAYMENT SUCCESS
 // ==================================================
 exports.getPromotionSubscriptionFromSession = async (req, res) => {
   try {
     const { sessionId } = req.body;
+
     if (!sessionId) {
       return res.status(400).json({
         isSuccess: false,
-        message: "sessionId is required",
+        message: "sessionId required",
       });
     }
+
     const session = await stripe.checkout.sessions.retrieve(sessionId, {
       expand: ["subscription"],
     });
@@ -116,20 +144,81 @@ exports.getPromotionSubscriptionFromSession = async (req, res) => {
     if (!session.subscription) {
       return res.status(400).json({
         isSuccess: false,
-        message: "Subscription not found for this session",
+        message: "Subscription not found",
       });
     }
 
+    const { userId, serviceId, promotionPlan } = session.metadata;
+    const subscription = session.subscription;
+
+    const plan = SUBSCRIPTION_PLANS[promotionPlan];
+    if (!plan) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Invalid promotion plan",
+      });
+    }
+
+    const service = await Service.findById(serviceId);
+
+    if (!service || service.owner.toString() !== userId) {
+      return res.status(403).json({
+        isSuccess: false,
+        message: "Invalid service",
+      });
+    }
+
+    if (service.isPromoted) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Service already promoted",
+      });
+    }
+
+    if (!["active", "trialing"].includes(subscription.status)) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Subscription not active",
+      });
+    }
+
+    const stripePriceId = subscription.items.data[0].price.id;
+
+    if (stripePriceId !== plan.priceId) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Plan mismatch",
+      });
+    }
+
+    // ✅ APPLY PROMOTION
+    service.isPromoted = true;
+    service.promotionType = "subscription";
+    service.promotionSubscriptionId = subscription.id;
+    service.promotionPriceId = stripePriceId;
+    service.promotionPlanDays = plan.days;
+    service.promotionAutoRenew = true;
+    service.promotionStatus = "active";
+    service.promotionAmount =
+      subscription.items.data[0].price.unit_amount / 100;
+
+    service.promotionStart = new Date(
+      subscription.current_period_start * 1000
+    );
+
+    service.promotionEnd = new Date(
+      subscription.current_period_end * 1000
+    );
+
+    await service.save();
+
     return res.json({
       isSuccess: true,
-      subscriptionId: session.subscription.id,
-      promotionPlan: session.metadata.promotionPlan,
-      status: session.subscription.status,
-      currentPeriodStart: session.subscription.current_period_start,
-      currentPeriodEnd: session.subscription.current_period_end,
+      message: "Service promoted successfully 🎉",
     });
+
   } catch (err) {
-    console.error("getPromotionSubscriptionFromSession error:", err);
+    console.error("confirmPromotion error:", err);
     return res.status(500).json({
       isSuccess: false,
       message: err.message,
@@ -137,8 +226,10 @@ exports.getPromotionSubscriptionFromSession = async (req, res) => {
   }
 };
 
+
+
 // ==================================================
-// 3️⃣ CANCEL PROMOTION SUBSCRIPTION (OPTIONAL)
+// 3️⃣ CANCEL PROMOTION (AT PERIOD END)
 // ==================================================
 exports.cancelPromotionSubscription = async (req, res) => {
   try {
@@ -157,10 +248,11 @@ exports.cancelPromotionSubscription = async (req, res) => {
 
     return res.json({
       isSuccess: true,
-      message: "Subscription will be cancelled at period end",
+      message: "Subscription will cancel at period end",
       status: subscription.status,
       cancelAt: subscription.cancel_at,
     });
+
   } catch (err) {
     console.error("cancelPromotionSubscription error:", err);
     return res.status(500).json({

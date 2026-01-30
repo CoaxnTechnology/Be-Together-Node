@@ -3,7 +3,7 @@ const User = require("../model/User");
 const Service = require("../model/Service");
 
 // ===============================
-// PROMOTION SUBSCRIPTION PLANS
+// PROMOTION PLANS
 // ===============================
 const SUBSCRIPTION_PLANS = {
   basic: {
@@ -20,9 +20,11 @@ const SUBSCRIPTION_PLANS = {
   },
 };
 
-// ==================================================
-// 1️⃣ CREATE PROMOTION SUBSCRIPTION CHECKOUT (SERVICE REQUIRED)
-// ==================================================
+
+
+// ======================================================
+// 1️⃣ CREATE PROMOTION CHECKOUT SESSION
+// ======================================================
 exports.createPromotionSubscriptionCheckout = async (req, res) => {
   try {
     const { userId, serviceId, promotionPlan } = req.body;
@@ -43,20 +45,18 @@ exports.createPromotionSubscriptionCheckout = async (req, res) => {
     }
 
     const user = await User.findById(userId);
-    if (!user) {
+    if (!user)
       return res.status(404).json({
         isSuccess: false,
         message: "User not found",
       });
-    }
 
     const service = await Service.findById(serviceId);
-    if (!service || service.owner.toString() !== userId) {
+    if (!service || service.owner.toString() !== userId)
       return res.status(403).json({
         isSuccess: false,
         message: "Invalid service",
       });
-    }
 
     if (service.isPromoted) {
       return res.status(400).json({
@@ -65,10 +65,10 @@ exports.createPromotionSubscriptionCheckout = async (req, res) => {
       });
     }
 
-    // 🔹 Create Stripe customer if not exists
-    let customerStripeId = user.stripeCustomerId;
+    // Create Stripe customer if not exists
+    let customerId = user.stripeCustomerId;
 
-    if (!customerStripeId) {
+    if (!customerId) {
       const customer = await stripe.customers.create({
         email: user.email,
         name: user.name,
@@ -76,13 +76,13 @@ exports.createPromotionSubscriptionCheckout = async (req, res) => {
 
       user.stripeCustomerId = customer.id;
       await user.save();
-      customerStripeId = customer.id;
+      customerId = customer.id;
     }
 
-    // 🔹 Create Checkout Session
+    // Create Checkout session
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
-      customer: customerStripeId,
+      customer: customerId,
       payment_method_types: ["card"],
 
       line_items: [
@@ -101,7 +101,8 @@ exports.createPromotionSubscriptionCheckout = async (req, res) => {
       success_url:
         "https://yourapp.com/promotion-success?session_id={CHECKOUT_SESSION_ID}",
 
-      cancel_url: "https://yourapp.com/promotion-cancel?serviceId=" + serviceId,
+      cancel_url:
+        "https://yourapp.com/promotion-cancel?serviceId=" + serviceId,
     });
 
     return res.json({
@@ -117,9 +118,11 @@ exports.createPromotionSubscriptionCheckout = async (req, res) => {
   }
 };
 
-// ==================================================
+
+
+// ======================================================
 // 2️⃣ CONFIRM PROMOTION AFTER PAYMENT SUCCESS
-// ==================================================
+// ======================================================
 exports.confirmPromotionAfterPayment = async (req, res) => {
   try {
     const { sessionId } = req.body;
@@ -251,9 +254,9 @@ exports.confirmPromotionAfterPayment = async (req, res) => {
 
 
 
-// ==================================================
+// ======================================================
 // 3️⃣ CANCEL PROMOTION (AT PERIOD END)
-// ==================================================
+// ======================================================
 exports.cancelPromotionSubscription = async (req, res) => {
   try {
     const { subscriptionId } = req.body;

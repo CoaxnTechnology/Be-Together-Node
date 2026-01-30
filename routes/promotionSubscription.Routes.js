@@ -3,7 +3,7 @@ const router = express.Router();
 
 const {
   createPromotionSubscriptionCheckout,
-  getPromotionSubscriptionFromSession,
+  confirmPromotionAfterPayment,
   cancelPromotionSubscription,
 } = require("../controller/promotionSubscription.controller");
 
@@ -14,7 +14,7 @@ router.post(
 
 router.post(
   "/subscription/session",
-  getPromotionSubscriptionFromSession,
+  confirmPromotionAfterPayment,
 );
 
 router.post("/subscription/cancel", cancelPromotionSubscription);

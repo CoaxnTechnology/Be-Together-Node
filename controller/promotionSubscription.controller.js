@@ -254,38 +254,6 @@ exports.confirmPromotionAfterPayment = async (req, res) => {
 // ==================================================
 // 3️⃣ CANCEL PROMOTION (AT PERIOD END)
 // ==================================================
-exports.getPromotionSubscriptionFromSession = async (req, res) => {
-  try {
-    const { subscriptionId } = req.body;
-
-    if (!subscriptionId) {
-      return res.status(400).json({
-        isSuccess: false,
-        message: "subscriptionId required",
-      });
-    }
-
-    const subscription = await stripe.subscriptions.update(subscriptionId, {
-      cancel_at_period_end: true,
-    });
-
-    return res.json({
-      isSuccess: true,
-      message: "Subscription will cancel at period end",
-      status: subscription.status,
-      cancelAt: subscription.cancel_at,
-    });
-  } catch (err) {
-    console.error("cancelPromotionSubscription error:", err);
-    return res.status(500).json({
-      isSuccess: false,
-      message: err.message,
-    });
-  }
-};
-// ==================================================
-// 3️⃣ CANCEL PROMOTION (AT PERIOD END)
-// ==================================================
 exports.cancelPromotionSubscription = async (req, res) => {
   try {
     const { subscriptionId } = req.body;
@@ -307,7 +275,6 @@ exports.cancelPromotionSubscription = async (req, res) => {
       status: subscription.status,
       cancelAt: subscription.cancel_at,
     });
-
   } catch (err) {
     console.error("cancelPromotionSubscription error:", err);
     return res.status(500).json({

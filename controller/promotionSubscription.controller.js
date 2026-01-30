@@ -20,8 +20,6 @@ const SUBSCRIPTION_PLANS = {
   },
 };
 
-
-
 // ==================================================
 // 1️⃣ CREATE PROMOTION SUBSCRIPTION CHECKOUT (SERVICE REQUIRED)
 // ==================================================
@@ -103,15 +101,13 @@ exports.createPromotionSubscriptionCheckout = async (req, res) => {
       success_url:
         "https://yourapp.com/promotion-success?session_id={CHECKOUT_SESSION_ID}",
 
-      cancel_url:
-        "https://yourapp.com/promotion-cancel?serviceId=" + serviceId,
+      cancel_url: "https://yourapp.com/promotion-cancel?serviceId=" + serviceId,
     });
 
     return res.json({
       isSuccess: true,
       redirectUrl: session.url,
     });
-
   } catch (err) {
     console.error("createPromotionCheckout error:", err);
     return res.status(500).json({
@@ -120,8 +116,6 @@ exports.createPromotionSubscriptionCheckout = async (req, res) => {
     });
   }
 };
-
-
 
 // ==================================================
 // 2️⃣ CONFIRM PROMOTION AFTER PAYMENT SUCCESS
@@ -202,13 +196,21 @@ exports.getPromotionSubscriptionFromSession = async (req, res) => {
     service.promotionAmount =
       subscription.items.data[0].price.unit_amount / 100;
 
-    service.promotionStart = new Date(
-      subscription.current_period_start * 1000
-    );
+    const startTs = subscription.current_period_start;
+    const endTs = subscription.current_period_end;
 
-    service.promotionEnd = new Date(
-      subscription.current_period_end * 1000
-    );
+    const startDate = startTs ? new Date(startTs * 1000) : null;
+    const endDate = endTs ? new Date(endTs * 1000) : null;
+
+    if (!startDate || !endDate || isNaN(startDate) || isNaN(endDate)) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Stripe returned invalid promotion period",
+      });
+    }
+
+    service.promotionStart = startDate;
+    service.promotionEnd = endDate;
 
     await service.save();
 
@@ -216,7 +218,6 @@ exports.getPromotionSubscriptionFromSession = async (req, res) => {
       isSuccess: true,
       message: "Service promoted successfully 🎉",
     });
-
   } catch (err) {
     console.error("confirmPromotion error:", err);
     return res.status(500).json({
@@ -225,8 +226,6 @@ exports.getPromotionSubscriptionFromSession = async (req, res) => {
     });
   }
 };
-
-
 
 // ==================================================
 // 3️⃣ CANCEL PROMOTION (AT PERIOD END)
@@ -252,7 +251,6 @@ exports.cancelPromotionSubscription = async (req, res) => {
       status: subscription.status,
       cancelAt: subscription.cancel_at,
     });
-
   } catch (err) {
     console.error("cancelPromotionSubscription error:", err);
     return res.status(500).json({

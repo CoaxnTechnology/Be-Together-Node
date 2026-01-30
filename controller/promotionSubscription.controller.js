@@ -20,8 +20,6 @@ const SUBSCRIPTION_PLANS = {
   },
 };
 
-
-
 // ======================================================
 // 1️⃣ CREATE PROMOTION CHECKOUT SESSION
 // ======================================================
@@ -101,8 +99,7 @@ exports.createPromotionSubscriptionCheckout = async (req, res) => {
       success_url:
         "https://yourapp.com/promotion-success?session_id={CHECKOUT_SESSION_ID}",
 
-      cancel_url:
-        "https://yourapp.com/promotion-cancel?serviceId=" + serviceId,
+      cancel_url: "https://yourapp.com/promotion-cancel?serviceId=" + serviceId,
     });
 
     return res.json({
@@ -117,8 +114,6 @@ exports.createPromotionSubscriptionCheckout = async (req, res) => {
     });
   }
 };
-
-
 
 // ======================================================
 // 2️⃣ CONFIRM PROMOTION AFTER PAYMENT SUCCESS
@@ -204,8 +199,13 @@ exports.confirmPromotionAfterPayment = async (req, res) => {
     }
 
     // 5️⃣ Safe Date Validation
-    const startTs = subscription.current_period_start;
-    const endTs = subscription.current_period_end;
+    // 5️⃣ Safe Date Validation
+    const item = subscription.items.data[0];
+
+    const startTs =
+      subscription.current_period_start || item.current_period_start;
+
+    const endTs = subscription.current_period_end || item.current_period_end;
 
     if (!startTs || !endTs) {
       return res.status(400).json({
@@ -217,7 +217,7 @@ exports.confirmPromotionAfterPayment = async (req, res) => {
     const startDate = new Date(startTs * 1000);
     const endDate = new Date(endTs * 1000);
 
-    if (isNaN(startDate) || isNaN(endDate)) {
+    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
       return res.status(400).json({
         isSuccess: false,
         message: "Invalid subscription dates",
@@ -252,8 +252,6 @@ exports.confirmPromotionAfterPayment = async (req, res) => {
   }
 };
 
-
-
 // ======================================================
 // 3️⃣ CANCEL PROMOTION (AT PERIOD END)
 // ======================================================
@@ -286,4 +284,3 @@ exports.cancelPromotionSubscription = async (req, res) => {
     });
   }
 };
-//

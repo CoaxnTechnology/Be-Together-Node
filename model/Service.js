@@ -103,7 +103,7 @@ promotionPriceId: { type: String, default: null },
 promotionAutoRenew: { type: Boolean, default: false },
 promotionStatus: {
   type: String,
-  enum: ["active", "cancelled", "expired", "payment_failed"],
+  enum: ["active", "cancelled", "expired", "payment_failed", "cancel_scheduled"],
   default: null,
 },
 promotionCancelledAt: { type: Date, default: null },

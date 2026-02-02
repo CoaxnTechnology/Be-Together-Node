@@ -157,29 +157,41 @@ exports.stripeWebhook = async (req, res) => {
     // 2️⃣ AUTO RENEW SUCCESS
     ////////////////////////////////////////////////////////////
     if (event.type === "invoice.paid") {
-      const subscription = await stripe.subscriptions.retrieve(
-        data.subscription
-      );
 
-      const service = await Service.findOne({
-        promotionSubscriptionId: subscription.id,
-      });
+  // Safely get subscription id
+  const subscriptionId =
+    data.subscription ||
+    (data.parent &&
+      data.parent.subscription_details &&
+      data.parent.subscription_details.subscription);
 
-      if (service) {
-        service.promotionStart = new Date(
-          subscription.current_period_start * 1000
-        );
-        service.promotionEnd = new Date(
-          subscription.current_period_end * 1000
-        );
-        service.isPromoted = true;
-        service.promotionStatus = "active";
+  if (!subscriptionId) {
+    console.log("⚠ invoice.paid without subscription (skipped)");
+    return res.json({ received: true });
+  }
 
-        await service.save();
+  const subscription = await stripe.subscriptions.retrieve(subscriptionId);
 
-        console.log("🔄 Subscription renewed");
-      }
-    }
+  const service = await Service.findOne({
+    promotionSubscriptionId: subscription.id,
+  });
+
+  if (service) {
+    service.promotionStart = new Date(
+      subscription.current_period_start * 1000
+    );
+    service.promotionEnd = new Date(
+      subscription.current_period_end * 1000
+    );
+    service.isPromoted = true;
+    service.promotionStatus = "active";
+
+    await service.save();
+
+    console.log("🔄 Subscription renewed safely");
+  }
+}
+
 
     ////////////////////////////////////////////////////////////
     // 3️⃣ CANCEL AT PERIOD END

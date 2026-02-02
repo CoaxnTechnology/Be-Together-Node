@@ -81,7 +81,7 @@ app.post(
     }
 
     try {
-      await promotionController.stripeWebhookHandler(event);
+      await promotionController.stripeWebhook(event);
       console.log("✅ Webhook Processed Successfully");
       res.json({ received: true });
     } catch (err) {

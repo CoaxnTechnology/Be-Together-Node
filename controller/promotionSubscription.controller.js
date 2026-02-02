@@ -254,9 +254,8 @@ exports.cancelPromotionSubscription = async (req, res) => {
 //////////////////////////////////////////////////////////
 // 4️⃣ DAILY CRON JOB (AUTO EXPIRE CLEANUP)
 //////////////////////////////////////////////////////////
-cron.schedule("* * * * *", async () => {
+cron.schedule("0 0 * * *", async () => {
   console.log("⏳ Running daily promotion expiry check...");
-  console.log("Cron running every minute");
   const now = new Date();
 
   const result = await Service.updateMany(

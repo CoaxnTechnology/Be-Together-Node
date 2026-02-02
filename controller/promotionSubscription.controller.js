@@ -95,6 +95,10 @@ exports.createPromotionSubscriptionCheckout = async (req, res) => {
 //////////////////////////////////////////////////////////
 // 2️⃣ STRIPE WEBHOOK HANDLER
 exports.stripeWebhook = async (req, res) => {
+ // console.log("\n==============================");
+  console.log("🔥 STRIPE WEBHOOK HIT");
+  //console.log("==============================");
+
   const sig = req.headers["stripe-signature"];
   let event;
 
@@ -104,6 +108,7 @@ exports.stripeWebhook = async (req, res) => {
       sig,
       process.env.STRIPE_WEBHOOK_SECRET
     );
+    console.log("✅ Event Verified:", event.type);
   } catch (err) {
     console.log("❌ Signature failed:", err.message);
     return res.status(400).send("Webhook Error");
@@ -114,19 +119,23 @@ exports.stripeWebhook = async (req, res) => {
   try {
 
     //////////////////////////////////////////////////////////////
-    // 1️⃣ CHECKOUT COMPLETED (ACTIVATE FIRST TIME)
+    // 1️⃣ CHECKOUT COMPLETED
     //////////////////////////////////////////////////////////////
     if (event.type === "checkout.session.completed") {
+      console.log("➡ checkout.session.completed triggered");
 
       const subscriptionId = data.subscription;
       const serviceId = data.metadata?.serviceId;
 
+      console.log("Subscription ID:", subscriptionId);
+      console.log("Service ID:", serviceId);
+
       if (!subscriptionId || !serviceId) {
+        console.log("⚠ Missing subscriptionId or serviceId");
         return res.json({ received: true });
       }
 
       const subscription = await stripe.subscriptions.retrieve(subscriptionId);
-
       const item = subscription.items?.data?.[0];
 
       if (!item?.current_period_start || !item?.current_period_end) {
@@ -137,13 +146,11 @@ exports.stripeWebhook = async (req, res) => {
       const startDate = new Date(item.current_period_start * 1000);
       const endDate = new Date(item.current_period_end * 1000);
 
-      if (isNaN(startDate) || isNaN(endDate)) {
-        console.log("❌ Invalid date");
+      const service = await Service.findById(serviceId);
+      if (!service) {
+        console.log("❌ Service not found");
         return res.json({ received: true });
       }
-
-      const service = await Service.findById(serviceId);
-      if (!service) return res.json({ received: true });
 
       service.promotionSubscriptionId = subscription.id;
       service.promotionPriceId = item.price.id;
@@ -162,9 +169,12 @@ exports.stripeWebhook = async (req, res) => {
     // 2️⃣ INVOICE PAID (RENEWAL)
     //////////////////////////////////////////////////////////////
     if (event.type === "invoice.paid") {
+      console.log("➡ invoice.paid triggered");
 
       const subscriptionId =
         data.parent?.subscription_details?.subscription;
+
+      console.log("Subscription ID from invoice:", subscriptionId);
 
       if (!subscriptionId) {
         console.log("⚠ No subscription in invoice");
@@ -173,11 +183,6 @@ exports.stripeWebhook = async (req, res) => {
 
       const line = data.lines?.data?.[0];
 
-      if (!line?.period?.start || !line?.period?.end) {
-        console.log("⚠ Invoice period missing");
-        return res.json({ received: true });
-      }
-
       const startDate = new Date(line.period.start * 1000);
       const endDate = new Date(line.period.end * 1000);
 
@@ -185,7 +190,10 @@ exports.stripeWebhook = async (req, res) => {
         promotionSubscriptionId: subscriptionId,
       });
 
-      if (!service) return res.json({ received: true });
+      if (!service) {
+        console.log("❌ Service not found for renewal");
+        return res.json({ received: true });
+      }
 
       service.promotionStart = startDate;
       service.promotionEnd = endDate;
@@ -198,12 +206,15 @@ exports.stripeWebhook = async (req, res) => {
     }
 
     //////////////////////////////////////////////////////////////
-    // 3️⃣ PAYMENT FAILED
+    // 3️⃣ PAYMENT FAILED (CARD REMOVED / BANK DECLINED)
     //////////////////////////////////////////////////////////////
     if (event.type === "invoice.payment_failed") {
+      console.log("➡ invoice.payment_failed triggered");
 
       const subscriptionId =
         data.parent?.subscription_details?.subscription;
+
+      console.log("Failed Subscription:", subscriptionId);
 
       const service = await Service.findOne({
         promotionSubscriptionId: subscriptionId,
@@ -213,13 +224,45 @@ exports.stripeWebhook = async (req, res) => {
         service.isPromoted = false;
         service.promotionStatus = "payment_failed";
         await service.save();
+
+        console.log("❌ Marked as payment_failed in DB");
       }
     }
 
     //////////////////////////////////////////////////////////////
-    // 4️⃣ SUBSCRIPTION DELETED
+    // 4️⃣ SUBSCRIPTION UPDATED (Cancel at period end)
+    //////////////////////////////////////////////////////////////
+    if (event.type === "customer.subscription.updated") {
+      console.log("➡ customer.subscription.updated triggered");
+
+      console.log("Cancel at period end:", data.cancel_at_period_end);
+      console.log("Subscription status:", data.status);
+
+      const service = await Service.findOne({
+        promotionSubscriptionId: data.id,
+      });
+
+      if (!service) {
+        console.log("⚠ Service not found for update");
+        return res.json({ received: true });
+      }
+
+      if (data.cancel_at_period_end) {
+        service.promotionAutoRenew = false;
+        service.promotionStatus = "cancel_scheduled";
+        await service.save();
+
+        console.log("⚠ Auto renew disabled (Cancel at period end)");
+      }
+    }
+
+    //////////////////////////////////////////////////////////////
+    // 5️⃣ SUBSCRIPTION DELETED (Immediate cancel)
     //////////////////////////////////////////////////////////////
     if (event.type === "customer.subscription.deleted") {
+      console.log("➡ customer.subscription.deleted triggered");
+
+      console.log("Subscription Cancelled Immediately:", data.id);
 
       const service = await Service.findOne({
         promotionSubscriptionId: data.id,
@@ -229,10 +272,15 @@ exports.stripeWebhook = async (req, res) => {
         service.isPromoted = false;
         service.promotionStatus = "cancelled";
         service.promotionAutoRenew = false;
+        service.promotionCancelledAt = new Date();
+
         await service.save();
+
+        console.log("🛑 Subscription Fully Cancelled & DB Updated");
       }
     }
 
+    console.log("✅ Webhook Processing Done");
     return res.json({ received: true });
 
   } catch (err) {

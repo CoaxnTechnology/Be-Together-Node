@@ -1,22 +1,17 @@
 const express = require("express");
 const router = express.Router();
+const controller = require("../controller/promotionSubscription.controller");
 
-const {
-  createPromotionSubscriptionCheckout,
-  confirmPromotionAfterPayment,
-  cancelPromotionSubscription,
-} = require("../controller/promotionSubscription.controller");
-
+// 1️⃣ Create Checkout
 router.post(
   "/subscription/checkout",
-  createPromotionSubscriptionCheckout,
+  controller.createPromotionSubscriptionCheckout
 );
 
+// 2️⃣ Cancel Subscription
 router.post(
-  "/subscription/session",
-  confirmPromotionAfterPayment,
+  "/subscription/cancel",
+  controller.cancelPromotionSubscription
 );
-
-router.post("/subscription/cancel", cancelPromotionSubscription);
 
 module.exports = router;

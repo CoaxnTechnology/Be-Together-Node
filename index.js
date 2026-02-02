@@ -23,34 +23,73 @@ const app = express();
 const crypto = require("crypto");
 const { exec } = require("child_process");
 const promotionSubscription = require("./routes/promotionSubscription.Routes");
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
+const promotionController = require("./controller/promotionSubscription.controller");
+
 // --- KEEP RAW ONLY FOR GITHUB ---
-app.post("/webhook/github", express.raw({ type: "application/json" }), (req, res) => {
-  console.log("🔥 BACKEND WEBHOOK HIT");
+app.post(
+  "/webhook/github",
+  express.raw({ type: "application/json" }),
+  (req, res) => {
+    console.log("🔥 BACKEND WEBHOOK HIT");
 
-const secret = process.env.GITHUB_WEBHOOK_SECRET;
-if(!secret){
-  console.log("❌ SECRET NOT SET");
-  return res.status(500).send("no secret");
-}
+    const secret = process.env.GITHUB_WEBHOOK_SECRET;
+    if (!secret) {
+      console.log("❌ SECRET NOT SET");
+      return res.status(500).send("no secret");
+    }
 
-  const signature = req.headers["x-hub-signature-256"];
-  const hmac = crypto.createHmac("sha256", secret);
-  hmac.update(req.body);        // Buffer needed
-  const digest = "sha256=" + hmac.digest("hex");
+    const signature = req.headers["x-hub-signature-256"];
+    const hmac = crypto.createHmac("sha256", secret);
+    hmac.update(req.body); // Buffer needed
+    const digest = "sha256=" + hmac.digest("hex");
 
-  if (signature !== digest) {
-    return res.status(401).send("invalid");
-  }
-//
-  exec("bash /var/www/backend-uat/deploy.sh > /dev/null 2>&1 &");
+    if (signature !== digest) {
+      return res.status(401).send("invalid");
+    }
+    //
+    exec("bash /var/www/backend-uat/deploy.sh > /dev/null 2>&1 &");
 
-  res.status(200).send("received");
-});
+    res.status(200).send("received");
+  },
+);
 app.post("/webhook/frontend", (req, res) => {
   console.log("🔥 FRONTEND DEPLOY HIT");
   exec("bash /var/www/frontend-uat-admin/deploy.sh > /dev/null 2>&1 &");
   res.send("received");
 });
+app.post(
+  "/api/promotion/stripe/webhook",
+  express.raw({ type: "application/json" }),
+  async (req, res) => {
+    console.log("🔥 STRIPE WEBHOOK HIT");
+
+    const sig = req.headers["stripe-signature"];
+    let event;
+
+    try {
+      event = stripe.webhooks.constructEvent(
+        req.body,
+        sig,
+        process.env.STRIPE_WEBHOOK_SECRET
+      );
+
+      console.log("✅ Webhook Verified:", event.type);
+    } catch (err) {
+      console.error("❌ Webhook Signature Error:", err.message);
+      return res.status(400).send("Webhook Error");
+    }
+
+    try {
+      await promotionController.stripeWebhookHandler(event);
+      console.log("✅ Webhook Processed Successfully");
+      res.json({ received: true });
+    } catch (err) {
+      console.error("❌ Webhook Processing Failed:", err);
+      res.status(500).send("Webhook Failed");
+    }
+  }
+);
 
 
 // Middleware
@@ -62,7 +101,7 @@ app.use(
     origin: "*", // Allow all origins (not recommended for production)
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
     credentials: true,
-  })
+  }),
 );
 connectDB();
 
@@ -101,7 +140,7 @@ app.use("/api/admin/cancellation", cancellationRoutes);
 app.use("/api/stripe/connect", stripeRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/payment/violation", paymentViolationRoutes);
-app.use("/api/promotion",promotionSubscription)
+app.use("/api/promotion", promotionSubscription);
 // Connect to MongoDB (live Atlas)
 app.use("/api/admin", AdminRoutes);
 // Start server

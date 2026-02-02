@@ -3,14 +3,14 @@ const Service = require("../model/Service");
 const User = require("../model/User");
 const cron = require("node-cron");
 
-// =======================================
+//////////////////////////////////////////////////////////
 // 🔐 Duplicate Event Protection
-// =======================================
+//////////////////////////////////////////////////////////
 const processedEvents = new Set();
 
-// =======================================
+//////////////////////////////////////////////////////////
 // 📦 PROMOTION PLANS
-// =======================================
+//////////////////////////////////////////////////////////
 const SUBSCRIPTION_PLANS = {
   basic: { priceId: "price_1SuBhHRic3VtmD7tZJ7O7806", days: 7 },
   standard: { priceId: "price_1SuBk3Ric3VtmD7tJ23qLcMP", days: 15 },
@@ -56,6 +56,7 @@ exports.createPromotionSubscriptionCheckout = async (req, res) => {
       });
     }
 
+    // Create Stripe customer if not exists
     let customerId = user.stripeCustomerId;
 
     if (!customerId) {
@@ -74,7 +75,11 @@ exports.createPromotionSubscriptionCheckout = async (req, res) => {
       customer: customerId,
       payment_method_types: ["card"],
       line_items: [{ price: plan.priceId, quantity: 1 }],
-      metadata: { userId, serviceId, promotionPlan },
+      metadata: {
+        userId,
+        serviceId,
+        promotionPlan,
+      },
       success_url:
         "https://yourapp.com/success?session_id={CHECKOUT_SESSION_ID}",
       cancel_url: "https://yourapp.com/cancel",
@@ -91,8 +96,6 @@ exports.createPromotionSubscriptionCheckout = async (req, res) => {
 // 2️⃣ STRIPE WEBHOOK (PRODUCTION SAFE)
 //////////////////////////////////////////////////////////
 exports.stripeWebhook = async (req, res) => {
-  console.log("🔥 STRIPE WEBHOOK HIT");
-
   const sig = req.headers["stripe-signature"];
   let event;
 
@@ -102,48 +105,35 @@ exports.stripeWebhook = async (req, res) => {
       sig,
       process.env.STRIPE_WEBHOOK_SECRET
     );
-    console.log("✅ Webhook Verified:", event.type);
   } catch (err) {
-    console.error("❌ Signature Verification Failed:", err.message);
+    console.error("Webhook signature failed:", err.message);
     return res.status(400).send("Webhook Error");
   }
+
+  // 🔐 Prevent duplicate processing
+  if (processedEvents.has(event.id)) {
+    return res.json({ received: true });
+  }
+  processedEvents.add(event.id);
 
   const data = event.data.object;
 
   try {
     ////////////////////////////////////////////////////////////
-    // 1️⃣ SAVE SUBSCRIPTION DATES (FIRST TIME)
+    // 1️⃣ CHECKOUT COMPLETED (SAVE DATES + ACTIVATE)
     ////////////////////////////////////////////////////////////
     if (event.type === "checkout.session.completed") {
       const { serviceId } = data.metadata || {};
       const subscriptionId = data.subscription;
 
       if (!subscriptionId || !serviceId) {
-        console.log("⚠ Missing subscription or serviceId");
         return res.json({ received: true });
       }
 
       const subscription = await stripe.subscriptions.retrieve(subscriptionId);
 
-      if (
-        !subscription.current_period_start ||
-        !subscription.current_period_end
-      ) {
-        console.log("⚠ Missing subscription dates");
-        return res.json({ received: true });
-      }
-
-      const startDate = new Date(
-        subscription.current_period_start * 1000
-      );
-      const endDate = new Date(
-        subscription.current_period_end * 1000
-      );
-
-      if (isNaN(startDate) || isNaN(endDate)) {
-        console.log("⚠ Invalid subscription dates");
-        return res.json({ received: true });
-      }
+      const startDate = new Date(subscription.current_period_start * 1000);
+      const endDate = new Date(subscription.current_period_end * 1000);
 
       const service = await Service.findById(serviceId);
       if (!service) return res.json({ received: true });
@@ -153,22 +143,26 @@ exports.stripeWebhook = async (req, res) => {
         subscription.items.data[0].price.id;
       service.promotionStart = startDate;
       service.promotionEnd = endDate;
+      service.isPromoted = true;
+      service.promotionStatus = "active";
+      service.promotionAutoRenew = true;
 
       await service.save();
 
-      console.log("📅 Subscription dates saved");
+      console.log("✅ Promotion activated with dates");
     }
 
     ////////////////////////////////////////////////////////////
-    // 2️⃣ ACTIVATE SERVICE AFTER PAYMENT
+    // 2️⃣ RENEWAL PAYMENT SUCCESS
     ////////////////////////////////////////////////////////////
     if (event.type === "invoice.paid") {
       const subscriptionId = data.subscription;
+      if (!subscriptionId) return res.json({ received: true });
 
-      if (!subscriptionId) {
-        console.log("⚠ invoice without subscription");
-        return res.json({ received: true });
-      }
+      const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+
+      const startDate = new Date(subscription.current_period_start * 1000);
+      const endDate = new Date(subscription.current_period_end * 1000);
 
       const service = await Service.findOne({
         promotionSubscriptionId: subscriptionId,
@@ -176,13 +170,14 @@ exports.stripeWebhook = async (req, res) => {
 
       if (!service) return res.json({ received: true });
 
+      service.promotionStart = startDate;
+      service.promotionEnd = endDate;
       service.isPromoted = true;
       service.promotionStatus = "active";
-      service.promotionAutoRenew = true;
 
       await service.save();
 
-      console.log("✅ Service activated");
+      console.log("🔄 Subscription renewed");
     }
 
     ////////////////////////////////////////////////////////////
@@ -196,10 +191,9 @@ exports.stripeWebhook = async (req, res) => {
       });
 
       if (service) {
-        service.promotionStatus = "payment_failed";
         service.isPromoted = false;
+        service.promotionStatus = "payment_failed";
         await service.save();
-        console.log("❌ Payment failed");
       }
     }
 
@@ -215,7 +209,6 @@ exports.stripeWebhook = async (req, res) => {
         if (service) {
           service.promotionAutoRenew = false;
           await service.save();
-          console.log("⚠ Auto renew disabled");
         }
       }
     }
@@ -233,13 +226,12 @@ exports.stripeWebhook = async (req, res) => {
         service.promotionStatus = "cancelled";
         service.promotionAutoRenew = false;
         await service.save();
-        console.log("❌ Subscription cancelled");
       }
     }
 
     res.json({ received: true });
   } catch (err) {
-    console.error("❌ Webhook Processing Error:", err);
+    console.error("Webhook processing error:", err);
     res.status(500).send("Webhook Failed");
   }
 };
@@ -269,7 +261,6 @@ exports.cancelPromotionSubscription = async (req, res) => {
 // 4️⃣ DAILY CRON JOB (AUTO EXPIRE CLEANUP)
 //////////////////////////////////////////////////////////
 cron.schedule("0 0 * * *", async () => {
-  console.log("⏳ Running daily promotion expiry check...");
   const now = new Date();
 
   const result = await Service.updateMany(
@@ -283,8 +274,8 @@ cron.schedule("0 0 * * *", async () => {
         isPromoted: false,
         promotionStatus: "expired",
       },
-    },
+    }
   );
 
-  console.log("Expired promotions updated:", result.modifiedCount);
+  console.log("Expired promotions:", result.modifiedCount);
 });

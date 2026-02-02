@@ -100,7 +100,7 @@ exports.stripeWebhook = async (req, res) => {
     event = stripe.webhooks.constructEvent(
       req.body,
       sig,
-      process.env.STRIPE_WEBHOOK_SECRET
+      process.env.STRIPE_WEBHOOK_SECRET,
     );
 
     console.log("✅ Webhook Verified:", event.type);
@@ -131,20 +131,17 @@ exports.stripeWebhook = async (req, res) => {
       }
 
       const subscription = await stripe.subscriptions.retrieve(
-        data.subscription
+        data.subscription,
       );
 
       service.isPromoted = true;
       service.promotionType = "subscription";
       service.promotionSubscriptionId = subscription.id;
-      service.promotionPriceId =
-        subscription.items.data[0].price.id;
+      service.promotionPriceId = subscription.items.data[0].price.id;
       service.promotionStart = new Date(
-        subscription.current_period_start * 1000
+        subscription.current_period_start * 1000,
       );
-      service.promotionEnd = new Date(
-        subscription.current_period_end * 1000
-      );
+      service.promotionEnd = new Date(subscription.current_period_end * 1000);
       service.promotionStatus = "active";
       service.promotionAutoRenew = true;
 
@@ -157,41 +154,37 @@ exports.stripeWebhook = async (req, res) => {
     // 2️⃣ AUTO RENEW SUCCESS
     ////////////////////////////////////////////////////////////
     if (event.type === "invoice.paid") {
+      // Safely get subscription id
+      const subscriptionId =
+        data.subscription ||
+        (data.parent &&
+          data.parent.subscription_details &&
+          data.parent.subscription_details.subscription);
 
-  // Safely get subscription id
-  const subscriptionId =
-    data.subscription ||
-    (data.parent &&
-      data.parent.subscription_details &&
-      data.parent.subscription_details.subscription);
+      if (!subscriptionId) {
+        console.log("⚠ invoice.paid without subscription (skipped)");
+        return res.json({ received: true });
+      }
 
-  if (!subscriptionId) {
-    console.log("⚠ invoice.paid without subscription (skipped)");
-    return res.json({ received: true });
-  }
+      const subscription = await stripe.subscriptions.retrieve(subscriptionId);
 
-  const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+      const service = await Service.findOne({
+        promotionSubscriptionId: subscription.id,
+      });
 
-  const service = await Service.findOne({
-    promotionSubscriptionId: subscription.id,
-  });
+      if (service) {
+        service.promotionStart = new Date(
+          subscription.current_period_start * 1000,
+        );
+        service.promotionEnd = new Date(subscription.current_period_end * 1000);
+        service.isPromoted = true;
+        service.promotionStatus = "active";
 
-  if (service) {
-    service.promotionStart = new Date(
-      subscription.current_period_start * 1000
-    );
-    service.promotionEnd = new Date(
-      subscription.current_period_end * 1000
-    );
-    service.isPromoted = true;
-    service.promotionStatus = "active";
+        await service.save();
 
-    await service.save();
-
-    console.log("🔄 Subscription renewed safely");
-  }
-}
-
+        console.log("🔄 Subscription renewed safely");
+      }
+    }
 
     ////////////////////////////////////////////////////////////
     // 3️⃣ CANCEL AT PERIOD END
@@ -231,13 +224,11 @@ exports.stripeWebhook = async (req, res) => {
     }
 
     res.json({ received: true });
-
   } catch (err) {
     console.error("❌ Webhook Processing Error:", err);
     res.status(500).send("Webhook Failed");
   }
 };
-
 
 //////////////////////////////////////////////////////////
 // 3️⃣ MANUAL CANCEL API
@@ -263,9 +254,9 @@ exports.cancelPromotionSubscription = async (req, res) => {
 //////////////////////////////////////////////////////////
 // 4️⃣ DAILY CRON JOB (AUTO EXPIRE CLEANUP)
 //////////////////////////////////////////////////////////
-cron.schedule("0 0 * * *", async () => {
+cron.schedule("* * * * *", async () => {
   console.log("⏳ Running daily promotion expiry check...");
-
+  console.log("Cron running every minute");
   const now = new Date();
 
   const result = await Service.updateMany(
@@ -279,7 +270,7 @@ cron.schedule("0 0 * * *", async () => {
         isPromoted: false,
         promotionStatus: "expired",
       },
-    }
+    },
   );
 
   console.log("Expired promotions updated:", result.modifiedCount);

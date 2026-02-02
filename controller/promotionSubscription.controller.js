@@ -102,7 +102,6 @@ exports.stripeWebhook = async (req, res) => {
       sig,
       process.env.STRIPE_WEBHOOK_SECRET
     );
-
     console.log("✅ Webhook Verified:", event.type);
   } catch (err) {
     console.error("❌ Signature Verification Failed:", err.message);
@@ -113,25 +112,19 @@ exports.stripeWebhook = async (req, res) => {
 
   try {
     ////////////////////////////////////////////////////////////
-    // ✅ ACTIVATE ONLY WHEN PAYMENT IS SUCCESS
+    // 1️⃣ SAVE SUBSCRIPTION DATES (FIRST TIME)
     ////////////////////////////////////////////////////////////
-    if (event.type === "invoice.paid") {
-      const subscriptionId =
-        data.subscription ||
-        (data.parent &&
-          data.parent.subscription_details &&
-          data.parent.subscription_details.subscription);
+    if (event.type === "checkout.session.completed") {
+      const { serviceId } = data.metadata || {};
+      const subscriptionId = data.subscription;
 
-      if (!subscriptionId) {
-        console.log("⚠ No subscription id found in invoice.paid");
+      if (!subscriptionId || !serviceId) {
+        console.log("⚠ Missing subscription or serviceId");
         return res.json({ received: true });
       }
 
-      const subscription = await stripe.subscriptions.retrieve(
-        subscriptionId
-      );
+      const subscription = await stripe.subscriptions.retrieve(subscriptionId);
 
-      // 🔒 Safe date validation
       if (
         !subscription.current_period_start ||
         !subscription.current_period_end
@@ -147,55 +140,71 @@ exports.stripeWebhook = async (req, res) => {
         subscription.current_period_end * 1000
       );
 
-      if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
-        console.log("⚠ Invalid date from Stripe, skipping");
+      if (isNaN(startDate) || isNaN(endDate)) {
+        console.log("⚠ Invalid subscription dates");
+        return res.json({ received: true });
+      }
+
+      const service = await Service.findById(serviceId);
+      if (!service) return res.json({ received: true });
+
+      service.promotionSubscriptionId = subscription.id;
+      service.promotionPriceId =
+        subscription.items.data[0].price.id;
+      service.promotionStart = startDate;
+      service.promotionEnd = endDate;
+
+      await service.save();
+
+      console.log("📅 Subscription dates saved");
+    }
+
+    ////////////////////////////////////////////////////////////
+    // 2️⃣ ACTIVATE SERVICE AFTER PAYMENT
+    ////////////////////////////////////////////////////////////
+    if (event.type === "invoice.paid") {
+      const subscriptionId = data.subscription;
+
+      if (!subscriptionId) {
+        console.log("⚠ invoice without subscription");
         return res.json({ received: true });
       }
 
       const service = await Service.findOne({
-        promotionSubscriptionId: subscription.id,
+        promotionSubscriptionId: subscriptionId,
       });
 
-      if (!service) {
-        console.log("⚠ Service not found for subscription");
-        return res.json({ received: true });
-      }
+      if (!service) return res.json({ received: true });
 
       service.isPromoted = true;
-      service.promotionType = "subscription";
-      service.promotionStart = startDate;
-      service.promotionEnd = endDate;
       service.promotionStatus = "active";
-      service.promotionAutoRenew = !subscription.cancel_at_period_end;
+      service.promotionAutoRenew = true;
 
       await service.save();
 
-      console.log("🚀 Service Activated / Renewed Successfully");
+      console.log("✅ Service activated");
     }
 
     ////////////////////////////////////////////////////////////
-    // ❌ PAYMENT FAILED
+    // 3️⃣ PAYMENT FAILED
     ////////////////////////////////////////////////////////////
     if (event.type === "invoice.payment_failed") {
       const subscriptionId = data.subscription;
-
-      if (!subscriptionId) return res.json({ received: true });
 
       const service = await Service.findOne({
         promotionSubscriptionId: subscriptionId,
       });
 
       if (service) {
-        service.isPromoted = false;
         service.promotionStatus = "payment_failed";
+        service.isPromoted = false;
         await service.save();
-
-        console.log("❌ Payment failed, promotion disabled");
+        console.log("❌ Payment failed");
       }
     }
 
     ////////////////////////////////////////////////////////////
-    // 🔄 CANCEL AT PERIOD END
+    // 4️⃣ CANCEL AT PERIOD END
     ////////////////////////////////////////////////////////////
     if (event.type === "customer.subscription.updated") {
       if (data.cancel_at_period_end) {
@@ -212,7 +221,7 @@ exports.stripeWebhook = async (req, res) => {
     }
 
     ////////////////////////////////////////////////////////////
-    // ❌ FULL CANCEL
+    // 5️⃣ FULL CANCEL
     ////////////////////////////////////////////////////////////
     if (event.type === "customer.subscription.deleted") {
       const service = await Service.findOne({
@@ -224,8 +233,7 @@ exports.stripeWebhook = async (req, res) => {
         service.promotionStatus = "cancelled";
         service.promotionAutoRenew = false;
         await service.save();
-
-        console.log("❌ Subscription fully cancelled");
+        console.log("❌ Subscription cancelled");
       }
     }
 
@@ -235,7 +243,6 @@ exports.stripeWebhook = async (req, res) => {
     res.status(500).send("Webhook Failed");
   }
 };
-
 
 //////////////////////////////////////////////////////////
 // 3️⃣ MANUAL CANCEL API

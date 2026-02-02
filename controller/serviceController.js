@@ -338,10 +338,10 @@ function bboxForLatLon(lat, lon, radiusKm = 3) {
  */
 
 exports.getServices = async (req, res) => {
-  console.log("\n===== getServices called =====");
+ // console.log("\n===== getServices called =====");
 
   try {
-    console.log("Incoming Body:", JSON.stringify(req.body, null, 2));
+   // console.log("Incoming Body:", JSON.stringify(req.body, null, 2));
 
     const {
       page = 1,
@@ -374,14 +374,14 @@ exports.getServices = async (req, res) => {
     const pageNum = Math.max(1, Number(page));
     const limitNum = Math.max(1, Number(limit));
 
-    console.log("\nParsed Params:", {
-      userLat,
-      userLng,
-      cityLat,
-      cityLng,
-      maxRadius,
-      keyword,
-    });
+    // console.log("\nParsed Params:", {
+    //   userLat,
+    //   userLng,
+    //   cityLat,
+    //   cityLng,
+    //   maxRadius,
+    //   keyword,
+    // });
 
     // -----------------------------
     // BASE MONGO FILTER
@@ -426,7 +426,7 @@ exports.getServices = async (req, res) => {
       baseMatch.isFree = true;
     }
 
-    console.log("\nBase Mongo Filter:", JSON.stringify(baseMatch, null, 2));
+   // console.log("\nBase Mongo Filter:", JSON.stringify(baseMatch, null, 2));
 
     // -----------------------------
     // FETCH DATABASE SERVICES
@@ -436,7 +436,7 @@ exports.getServices = async (req, res) => {
       .populate("owner", "name email profile_image")
       .lean();
 
-    console.log("DB Services Count:", services.length);
+   // console.log("DB Services Count:", services.length);
 
     let finalServices = services;
 
@@ -451,7 +451,7 @@ exports.getServices = async (req, res) => {
 
       const regex = new RegExp(safe, "i");
 
-      console.log("Applying Keyword Filter:", regex);
+      // console.log("Applying Keyword Filter:", regex);
 
       finalServices = finalServices.filter((svc) => {
         return (
@@ -474,7 +474,7 @@ exports.getServices = async (req, res) => {
         );
       });
 
-      console.log("After Keyword Filter:", finalServices.length);
+      //console.log("After Keyword Filter:", finalServices.length);
     }
 
     // -----------------------------
@@ -517,7 +517,7 @@ exports.getServices = async (req, res) => {
     let mapServices = finalServices;
 
     if (bx && bx.north != null) {
-      console.log("\nApplying Bounding Box:", bx);
+     // console.log("\nApplying Bounding Box:", bx);
 
       mapServices = finalServices.filter((svc) => {
         const coords = svc.location?.coordinates;
@@ -532,7 +532,7 @@ exports.getServices = async (req, res) => {
       });
     }
 
-    console.log("Map Services Count:", mapServices.length);
+    //console.log("Map Services Count:", mapServices.length);
 
     // -----------------------------
     // LIST SERVICES — SMART RADIUS LOGIC
@@ -623,11 +623,11 @@ exports.getServices = async (req, res) => {
     const start = (pageNum - 1) * limitNum;
     const paginated = listCandidates.slice(start, start + limitNum);
 
-    console.log("\nFINAL COUNTS:", {
-      total_list: listCandidates.length,
-      total_map: mapServices.length,
-      page_items: paginated.length,
-    });
+    // console.log("\nFINAL COUNTS:", {
+    //   total_list: listCandidates.length,
+    //   total_map: mapServices.length,
+    //   page_items: paginated.length,
+    // });
 
     // -----------------------------
     // RESPONSE
@@ -675,8 +675,8 @@ exports.getInterestedUsers = async (req, res) => {
 
     const skip = (Number(page) - 1) * Number(limit);
 
-    console.log("===== getInterestedUsers called =====");
-    console.log("Incoming body:", req.body);
+  //  console.log("===== getInterestedUsers called =====");
+   // console.log("Incoming body:", req.body);
 
     // -----------------------------------------------------
     // STEP 1: INTEREST FILTER LOGIC (categories + tags + keyword)
@@ -709,7 +709,7 @@ exports.getInterestedUsers = async (req, res) => {
     // Remove duplicates
     interestsFilter = [...new Set(interestsFilter)];
 
-    console.log("Final interestsFilter:", interestsFilter);
+//    console.log("Final interestsFilter:", interestsFilter);
 
     // -----------------------------------------------------
     // STEP 2: BUILD MONGO QUERY
@@ -772,7 +772,7 @@ exports.getInterestedUsers = async (req, res) => {
       };
     }
 
-    console.log("Final Mongo Query:", JSON.stringify(query, null, 2));
+   // console.log("Final Mongo Query:", JSON.stringify(query, null, 2));
 
     // -----------------------------------------------------
     // STEP 4: FETCH USERS

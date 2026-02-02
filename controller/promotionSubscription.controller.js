@@ -100,7 +100,7 @@ exports.stripeWebhook = async (req, res) => {
     event = stripe.webhooks.constructEvent(
       req.body,
       sig,
-      process.env.STRIPE_WEBHOOK_SECRET,
+      process.env.STRIPE_WEBHOOK_SECRET
     );
 
     console.log("✅ Webhook Verified:", event.type);
@@ -113,48 +113,9 @@ exports.stripeWebhook = async (req, res) => {
 
   try {
     ////////////////////////////////////////////////////////////
-    // 1️⃣ FIRST PAYMENT SUCCESS
-    ////////////////////////////////////////////////////////////
-    if (event.type === "checkout.session.completed") {
-      const { userId, serviceId } = data.metadata;
-
-      const service = await Service.findById(serviceId);
-
-      if (!service) {
-        console.log("⚠ Service not found");
-        return res.json({ received: true });
-      }
-
-      if (service.isPromoted) {
-        console.log("⚠ Service already promoted");
-        return res.json({ received: true });
-      }
-
-      const subscription = await stripe.subscriptions.retrieve(
-        data.subscription,
-      );
-
-      service.isPromoted = true;
-      service.promotionType = "subscription";
-      service.promotionSubscriptionId = subscription.id;
-      service.promotionPriceId = subscription.items.data[0].price.id;
-      service.promotionStart = new Date(
-        subscription.current_period_start * 1000,
-      );
-      service.promotionEnd = new Date(subscription.current_period_end * 1000);
-      service.promotionStatus = "active";
-      service.promotionAutoRenew = true;
-
-      await service.save();
-
-      console.log("✅ Service promoted successfully");
-    }
-
-    ////////////////////////////////////////////////////////////
-    // 2️⃣ AUTO RENEW SUCCESS
+    // ✅ ACTIVATE ONLY WHEN PAYMENT IS SUCCESS
     ////////////////////////////////////////////////////////////
     if (event.type === "invoice.paid") {
-      // Safely get subscription id
       const subscriptionId =
         data.subscription ||
         (data.parent &&
@@ -162,32 +123,79 @@ exports.stripeWebhook = async (req, res) => {
           data.parent.subscription_details.subscription);
 
       if (!subscriptionId) {
-        console.log("⚠ invoice.paid without subscription (skipped)");
+        console.log("⚠ No subscription id found in invoice.paid");
         return res.json({ received: true });
       }
 
-      const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+      const subscription = await stripe.subscriptions.retrieve(
+        subscriptionId
+      );
+
+      // 🔒 Safe date validation
+      if (
+        !subscription.current_period_start ||
+        !subscription.current_period_end
+      ) {
+        console.log("⚠ Missing subscription dates");
+        return res.json({ received: true });
+      }
+
+      const startDate = new Date(
+        subscription.current_period_start * 1000
+      );
+      const endDate = new Date(
+        subscription.current_period_end * 1000
+      );
+
+      if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+        console.log("⚠ Invalid date from Stripe, skipping");
+        return res.json({ received: true });
+      }
 
       const service = await Service.findOne({
         promotionSubscriptionId: subscription.id,
       });
 
-      if (service) {
-        service.promotionStart = new Date(
-          subscription.current_period_start * 1000,
-        );
-        service.promotionEnd = new Date(subscription.current_period_end * 1000);
-        service.isPromoted = true;
-        service.promotionStatus = "active";
+      if (!service) {
+        console.log("⚠ Service not found for subscription");
+        return res.json({ received: true });
+      }
 
+      service.isPromoted = true;
+      service.promotionType = "subscription";
+      service.promotionStart = startDate;
+      service.promotionEnd = endDate;
+      service.promotionStatus = "active";
+      service.promotionAutoRenew = !subscription.cancel_at_period_end;
+
+      await service.save();
+
+      console.log("🚀 Service Activated / Renewed Successfully");
+    }
+
+    ////////////////////////////////////////////////////////////
+    // ❌ PAYMENT FAILED
+    ////////////////////////////////////////////////////////////
+    if (event.type === "invoice.payment_failed") {
+      const subscriptionId = data.subscription;
+
+      if (!subscriptionId) return res.json({ received: true });
+
+      const service = await Service.findOne({
+        promotionSubscriptionId: subscriptionId,
+      });
+
+      if (service) {
+        service.isPromoted = false;
+        service.promotionStatus = "payment_failed";
         await service.save();
 
-        console.log("🔄 Subscription renewed safely");
+        console.log("❌ Payment failed, promotion disabled");
       }
     }
 
     ////////////////////////////////////////////////////////////
-    // 3️⃣ CANCEL AT PERIOD END
+    // 🔄 CANCEL AT PERIOD END
     ////////////////////////////////////////////////////////////
     if (event.type === "customer.subscription.updated") {
       if (data.cancel_at_period_end) {
@@ -198,14 +206,13 @@ exports.stripeWebhook = async (req, res) => {
         if (service) {
           service.promotionAutoRenew = false;
           await service.save();
-
           console.log("⚠ Auto renew disabled");
         }
       }
     }
 
     ////////////////////////////////////////////////////////////
-    // 4️⃣ FULL CANCEL OR EXPIRED
+    // ❌ FULL CANCEL
     ////////////////////////////////////////////////////////////
     if (event.type === "customer.subscription.deleted") {
       const service = await Service.findOne({
@@ -216,7 +223,6 @@ exports.stripeWebhook = async (req, res) => {
         service.isPromoted = false;
         service.promotionStatus = "cancelled";
         service.promotionAutoRenew = false;
-
         await service.save();
 
         console.log("❌ Subscription fully cancelled");
@@ -229,6 +235,7 @@ exports.stripeWebhook = async (req, res) => {
     res.status(500).send("Webhook Failed");
   }
 };
+
 
 //////////////////////////////////////////////////////////
 // 3️⃣ MANUAL CANCEL API

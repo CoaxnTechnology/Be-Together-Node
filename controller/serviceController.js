@@ -870,8 +870,8 @@ exports.getInterestedUsers = async (req, res) => {
 
     const skip = (Number(page) - 1) * Number(limit);
 
-    console.log("\n===== getInterestedUsers called =====");
-    console.log("Incoming body:", req.body);
+   // console.log("\n===== getInterestedUsers called =====");
+    //console.log("Incoming body:", req.body);
 
     // -----------------------------------------------------
     // STEP 1: INTEREST FILTER LOGIC
@@ -903,7 +903,7 @@ exports.getInterestedUsers = async (req, res) => {
 
     interestsFilter = [...new Set(interestsFilter)];
 
-    console.log("Final interestsFilter:", interestsFilter);
+    //console.log("Final interestsFilter:", interestsFilter);
 
     // -----------------------------------------------------
     // STEP 2: BUILD MONGO QUERY
@@ -959,12 +959,12 @@ exports.getInterestedUsers = async (req, res) => {
 
     // ⭐ NEW: If keyword exists → DO NOT APPLY RADIUS
     if (keyword.trim() !== "") {
-      console.log("🔍 Keyword exists → SKIPPING RADIUS FILTER COMPLETELY.");
+      //console.log("🔍 Keyword exists → SKIPPING RADIUS FILTER COMPLETELY.");
     }
 
     // Apply radius only when NO keyword
     else if (centerLat !== null && centerLng !== null) {
-      console.log("📏 Applying radius filter:", radius_km, "km");
+      //console.log("📏 Applying radius filter:", radius_km, "km");
 
       query["lastLocation.coords"] = {
         $geoWithin: {
@@ -973,7 +973,7 @@ exports.getInterestedUsers = async (req, res) => {
       };
     }
 
-    console.log("Final Mongo Query:", JSON.stringify(query, null, 2));
+    //console.log("Final Mongo Query:", JSON.stringify(query, null, 2));
 
     // -----------------------------------------------------
     // STEP 4: FETCH USERS
@@ -988,8 +988,8 @@ exports.getInterestedUsers = async (req, res) => {
       .limit(Number(limit))
       .lean();
 
-    console.log("Fetched mapUsers:", mapUsers.length);
-    console.log("Fetched listUsers:", listUsers.length);
+    //console.log("Fetched mapUsers:", mapUsers.length);
+    //console.log("Fetched listUsers:", listUsers.length);
 
     // -----------------------------------------------------
     // STEP 5: DISTANCE CALCULATOR
@@ -1033,7 +1033,7 @@ exports.getInterestedUsers = async (req, res) => {
     // -----------------------------------------------------
     const total = await User.countDocuments(query);
 
-    console.log("Total matched users:", total);
+   // console.log("Total matched users:", total);
 
     // -----------------------------------------------------
     // STEP 7: RESPONSE
@@ -1047,7 +1047,7 @@ exports.getInterestedUsers = async (req, res) => {
       listUsers: finalListUsers,
     });
   } catch (err) {
-    console.error("getInterestedUsers error:", err);
+    //console.error("getInterestedUsers error:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 };

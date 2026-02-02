@@ -95,13 +95,7 @@ exports.createPromotionSubscriptionCheckout = async (req, res) => {
 //////////////////////////////////////////////////////////
 // 2️⃣ STRIPE WEBHOOK HANDLER
 exports.stripeWebhook = async (req, res) => {
-  console.log("\n==============================");
-  console.log("🔥 STRIPE WEBHOOK TRIGGERED");
-  console.log("==============================");
-
   const sig = req.headers["stripe-signature"];
-  console.log("Signature Header:", sig ? "Present" : "Missing");
-
   let event;
 
   try {
@@ -110,178 +104,89 @@ exports.stripeWebhook = async (req, res) => {
       sig,
       process.env.STRIPE_WEBHOOK_SECRET
     );
-    console.log("✅ Webhook Verified");
-    console.log("Event ID:", event.id);
-    console.log("Event Type:", event.type);
   } catch (err) {
-    console.log("❌ Signature Verification Failed:", err.message);
+    console.log("❌ Signature failed:", err.message);
     return res.status(400).send("Webhook Error");
   }
 
-  // Prevent duplicate events
-  if (processedEvents.has(event.id)) {
-    console.log("⚠ Duplicate event ignored:", event.id);
-    return res.json({ received: true });
-  }
-
-  processedEvents.add(event.id);
-
   const data = event.data.object;
-  console.log("📦 Event Data Object:", JSON.stringify(data, null, 2));
 
   try {
+
     //////////////////////////////////////////////////////////////
-    // CHECKOUT COMPLETED
+    // 1️⃣ CHECKOUT COMPLETED (ACTIVATE FIRST TIME)
     //////////////////////////////////////////////////////////////
     if (event.type === "checkout.session.completed") {
-      console.log("➡ Handling checkout.session.completed");
 
       const subscriptionId = data.subscription;
-      const metadata = data.metadata || {};
+      const serviceId = data.metadata?.serviceId;
 
-      console.log("Subscription ID:", subscriptionId);
-      console.log("Metadata:", metadata);
-
-      if (!subscriptionId) {
-        console.log("❌ No subscriptionId found");
+      if (!subscriptionId || !serviceId) {
         return res.json({ received: true });
       }
 
-      const serviceId = metadata.serviceId;
-      if (!serviceId) {
-        console.log("❌ No serviceId in metadata");
+      const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+
+      const item = subscription.items?.data?.[0];
+
+      if (!item?.current_period_start || !item?.current_period_end) {
+        console.log("⚠ Period not ready");
         return res.json({ received: true });
       }
 
-      console.log("🔎 Fetching subscription from Stripe...");
-      const subscription = await stripe.subscriptions.retrieve(
-        subscriptionId
-      );
+      const startDate = new Date(item.current_period_start * 1000);
+      const endDate = new Date(item.current_period_end * 1000);
 
-      console.log(
-        "📄 Subscription Object:",
-        JSON.stringify(subscription, null, 2)
-      );
-
-      console.log(
-        "current_period_start:",
-        subscription.current_period_start
-      );
-      console.log(
-        "current_period_end:",
-        subscription.current_period_end
-      );
-
-      if (
-        !subscription.current_period_start ||
-        !subscription.current_period_end
-      ) {
-        console.log("⚠ Period dates not ready yet");
+      if (isNaN(startDate) || isNaN(endDate)) {
+        console.log("❌ Invalid date");
         return res.json({ received: true });
       }
 
-      const startDate = new Date(
-        subscription.current_period_start * 1000
-      );
-      const endDate = new Date(
-        subscription.current_period_end * 1000
-      );
-
-      console.log("Converted Start Date:", startDate);
-      console.log("Converted End Date:", endDate);
-
-      if (
-        isNaN(startDate.getTime()) ||
-        isNaN(endDate.getTime())
-      ) {
-        console.log("❌ Invalid Date Detected");
-        return res.json({ received: true });
-      }
-
-      console.log("🔎 Fetching service from DB:", serviceId);
       const service = await Service.findById(serviceId);
-
-      if (!service) {
-        console.log("❌ Service not found in DB");
-        return res.json({ received: true });
-      }
-
-      console.log("✅ Service Found:", service._id);
+      if (!service) return res.json({ received: true });
 
       service.promotionSubscriptionId = subscription.id;
-      service.promotionPriceId =
-        subscription.items.data[0]?.price?.id;
+      service.promotionPriceId = item.price.id;
       service.promotionStart = startDate;
       service.promotionEnd = endDate;
       service.isPromoted = true;
       service.promotionStatus = "active";
       service.promotionAutoRenew = true;
 
-      console.log("💾 Saving service to DB...");
       await service.save();
 
-      console.log("🎉 Promotion Activated Successfully");
+      console.log("✅ Promotion Activated (First Time)");
     }
 
     //////////////////////////////////////////////////////////////
-    // INVOICE PAID (RENEWAL)
+    // 2️⃣ INVOICE PAID (RENEWAL)
     //////////////////////////////////////////////////////////////
     if (event.type === "invoice.paid") {
-      console.log("➡ Handling invoice.paid");
 
-      const subscriptionId = data.subscription;
-      console.log("Subscription ID from invoice:", subscriptionId);
+      const subscriptionId =
+        data.parent?.subscription_details?.subscription;
 
       if (!subscriptionId) {
-        console.log("❌ Invoice has no subscription");
+        console.log("⚠ No subscription in invoice");
         return res.json({ received: true });
       }
 
-      const subscription = await stripe.subscriptions.retrieve(
-        subscriptionId
-      );
+      const line = data.lines?.data?.[0];
 
-      console.log(
-        "Subscription for renewal:",
-        JSON.stringify(subscription, null, 2)
-      );
-
-      if (
-        !subscription.current_period_start ||
-        !subscription.current_period_end
-      ) {
-        console.log("⚠ Renewal dates missing");
+      if (!line?.period?.start || !line?.period?.end) {
+        console.log("⚠ Invoice period missing");
         return res.json({ received: true });
       }
 
-      const startDate = new Date(
-        subscription.current_period_start * 1000
-      );
-      const endDate = new Date(
-        subscription.current_period_end * 1000
-      );
-
-      console.log("Renewal Start Date:", startDate);
-      console.log("Renewal End Date:", endDate);
-
-      if (
-        isNaN(startDate.getTime()) ||
-        isNaN(endDate.getTime())
-      ) {
-        console.log("❌ Invalid renewal date");
-        return res.json({ received: true });
-      }
+      const startDate = new Date(line.period.start * 1000);
+      const endDate = new Date(line.period.end * 1000);
 
       const service = await Service.findOne({
         promotionSubscriptionId: subscriptionId,
       });
 
-      if (!service) {
-        console.log("❌ No service found for renewal");
-        return res.json({ received: true });
-      }
+      if (!service) return res.json({ received: true });
 
-      console.log("Updating renewal in DB...");
       service.promotionStart = startDate;
       service.promotionEnd = endDate;
       service.isPromoted = true;
@@ -289,16 +194,16 @@ exports.stripeWebhook = async (req, res) => {
 
       await service.save();
 
-      console.log("🔄 Renewal Updated Successfully");
+      console.log("🔄 Subscription Renewed Successfully");
     }
 
     //////////////////////////////////////////////////////////////
-    // PAYMENT FAILED
+    // 3️⃣ PAYMENT FAILED
     //////////////////////////////////////////////////////////////
     if (event.type === "invoice.payment_failed") {
-      console.log("➡ Handling invoice.payment_failed");
 
-      const subscriptionId = data.subscription;
+      const subscriptionId =
+        data.parent?.subscription_details?.subscription;
 
       const service = await Service.findOne({
         promotionSubscriptionId: subscriptionId,
@@ -308,15 +213,13 @@ exports.stripeWebhook = async (req, res) => {
         service.isPromoted = false;
         service.promotionStatus = "payment_failed";
         await service.save();
-        console.log("❌ Marked as payment_failed");
       }
     }
 
     //////////////////////////////////////////////////////////////
-    // SUBSCRIPTION DELETED
+    // 4️⃣ SUBSCRIPTION DELETED
     //////////////////////////////////////////////////////////////
     if (event.type === "customer.subscription.deleted") {
-      console.log("➡ Handling subscription deleted");
 
       const service = await Service.findOne({
         promotionSubscriptionId: data.id,
@@ -327,19 +230,17 @@ exports.stripeWebhook = async (req, res) => {
         service.promotionStatus = "cancelled";
         service.promotionAutoRenew = false;
         await service.save();
-        console.log("🛑 Subscription Cancelled");
       }
     }
 
-    console.log("✅ Webhook completed successfully");
     return res.json({ received: true });
 
   } catch (err) {
-    console.log("❌ WEBHOOK PROCESSING ERROR:");
-    console.log(err);
+    console.log("❌ Webhook error:", err);
     return res.status(500).send("Webhook Failed");
   }
 };
+
 
 
 //////////////////////////////////////////////////////////

@@ -589,26 +589,41 @@ exports.getServices = async (req, res) => {
     // SORT + PAGINATION
     // -----------------------------
     listCandidates.sort((a, b) => {
-      // 1️⃣ Promoted first
-      if (a.isPromoted && !b.isPromoted) return -1;
-      if (!a.isPromoted && b.isPromoted) return 1;
+      const PROMOTION_RADIUS = 30;
 
-      // 2️⃣ If both same promotion status → distance sort
-      if (a.distance_km === null) return 1;
-      if (b.distance_km === null) return -1;
+      const aDist = a.distance_km ?? Infinity;
+      const bDist = b.distance_km ?? Infinity;
 
-      return a.distance_km - b.distance_km;
+      const aPromotedInRange = a.isPromoted && aDist <= PROMOTION_RADIUS;
+
+      const bPromotedInRange = b.isPromoted && bDist <= PROMOTION_RADIUS;
+
+      // ✅ 1️⃣ Promoted within 30km get priority
+      if (aPromotedInRange && !bPromotedInRange) return -1;
+      if (!aPromotedInRange && bPromotedInRange) return 1;
+
+      // ✅ 2️⃣ Otherwise sort purely by distance
+      return aDist - bDist;
     });
 
     mapServices.sort((a, b) => {
-      if (a.isPromoted && !b.isPromoted) return -1;
-      if (!a.isPromoted && b.isPromoted) return 1;
+      const PROMOTION_RADIUS = 30;
 
-      if (a.distance_km === null) return 1;
-      if (b.distance_km === null) return -1;
+      const aDist = a.distance_km ?? Infinity;
+      const bDist = b.distance_km ?? Infinity;
 
-      return a.distance_km - b.distance_km;
+      const aPromotedInRange = a.isPromoted && aDist <= PROMOTION_RADIUS;
+
+      const bPromotedInRange = b.isPromoted && bDist <= PROMOTION_RADIUS;
+
+      // ✅ Priority only if promoted AND within 30km
+      if (aPromotedInRange && !bPromotedInRange) return -1;
+      if (!aPromotedInRange && bPromotedInRange) return 1;
+
+      // Otherwise pure distance sort
+      return aDist - bDist;
     });
+
     const promotedServices = listCandidates
       .filter((svc) => svc.isPromoted === true)
       .sort((a, b) => {

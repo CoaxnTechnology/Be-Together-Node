@@ -588,11 +588,19 @@ exports.getServices = async (req, res) => {
     // -----------------------------
     // SORT + PAGINATION
     // -----------------------------
+    const isCityFilterApplied = cityLat !== null && cityLng !== null;
     listCandidates.sort((a, b) => {
       const PROMOTION_RADIUS = 30;
 
       const aDist = a.distance_km ?? Infinity;
       const bDist = b.distance_km ?? Infinity;
+      if (isCityFilterApplied) {
+        // 🔥 City filter → Sponsored first (within radius already filtered)
+        if (a.isPromoted && !b.isPromoted) return -1;
+        if (!a.isPromoted && b.isPromoted) return 1;
+
+        return aDist - bDist;
+      }
 
       const aPromotedInRange = a.isPromoted && aDist <= PROMOTION_RADIUS;
 
@@ -612,6 +620,12 @@ exports.getServices = async (req, res) => {
       const aDist = a.distance_km ?? Infinity;
       const bDist = b.distance_km ?? Infinity;
 
+      if (isCityFilterApplied) {
+        if (a.isPromoted && !b.isPromoted) return -1;
+        if (!a.isPromoted && b.isPromoted) return 1;
+
+        return aDist - bDist;
+      }
       const aPromotedInRange = a.isPromoted && aDist <= PROMOTION_RADIUS;
 
       const bPromotedInRange = b.isPromoted && bDist <= PROMOTION_RADIUS;

@@ -5,26 +5,50 @@ const PromotionPlan = require("../model/PromotionPlan");
 // CREATE PLAN (Basic – 7 Days)
 //////////////////////////////////////////////////////////
 exports.createPromotionPlan = async (req, res) => {
+  console.log("========== CREATE PROMOTION PLAN START ==========");
+  console.log("Request Body:", req.body);
+
   try {
     const { name, days, price } = req.body;
 
+    console.log("Parsed Values:");
+    console.log("Name:", name);
+    console.log("Days:", days);
+    console.log("Price:", price);
+
+    //////////////////////////////////////////////////
+    // Validation
+    //////////////////////////////////////////////////
     if (!name || !days || !price) {
+      console.log("Validation Failed: Missing required fields");
       return res.status(400).json({
         message: "Name, Days and Price required",
       });
     }
 
-    // Prevent duplicate duration
+    console.log("Validation Passed");
+
+    //////////////////////////////////////////////////
+    // Check Duplicate Duration
+    //////////////////////////////////////////////////
+    console.log("Checking existing plan with same days...");
     const existing = await PromotionPlan.findOne({ days });
+
     if (existing) {
+      console.log("Duplicate plan found:", existing);
       return res.status(400).json({
         message: "Plan with same duration already exists",
       });
     }
 
+    console.log("No duplicate plan found");
+
     //////////////////////////////////////////////////
-    // Create Stripe Price under ONE product
+    // Stripe Price Creation
     //////////////////////////////////////////////////
+    console.log("Creating Stripe price...");
+    console.log("Stripe Product ID:", process.env.STRIPE_PROMOTION_PRODUCT_ID);
+
     const stripePrice = await stripe.prices.create({
       unit_amount: price * 100,
       currency: "eur",
@@ -34,10 +58,16 @@ exports.createPromotionPlan = async (req, res) => {
       },
       product: process.env.STRIPE_PROMOTION_PRODUCT_ID,
     });
-    console.log("Product ID:", process.env.STRIPE_PROMOTION_PRODUCT_ID);
+
+    console.log("Stripe price created successfully");
+    console.log("Stripe Price ID:", stripePrice.id);
+    console.log("Full Stripe Response:", stripePrice);
+
     //////////////////////////////////////////////////
-    // Save in DB
+    // Save in Database
     //////////////////////////////////////////////////
+    console.log("Saving plan in database...");
+
     const plan = await PromotionPlan.create({
       name,
       days,
@@ -45,12 +75,20 @@ exports.createPromotionPlan = async (req, res) => {
       stripePriceId: stripePrice.id,
     });
 
+    console.log("Plan saved successfully:", plan);
+
+    console.log("========== CREATE PROMOTION PLAN SUCCESS ==========");
+
     res.json({ isSuccess: true, plan });
   } catch (err) {
-    console.error(err);
+    console.log("========== CREATE PROMOTION PLAN ERROR ==========");
+    console.error("Error Details:", err);
+    console.log("========== CREATE PROMOTION PLAN FAILED ==========");
+
     res.status(500).json({ message: "Error creating plan" });
   }
 };
+
 exports.getPromotionPlans = async (req, res) => {
   try {
     const plans = await PromotionPlan.find({ isActive: true }).sort({

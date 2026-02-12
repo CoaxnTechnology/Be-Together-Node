@@ -10,10 +10,10 @@ function createAccessToken(payload) {
 
 function decodeToken(token) {
   try {
-    console.log("🔍 Verifying token...");
+    //console.log("🔍 Verifying token...");
     return jwt.verify(token, JWT_SECRET);
   } catch (err) {
-    console.log("❌ JWT verification failed:", err.message);
+    //console.log("❌ JWT verification failed:", err.message);
     return null;
   }
 }

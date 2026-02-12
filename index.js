@@ -25,7 +25,7 @@ const { exec } = require("child_process");
 const promotionSubscription = require("./routes/promotionSubscription.Routes");
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const promotionController = require("./controller/promotionSubscription.controller");
-
+const promotionPlanAdminRoutes = require("./routes/promotionPlanadminRoutes");
 // --- KEEP RAW ONLY FOR GITHUB ---
 app.post(
   "/webhook/github",
@@ -114,6 +114,7 @@ app.use("/api/stripe/connect", stripeRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/payment/violation", paymentViolationRoutes);
 app.use("/api/promotion", promotionSubscription);
+app.use("/api",promotionPlanAdminRoutes)
 // Connect to MongoDB (live Atlas)
 app.use("/api/admin", AdminRoutes);
 // Start server

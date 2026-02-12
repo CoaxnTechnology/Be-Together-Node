@@ -105,13 +105,31 @@ exports.getPromotionPlans = async (req, res) => {
 exports.updatePromotionPlan = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, days, price } = req.body;
+    const { name, description, days, price } = req.body;
 
+    //////////////////////////////////////////////////
+    // Find Plan
+    //////////////////////////////////////////////////
     const plan = await PromotionPlan.findById(id);
-    if (!plan) return res.status(404).json({ message: "Plan not found" });
+    if (!plan) {
+      return res.status(404).json({ message: "Plan not found" });
+    }
 
+    //////////////////////////////////////////////////
+    // Validation
+    //////////////////////////////////////////////////
+    if (!name || !days || !price) {
+      return res.status(400).json({
+        message: "Name, Days and Price required",
+      });
+    }
+
+    //////////////////////////////////////////////////
+    // Stripe Price Update Logic
+    //////////////////////////////////////////////////
     let stripePriceId = plan.stripePriceId;
 
+    // Only create new Stripe price if days or price changed
     if (price !== plan.price || days !== plan.days) {
       const newPrice = await stripe.prices.create({
         unit_amount: price * 100,
@@ -126,7 +144,11 @@ exports.updatePromotionPlan = async (req, res) => {
       stripePriceId = newPrice.id;
     }
 
+    //////////////////////////////////////////////////
+    // Update Fields
+    //////////////////////////////////////////////////
     plan.name = name;
+    plan.description = description;   // ✅ Added
     plan.days = days;
     plan.price = price;
     plan.stripePriceId = stripePriceId;
@@ -134,10 +156,13 @@ exports.updatePromotionPlan = async (req, res) => {
     await plan.save();
 
     res.json({ isSuccess: true, plan });
+
   } catch (err) {
+    console.error("Update Plan Error:", err);
     res.status(500).json({ message: "Error updating plan" });
   }
 };
+
 exports.deletePromotionPlan = async (req, res) => {
   try {
     const { id } = req.params;

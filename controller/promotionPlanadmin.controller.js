@@ -1,5 +1,5 @@
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
-const PromotionPlan = require("../models/PromotionPlan");
+const PromotionPlan = require("../model/PromotionPlan");
 
 //////////////////////////////////////////////////////////
 // CREATE PLAN (Basic – 7 Days)

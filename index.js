@@ -61,9 +61,8 @@ app.post("/webhook/frontend", (req, res) => {
 app.post(
   "/api/promotion/stripe/webhook",
   express.raw({ type: "application/json" }),
-  promotionController.stripeWebhook
+  promotionController.stripeWebhook,
 );
-
 
 // Middleware
 app.use(express.urlencoded({ extended: true }));
@@ -114,9 +113,11 @@ app.use("/api/stripe/connect", stripeRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/payment/violation", paymentViolationRoutes);
 app.use("/api/promotion", promotionSubscription);
-app.use("/api",promotionPlanAdminRoutes)
+app.use("/api", promotionPlanAdminRoutes);
 // Connect to MongoDB (live Atlas)
 app.use("/api/admin", AdminRoutes);
+console.log("Product ID:", process.env.STRIPE_PROMOTION_PRODUCT_ID);
+
 // Start server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));

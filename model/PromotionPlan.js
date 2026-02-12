@@ -14,6 +14,9 @@ const promotionPlanSchema = new mongoose.Schema(
       type: Number,
       required: true,
     },
+    description: {
+      type: String, // ✅ ADD THIS
+    },
     stripePriceId: {
       type: String,
       required: true,

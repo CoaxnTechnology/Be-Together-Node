@@ -9,11 +9,12 @@ exports.createPromotionPlan = async (req, res) => {
   console.log("Request Body:", req.body);
 
   try {
-    const { name, days, price } = req.body;
+    const { name, days, description, price } = req.body;
 
     console.log("Parsed Values:");
     console.log("Name:", name);
     console.log("Days:", days);
+    console.log("Description:", description);
     console.log("Price:", price);
 
     //////////////////////////////////////////////////
@@ -72,6 +73,7 @@ exports.createPromotionPlan = async (req, res) => {
       name,
       days,
       price,
+      description,
       stripePriceId: stripePrice.id,
     });
 

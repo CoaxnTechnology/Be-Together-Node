@@ -2,6 +2,7 @@ const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const Service = require("../model/Service");
 const User = require("../model/User");
 const cron = require("node-cron");
+const PromotionPlan = require("../model/PromotionPlan");
 
 //////////////////////////////////////////////////////////
 // 🔐 Duplicate Event Protection
@@ -11,28 +12,22 @@ const processedEvents = new Set();
 //////////////////////////////////////////////////////////
 // 📦 PROMOTION PLANS
 //////////////////////////////////////////////////////////
-const SUBSCRIPTION_PLANS = {
-  basic: { priceId: "price_1SuBhHRic3VtmD7tZJ7O7806", days: 7 },
-  standard: { priceId: "price_1SuBk3Ric3VtmD7tJ23qLcMP", days: 15 },
-  premium: { priceId: "price_1SuBkmRic3VtmD7tnXtXQbnI", days: 30 },
-};
-
 //////////////////////////////////////////////////////////
 // 1️⃣ CREATE CHECKOUT SESSION
 //////////////////////////////////////////////////////////
 exports.createPromotionSubscriptionCheckout = async (req, res) => {
   try {
-    const { userId, serviceId, promotionPlan } = req.body;
+    const { userId, serviceId, planId } = req.body;
 
-    if (!userId || !serviceId || !promotionPlan) {
+    if (!userId || !serviceId || !planId) {
       return res.status(400).json({
         isSuccess: false,
-        message: "userId, serviceId & promotionPlan required",
+        message: "userId, serviceId & planId required",
       });
     }
 
-    const plan = SUBSCRIPTION_PLANS[promotionPlan];
-    if (!plan) {
+    const plan = await PromotionPlan.findById(planId);
+    if (!plan || !plan.isActive) {
       return res.status(400).json({
         isSuccess: false,
         message: "Invalid promotion plan",
@@ -74,11 +69,13 @@ exports.createPromotionSubscriptionCheckout = async (req, res) => {
       mode: "subscription",
       customer: customerId,
       payment_method_types: ["card"],
-      line_items: [{ price: plan.priceId, quantity: 1 }],
+      line_items: [{ price: plan.stripePriceId, quantity: 1 }],
       metadata: {
         userId,
         serviceId,
-        promotionPlan,
+        planId: plan._id.toString(),
+        planName: plan.name,
+        planDays: plan.days,
       },
       success_url:
         "https://yourapp.com/success?session_id={CHECKOUT_SESSION_ID}",
@@ -95,7 +92,7 @@ exports.createPromotionSubscriptionCheckout = async (req, res) => {
 //////////////////////////////////////////////////////////
 // 2️⃣ STRIPE WEBHOOK HANDLER
 exports.stripeWebhook = async (req, res) => {
- // console.log("\n==============================");
+  // console.log("\n==============================");
   console.log("🔥 STRIPE WEBHOOK HIT");
   //console.log("==============================");
 
@@ -106,7 +103,7 @@ exports.stripeWebhook = async (req, res) => {
     event = stripe.webhooks.constructEvent(
       req.body,
       sig,
-      process.env.STRIPE_WEBHOOK_SECRET
+      process.env.STRIPE_WEBHOOK_SECRET,
     );
     console.log("✅ Event Verified:", event.type);
   } catch (err) {
@@ -117,7 +114,6 @@ exports.stripeWebhook = async (req, res) => {
   const data = event.data.object;
 
   try {
-
     //////////////////////////////////////////////////////////////
     // 1️⃣ CHECKOUT COMPLETED
     //////////////////////////////////////////////////////////////
@@ -171,8 +167,7 @@ exports.stripeWebhook = async (req, res) => {
     if (event.type === "invoice.paid") {
       console.log("➡ invoice.paid triggered");
 
-      const subscriptionId =
-        data.parent?.subscription_details?.subscription;
+      const subscriptionId = data.parent?.subscription_details?.subscription;
 
       console.log("Subscription ID from invoice:", subscriptionId);
 
@@ -211,8 +206,7 @@ exports.stripeWebhook = async (req, res) => {
     if (event.type === "invoice.payment_failed") {
       console.log("➡ invoice.payment_failed triggered");
 
-      const subscriptionId =
-        data.parent?.subscription_details?.subscription;
+      const subscriptionId = data.parent?.subscription_details?.subscription;
 
       console.log("Failed Subscription:", subscriptionId);
 
@@ -282,14 +276,11 @@ exports.stripeWebhook = async (req, res) => {
 
     console.log("✅ Webhook Processing Done");
     return res.json({ received: true });
-
   } catch (err) {
     console.log("❌ Webhook error:", err);
     return res.status(500).send("Webhook Failed");
   }
 };
-
-
 
 //////////////////////////////////////////////////////////
 // 3️⃣ MANUAL CANCEL API
@@ -329,7 +320,7 @@ cron.schedule("0 0 * * *", async () => {
         isPromoted: false,
         promotionStatus: "expired",
       },
-    }
+    },
   );
 
   console.log("Expired promotions:", result.modifiedCount);

@@ -679,6 +679,8 @@ exports.getServices = async (req, res) => {
 };
 
 exports.getInterestedUsers = async (req, res) => {
+  console.log("🔥 FIRST getInterestedUsers HIT");
+
   try {
     const {
       latitude = 0,
@@ -874,6 +876,8 @@ exports.getInterestedUsers = async (req, res) => {
 };
 
 exports.getInterestedUsers = async (req, res) => {
+  console.log("✅ SECOND getInterestedUsers HIT");
+
   try {
     const {
       latitude = 0,

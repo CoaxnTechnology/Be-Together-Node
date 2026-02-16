@@ -49,9 +49,9 @@ exports.createPromotionPlan = async (req, res) => {
     //////////////////////////////////////////////////
     console.log("Creating Stripe price...");
     console.log("Stripe Product ID:", process.env.STRIPE_PROMOTION_PRODUCT_ID);
-
+    const unitAmount = Math.round(Number(price) * 100);
     const stripePrice = await stripe.prices.create({
-      unit_amount: price * 100,
+      unit_amount: unitAmount,
       currency: "eur",
       recurring: {
         interval: "day",
@@ -148,7 +148,7 @@ exports.updatePromotionPlan = async (req, res) => {
     // Update Fields
     //////////////////////////////////////////////////
     plan.name = name;
-    plan.description = description;   // ✅ Added
+    plan.description = description; // ✅ Added
     plan.days = days;
     plan.price = price;
     plan.stripePriceId = stripePriceId;
@@ -156,7 +156,6 @@ exports.updatePromotionPlan = async (req, res) => {
     await plan.save();
 
     res.json({ isSuccess: true, plan });
-
   } catch (err) {
     console.error("Update Plan Error:", err);
     res.status(500).json({ message: "Error updating plan" });

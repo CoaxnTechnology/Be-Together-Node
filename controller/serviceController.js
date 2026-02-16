@@ -939,6 +939,7 @@ exports.getInterestedUsers = async (req, res) => {
     // STEP 2: BUILD MONGO QUERY
     // -----------------------------------------------------
     const query = {};
+    query["lastLocation.coords.coordinates"] = { $ne: [0, 0] };
     // -----------------------------------------------------
     // ✅ GLOBAL SEARCH (NAME / EMAIL / PHONE / CITY / TAGS)
     // -----------------------------------------------------

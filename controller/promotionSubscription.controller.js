@@ -287,11 +287,27 @@ exports.stripeWebhook = async (req, res) => {
 //////////////////////////////////////////////////////////
 exports.cancelPromotionSubscription = async (req, res) => {
   try {
+    console.log("📩 Cancel subscription API called");
+    console.log("Request body:", req.body);
+
     const { subscriptionId } = req.body;
+
+    if (!subscriptionId) {
+      console.log("❌ subscriptionId missing");
+      return res.status(400).json({
+        isSuccess: false,
+        message: "subscriptionId is required",
+      });
+    }
+
+    console.log("🔄 Cancelling subscription:", subscriptionId);
 
     const subscription = await stripe.subscriptions.update(subscriptionId, {
       cancel_at_period_end: true,
     });
+
+    console.log("✅ Subscription updated successfully");
+    console.log("Stripe response status:", subscription.status);
 
     res.json({
       isSuccess: true,
@@ -299,7 +315,14 @@ exports.cancelPromotionSubscription = async (req, res) => {
       status: subscription.status,
     });
   } catch (err) {
-    res.status(500).json({ isSuccess: false, message: err.message });
+    console.log("❌ Error while cancelling subscription");
+    console.log("Error message:", err.message);
+    console.log("Full error:", err);
+
+    res.status(500).json({
+      isSuccess: false,
+      message: err.message,
+    });
   }
 };
 

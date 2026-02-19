@@ -33,7 +33,7 @@ const uploadFromBuffer = (buffer) =>
       (err, result) => {
         if (err) reject(err);
         else resolve(result);
-      }
+      },
     );
     streamifier.createReadStream(buffer).pipe(stream);
   });
@@ -48,7 +48,7 @@ function deduplicateSimilarTags(tags) {
         (t) =>
           t === normalized ||
           t.startsWith(normalized.slice(0, 5)) ||
-          normalized.startsWith(t.slice(0, 5))
+          normalized.startsWith(t.slice(0, 5)),
       )
     ) {
       unique.push(normalized);
@@ -81,7 +81,7 @@ const getHrFlowTags = async (text) => {
           "X-API-KEY": process.env.HRFLOW_API_KEY,
           "Content-Type": "application/json",
         },
-      }
+      },
     );
 
     console.log("⬅️ HrFlow raw response:", response.data);
@@ -94,7 +94,7 @@ const getHrFlowTags = async (text) => {
   } catch (err) {
     console.error(
       "❌ HrFlow tagging error:",
-      err.response?.data || err.message
+      err.response?.data || err.message,
     );
     return [];
   }
@@ -155,7 +155,7 @@ exports.createCategory = async (req, res) => {
       // shift categories AFTER this order
       await Category.updateMany(
         { order: { $gte: finalOrder } },
-        { $inc: { order: 1 } }
+        { $inc: { order: 1 } },
       );
     } else {
       finalOrder = totalCategories + 1;
@@ -187,8 +187,8 @@ exports.createCategory = async (req, res) => {
     let finalTags = [
       ...new Set(
         [...autoTags, ...userTags.map((t) => t.trim().toLowerCase())].filter(
-          Boolean
-        )
+          Boolean,
+        ),
       ),
     ];
     finalTags = deduplicateSimilarTags(finalTags);
@@ -219,7 +219,6 @@ exports.createCategory = async (req, res) => {
     });
   }
 };
-
 
 // ------------------ GET AI TAGS ------------------
 exports.getAITags = async (req, res) => {
@@ -325,12 +324,12 @@ exports.updateCategory = async (req, res) => {
       if (newOrder > oldOrder) {
         await Category.updateMany(
           { order: { $gt: oldOrder, $lte: newOrder } },
-          { $inc: { order: -1 } }
+          { $inc: { order: -1 } },
         );
       } else {
         await Category.updateMany(
           { order: { $gte: newOrder, $lt: oldOrder } },
-          { $inc: { order: 1 } }
+          { $inc: { order: 1 } },
         );
       }
 
@@ -363,7 +362,7 @@ exports.updateCategory = async (req, res) => {
           "..",
           "uploads",
           "category_images",
-          path.basename(category.image) // only file name
+          path.basename(category.image), // only file name
         );
 
         if (fs.existsSync(oldLocalPath)) {
@@ -412,7 +411,7 @@ exports.deleteCategory = async (req, res) => {
       const imagePath = path.join(
         __dirname,
         "../",
-        category.image.replace(/^\/+/, "")
+        category.image.replace(/^\/+/, ""),
       );
 
       if (fs.existsSync(imagePath)) {
@@ -581,7 +580,7 @@ exports.generateUsersFromCSV = async (req, res) => {
 
     categories.forEach((cat) => {
       (cat.tags || []).forEach((tag) =>
-        validCategoryTags.add(tag.toLowerCase())
+        validCategoryTags.add(tag.toLowerCase()),
       );
     });
 
@@ -654,19 +653,19 @@ exports.generateUsersFromCSV = async (req, res) => {
 
         /* ---------- AUTO-CLEAN TAGS ---------- */
         const cleanInterests = rawInterests.filter((t) =>
-          validCategoryTags.has(String(t).toLowerCase())
+          validCategoryTags.has(String(t).toLowerCase()),
         );
 
         const cleanOfferedTags = rawOfferedTags.filter((t) =>
-          validCategoryTags.has(String(t).toLowerCase())
+          validCategoryTags.has(String(t).toLowerCase()),
         );
 
         const removedInterests = rawInterests.filter(
-          (t) => !cleanInterests.includes(t)
+          (t) => !cleanInterests.includes(t),
         );
 
         const removedOffered = rawOfferedTags.filter(
-          (t) => !cleanOfferedTags.includes(t)
+          (t) => !cleanOfferedTags.includes(t),
         );
 
         if (removedInterests.length || removedOffered.length) {
@@ -795,7 +794,7 @@ exports.generateUsersFromCSV = async (req, res) => {
           "🎉 USER COMPLETED:",
           user.email,
           "SERVICES:",
-          createdServiceIds.length
+          createdServiceIds.length,
         );
 
         createdUsers.push({
@@ -830,7 +829,7 @@ exports.generateUsersFromCSV = async (req, res) => {
 exports.getFakeUsers = async (req, res) => {
   try {
     const fakeUsers = await User.find({ is_fake: true }).select(
-      "name email mobile city age profile_image created_at"
+      "name email mobile city age profile_image created_at",
     );
 
     res.json({
@@ -998,7 +997,7 @@ exports.editProfile = async (req, res) => {
           "..",
           "uploads",
           "profile_images",
-          oldFile
+          oldFile,
         );
 
         if (fs.existsSync(oldPath)) {
@@ -1015,7 +1014,7 @@ exports.editProfile = async (req, res) => {
 
     if (Array.isArray(interests) && interests.length > 0) {
       const tagRegexes = interests.map(
-        (t) => new RegExp(`^${escapeRegExp(t)}$`, "i")
+        (t) => new RegExp(`^${escapeRegExp(t)}$`, "i"),
       );
       const foundCategories = await Category.find({
         tags: { $in: tagRegexes },
@@ -1026,7 +1025,7 @@ exports.editProfile = async (req, res) => {
 
     if (Array.isArray(offeredTags) && offeredTags.length > 0) {
       const tagRegexes = offeredTags.map(
-        (t) => new RegExp(`^${escapeRegExp(t)}$`, "i")
+        (t) => new RegExp(`^${escapeRegExp(t)}$`, "i"),
       );
       const foundCategories = await Category.find({
         tags: { $in: tagRegexes },
@@ -1277,7 +1276,7 @@ exports.updateService = async (req, res) => {
       const validTags = category.tags.filter((tag) =>
         selectedTags
           .map((t) => String(t).toLowerCase())
-          .includes(tag.toLowerCase())
+          .includes(tag.toLowerCase()),
       );
 
       if (validTags.length) updatePayload.tags = validTags;
@@ -1343,7 +1342,7 @@ exports.updateService = async (req, res) => {
     const updatedService = await Service.findByIdAndUpdate(
       serviceId,
       { $set: updatePayload },
-      { new: true }
+      { new: true },
     );
 
     return res.json({
@@ -1442,7 +1441,7 @@ exports.getAllBookings = async (req, res) => {
       if (!booking.service || !booking.customer || !booking.provider) {
         console.log(
           "⚠️ Skipping booking due to missing reference:",
-          booking._id
+          booking._id,
         );
         return;
       }
@@ -1616,7 +1615,7 @@ exports.adminForceDeleteService = async (req, res) => {
     // ===============================
     const service = await Service.findById(serviceId).populate(
       "owner",
-      "name email services fcmToken"
+      "name email services fcmToken",
     );
 
     if (!service) {
@@ -1659,7 +1658,7 @@ exports.adminForceDeleteService = async (req, res) => {
       if (!payment) continue;
 
       const paymentIntent = await stripe.paymentIntents.retrieve(
-        payment.paymentIntentId
+        payment.paymentIntentId,
       );
 
       if (paymentIntent.status === "requires_capture") {
@@ -1705,7 +1704,7 @@ exports.adminForceDeleteService = async (req, res) => {
 
     await User.updateOne(
       { _id: service.owner._id },
-      { $pull: { services: service._id } }
+      { $pull: { services: service._id } },
     );
 
     service.deleteRequestStatus = "admin_deleted";
@@ -1725,7 +1724,7 @@ exports.adminForceDeleteService = async (req, res) => {
           email: service.owner.email,
         },
         service,
-        "provider"
+        "provider",
       );
 
       let customers = [];
@@ -1741,7 +1740,7 @@ exports.adminForceDeleteService = async (req, res) => {
               email: customer.email,
             },
             service,
-            "customer"
+            "customer",
           );
         }
       }
@@ -1790,6 +1789,80 @@ exports.getPendingDeleteCount = async (req, res) => {
   } catch (err) {
     return res.status(500).json({
       isSuccess: false,
+      message: "Server error",
+    });
+  }
+};
+
+//Block User by Admin
+
+exports.blockUser = async (req, res) => {
+  console.log("🛑 BLOCK USER API HIT");
+
+  try {
+    const { userId } = req.body;
+    console.log("📥 Received userId:", userId);
+
+    if (!userId) {
+      console.log("❌ userId missing in request");
+      return res.status(400).json({
+        success: false,
+        message: "userId required",
+      });
+    }
+
+    console.log("🔍 Finding user in DB...");
+    const user = await User.findById(userId);
+
+    if (!user) {
+      console.log("❌ User not found for ID:", userId);
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    console.log("✅ User found:", {
+      id: user._id,
+      email: user.email,
+      status: user.status,
+      is_active: user.is_active,
+      session_id: user.session_id,
+      fcmTokens: user.fcmToken?.length || 0,
+    });
+
+    // 🔥 BLOCK USER
+    console.log("🚫 Blocking user now...");
+    user.status = "banned";
+    user.is_active = false;
+
+    // 🔥 kill all sessions
+    console.log("🔐 Clearing session & access token");
+    user.session_id = null;
+    user.access_token = null;
+
+    // 🔥 mobile push logout
+    console.log("📵 Clearing FCM tokens");
+    user.fcmToken = [];
+
+    await user.save();
+
+    console.log("✅ USER BLOCKED SUCCESSFULLY:", {
+      id: user._id,
+      status: user.status,
+      is_active: user.is_active,
+      session_id: user.session_id,
+      fcmTokens: user.fcmToken.length,
+    });
+
+    return res.json({
+      success: true,
+      message: "User blocked and logged out from all devices",
+    });
+  } catch (err) {
+    console.error("❌ Block user error:", err);
+    return res.status(500).json({
+      success: false,
       message: "Server error",
     });
   }

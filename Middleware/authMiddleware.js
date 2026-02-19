@@ -24,6 +24,14 @@ async function authMiddleware(req, res, next) {
         .json({ IsSucces: false, message: "User not found" });
     }
 
+    /* 🔴 BLOCK CHECK (YAHI ADD HOGA) */
+    if (user.status === "banned" || user.is_active === false) {
+      return res.status(403).json({
+        IsSucces: false,
+        message: "Your account has been blocked by admin",
+      });
+    }
+
     // Check session
     if (user.session_id !== decoded.session_id) {
       return res

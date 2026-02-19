@@ -258,6 +258,12 @@ exports.verifyOtpRegister = async (req, res) => {
         .status(404)
         .json({ IsSucces: false, message: "User not found" });
     }
+    if (user.status === "banned" || user.is_active === false) {
+      return res.status(403).json({
+        IsSucces: false,
+        message: "Your account has been blocked by admin",
+      });
+    }
 
     if (!user.otp_code || !user.otp_expiry) {
       return res
@@ -342,6 +348,12 @@ exports.login = async (req, res) => {
     // Use email directly without converting to lowercase
     let user = await User.findOne({ email });
     console.log("🔍 Fetched user from DB:", user);
+    if (user && (user.status === "banned" || user.is_active === false)) {
+      return res.status(403).json({
+        IsSucces: false,
+        message: "Your account has been blocked by admin",
+      });
+    }
 
     // -------------------- MANUAL LOGIN -----------------------
     if (login_type === "manual") {
@@ -363,7 +375,7 @@ exports.login = async (req, res) => {
 
       const valid = await bcrypt.compare(
         String(password),
-        user.hashed_password
+        user.hashed_password,
       );
       console.log("🔑 Password valid?", valid);
 
@@ -433,7 +445,7 @@ exports.login = async (req, res) => {
 
         if (user.register_type === "manual") {
           console.log(
-            "❌ Conflict: existing manual registration prevents Google login"
+            "❌ Conflict: existing manual registration prevents Google login",
           );
           return res.status(409).json({
             IsSucces: false,
@@ -444,7 +456,7 @@ exports.login = async (req, res) => {
 
         if (!user.name || user.name === "No Name") {
           console.log(
-            `✏️ Updating user name from '${user.name}' to '${userName}'`
+            `✏️ Updating user name from '${user.name}' to '${userName}'`,
           );
           user.name = userName;
         }
@@ -531,6 +543,12 @@ exports.verifyOtpLogin = async (req, res) => {
       return res
         .status(404)
         .json({ IsSucces: false, message: "User not found" });
+    }
+    if (user.status === "banned" || user.is_active === false) {
+      return res.status(403).json({
+        IsSucces: false,
+        message: "Your account has been blocked by admin",
+      });
     }
 
     console.log("🟦 STEP 8: Checking if OTP exists");
@@ -623,6 +641,12 @@ exports.resendOtp = async (req, res) => {
       return res
         .status(404)
         .json({ IsSucces: false, message: "User not found" });
+    }
+    if (user.status === "banned" || user.is_active === false) {
+      return res.status(403).json({
+        IsSucces: false,
+        message: "Your account has been blocked by admin",
+      });
     }
 
     // Only manual accounts use OTP flows
@@ -735,6 +759,12 @@ exports.forgotOrResetPassword = async (req, res) => {
         .status(404)
         .json({ IsSucces: false, message: "User not found" });
     }
+    if (user.status === "banned" || user.is_active === false) {
+      return res.status(403).json({
+        IsSucces: false,
+        message: "Your account has been blocked by admin",
+      });
+    }
 
     // Mode 1: request reset (no token & no new_password provided)
     if (!token && !new_password) {
@@ -750,7 +780,7 @@ exports.forgotOrResetPassword = async (req, res) => {
       const COOLDOWN_SECONDS = 60;
       if (user.lastResetRequestAt) {
         const elapsedSec = Math.floor(
-          (Date.now() - new Date(user.lastResetRequestAt).getTime()) / 1000
+          (Date.now() - new Date(user.lastResetRequestAt).getTime()) / 1000,
         );
         if (elapsedSec < COOLDOWN_SECONDS) {
           return res.status(429).json({

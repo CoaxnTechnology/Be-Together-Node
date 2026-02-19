@@ -1867,3 +1867,48 @@ exports.blockUser = async (req, res) => {
     });
   }
 };
+exports.unblockUser = async (req, res) => {
+  try {
+    const { userId } = req.body;
+
+    console.log("🟢 Unblock request for user:", userId);
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: "userId required",
+      });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    // 🔓 UNBLOCK USER
+    user.status = "active";
+    user.is_active = true;
+
+    // ❗ DO NOT auto-login
+    user.session_id = null;
+    user.access_token = null;
+
+    await user.save();
+
+    console.log("✅ User unblocked:", user.email);
+
+    return res.json({
+      success: true,
+      message: "User unblocked successfully",
+    });
+  } catch (err) {
+    console.error("Unblock user error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
+  }
+};

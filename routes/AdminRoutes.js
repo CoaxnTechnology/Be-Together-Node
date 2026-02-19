@@ -30,6 +30,7 @@ const {
   adminForceDeleteService,
   getPendingDeleteCount,
   blockUser,
+  unblockUser,
 } = require("../controller/Admin");
 const adminAuth = require("../Middleware/adminAuth");
 const path = require("path");
@@ -156,7 +157,7 @@ router.delete(
   adminForceDeleteService
 );
 router.post("/block-user", adminAuth, blockUser);
-
+router.post("/unblock-user", adminAuth, unblockUser);
 // ------------------------CATEGORY------------------------
 router.post("/category/ai-tags", getAITags);
 router.post("/category/create", uploadCategoryImage.single("image"), createCategory);

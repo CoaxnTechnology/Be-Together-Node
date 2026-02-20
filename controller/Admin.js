@@ -13,7 +13,7 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const fs = require("fs");
 const path = require("path");
-
+const { notifyOnServicePromoted } = require("./notificationController");
 const csv = require("csv-parser");
 const Booking = require("../model/Booking");
 const Payment = require("../model/Payment");
@@ -1918,7 +1918,6 @@ exports.adminPromoteService = async (req, res) => {
 
   try {
     const { serviceId } = req.body;
-
     console.log("📦 Request Body:", req.body);
 
     if (!serviceId) {
@@ -1931,10 +1930,7 @@ exports.adminPromoteService = async (req, res) => {
 
     const now = new Date();
     const end = new Date();
-    end.setDate(end.getDate() + 30); // 30 days
-
-    console.log("⏱ Promotion Start:", now);
-    console.log("⏱ Promotion End:", end);
+    end.setDate(end.getDate() + 30);
 
     console.log("🔍 Finding service with ID:", serviceId);
 
@@ -1950,7 +1946,7 @@ exports.adminPromoteService = async (req, res) => {
         promotionStatus: "active",
       },
       { new: true },
-    );
+    ).populate("owner"); // 🔴 IMPORTANT
 
     if (!service) {
       console.error("❌ Service not found:", serviceId);
@@ -1963,8 +1959,15 @@ exports.adminPromoteService = async (req, res) => {
     console.log("✅ Service promoted successfully:", {
       id: service._id,
       title: service.title,
-      promotionEnd: service.promotionEnd,
     });
+
+    // 🔔 🔔 🔔 CALL NOTIFICATION FUNCTION HERE
+    try {
+      await notifyOnServicePromoted(service);
+    } catch (notifyErr) {
+      console.error("⚠️ Promotion notification failed:", notifyErr.message);
+      // ❗ notification fail hone se API fail nahi hogi
+    }
 
     return res.json({
       success: true,

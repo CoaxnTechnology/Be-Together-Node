@@ -1912,3 +1912,72 @@ exports.unblockUser = async (req, res) => {
     });
   }
 };
+//fake promote
+exports.adminPromoteService = async (req, res) => {
+  console.log("🚀 Admin Promote Service API CALLED");
+
+  try {
+    const { serviceId } = req.body;
+
+    console.log("📦 Request Body:", req.body);
+
+    if (!serviceId) {
+      console.error("❌ serviceId missing in request body");
+      return res.status(400).json({
+        success: false,
+        message: "serviceId is required",
+      });
+    }
+
+    const now = new Date();
+    const end = new Date();
+    end.setDate(end.getDate() + 30); // 30 days
+
+    console.log("⏱ Promotion Start:", now);
+    console.log("⏱ Promotion End:", end);
+
+    console.log("🔍 Finding service with ID:", serviceId);
+
+    const service = await Service.findByIdAndUpdate(
+      serviceId,
+      {
+        isPromoted: true,
+        promotionType: "one_time",
+        promotionPlanDays: 30,
+        promotionStart: now,
+        promotionEnd: end,
+        promotionAmount: 0,
+        promotionStatus: "active",
+      },
+      { new: true },
+    );
+
+    if (!service) {
+      console.error("❌ Service not found:", serviceId);
+      return res.status(404).json({
+        success: false,
+        message: "Service not found",
+      });
+    }
+
+    console.log("✅ Service promoted successfully:", {
+      id: service._id,
+      title: service.title,
+      promotionEnd: service.promotionEnd,
+    });
+
+    return res.json({
+      success: true,
+      message: "Service promoted for 30 days by admin",
+      data: service,
+    });
+  } catch (err) {
+    console.error("🔥 Admin promotion error:", err);
+
+    return res.status(500).json({
+      success: false,
+      message: "Admin promotion failed",
+      error: err.message,
+    });
+  }
+};

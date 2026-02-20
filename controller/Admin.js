@@ -1984,3 +1984,43 @@ exports.adminPromoteService = async (req, res) => {
     });
   }
 };
+exports.adminCancelPromotion = async (req, res) => {
+  try {
+    const { serviceId } = req.body;
+
+    if (!serviceId) {
+      return res.status(400).json({
+        success: false,
+        message: "serviceId is required",
+      });
+    }
+
+    const service = await Service.findByIdAndUpdate(
+      serviceId,
+      {
+        isPromoted: false,
+        promotionStatus: "cancelled",
+        promotionCancelledAt: new Date(),
+      },
+      { new: true },
+    );
+
+    if (!service) {
+      return res.status(404).json({
+        success: false,
+        message: "Service not found",
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: "Promotion cancelled by admin",
+      data: service,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: "Failed to cancel promotion",
+    });
+  }
+};

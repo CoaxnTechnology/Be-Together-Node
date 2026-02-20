@@ -32,6 +32,7 @@ const {
   blockUser,
   unblockUser,
   adminPromoteService,
+  adminCancelPromotion,
 } = require("../controller/Admin");
 const adminAuth = require("../Middleware/adminAuth");
 const path = require("path");
@@ -163,6 +164,7 @@ router.post(
   adminAuth, // 👈 MUST be admin
   adminPromoteService,
 );
+router.post("/admin/cancel-promotion", adminAuth, adminCancelPromotion);
 // ------------------------CATEGORY------------------------
 router.post("/category/ai-tags", getAITags);
 router.post(

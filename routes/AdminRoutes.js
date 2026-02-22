@@ -29,6 +29,10 @@ const {
   updateService,
   adminForceDeleteService,
   getPendingDeleteCount,
+  blockUser,
+  unblockUser,
+  adminPromoteService,
+  adminCancelPromotion,
 } = require("../controller/Admin");
 const adminAuth = require("../Middleware/adminAuth");
 const path = require("path");
@@ -87,8 +91,18 @@ const uploadCSV = multer({
 // 🏷 CATEGORY IMAGES (disk)
 const categoryImageStorage = multer.diskStorage({
   destination: function (req, file, cb) {
-    cb(null, "uploads/category_images");
+    // ✅ Absolute path (VERY IMPORTANT)
+    const uploadDir = path.join(process.cwd(), "uploads", "category_images");
+
+    // ✅ Auto-create folder if missing
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+      console.log("📁 uploads/category_images folder auto-created");
+    }
+
+    cb(null, uploadDir);
   },
+
   filename: function (req, file, cb) {
     const uniqueName =
       "category_" +
@@ -96,6 +110,7 @@ const categoryImageStorage = multer.diskStorage({
       "_" +
       Math.round(Math.random() * 1e9) +
       path.extname(file.originalname);
+
     cb(null, uniqueName);
   },
 });
@@ -116,7 +131,7 @@ router.patch(
   "/service/update",
   //adminAuth,
   uploadServiceImage.single("image"), // service image
-  updateService
+  updateService,
 );
 // ------------------------FAKE USERS------------------------
 router.get("/fake-users", getFakeUsers);
@@ -124,24 +139,44 @@ router.get("/fake-users/:id", getFakeUserById);
 
 router.delete("/fake-users/:id", deleteFakeUser);
 router.delete("/fake-users", deleteAllFakeUsers);
-router.post("/upload-users-csv", uploadCSV.single("file"), generateUsersFromCSV);
+router.post(
+  "/upload-users-csv",
+  uploadCSV.single("file"),
+  generateUsersFromCSV,
+);
 
 // ------------------------PROFILE------------------------
 router.put(
   "/user/edit-profile/:userId",
   uploadProfileImage.single("profile_image"),
-  editProfile
+  editProfile,
 );
 //admin delete the service---
 router.delete(
   "/admin-force-delete/:serviceId",
   adminAuth, // 👈 MUST be admin
-  adminForceDeleteService
+  adminForceDeleteService,
 );
+router.post("/block-user", adminAuth, blockUser);
+router.post("/unblock-user", adminAuth, unblockUser);
+router.post(
+  "/admin/promote-service",
+  adminAuth, // 👈 MUST be admin
+  adminPromoteService,
+);
+router.post("/admin/cancel-promotion", adminAuth, adminCancelPromotion);
 // ------------------------CATEGORY------------------------
 router.post("/category/ai-tags", getAITags);
-router.post("/category/create", uploadCategoryImage.single("image"), createCategory);
-router.put("/category/update/:id", uploadCategoryImage.single("image"), updateCategory);
+router.post(
+  "/category/create",
+  uploadCategoryImage.single("image"),
+  createCategory,
+);
+router.put(
+  "/category/update/:id",
+  uploadCategoryImage.single("image"),
+  updateCategory,
+);
 router.delete("/category/delete/:id", deleteCategory);
 router.post("/category/all", getAllCategories);
 
@@ -156,12 +191,7 @@ router.post("/auth/login", loginAdmin);
 router.get("/payment", getAllPayments);
 
 // admin.routes.js
-router.get(
-  "/pending-delete-count",
-  adminAuth,
-  getPendingDeleteCount
-);
+router.get("/pending-delete-count", adminAuth, getPendingDeleteCount);
 //
 
 module.exports = router;
-

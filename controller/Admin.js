@@ -12,7 +12,7 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const fs = require("fs");
 const path = require("path");
-
+const { notifyOnServicePromoted } = require("./notificationController");
 const csv = require("csv-parser");
 const Booking = require("../model/Booking");
 const Payment = require("../model/Payment");
@@ -32,7 +32,7 @@ const uploadFromBuffer = (buffer) =>
       (err, result) => {
         if (err) reject(err);
         else resolve(result);
-      }
+      },
     );
     streamifier.createReadStream(buffer).pipe(stream);
   });
@@ -47,7 +47,7 @@ function deduplicateSimilarTags(tags) {
         (t) =>
           t === normalized ||
           t.startsWith(normalized.slice(0, 5)) ||
-          normalized.startsWith(t.slice(0, 5))
+          normalized.startsWith(t.slice(0, 5)),
       )
     ) {
       unique.push(normalized);
@@ -80,7 +80,7 @@ const getHrFlowTags = async (text) => {
           "X-API-KEY": process.env.HRFLOW_API_KEY,
           "Content-Type": "application/json",
         },
-      }
+      },
     );
 
     console.log("⬅️ HrFlow raw response:", response.data);
@@ -93,7 +93,7 @@ const getHrFlowTags = async (text) => {
   } catch (err) {
     console.error(
       "❌ HrFlow tagging error:",
-      err.response?.data || err.message
+      err.response?.data || err.message,
     );
     return [];
   }
@@ -104,47 +104,75 @@ exports.createCategory = async (req, res) => {
   try {
     const { name, tags, order } = req.body;
 
-    if (!name?.trim())
-      return res
-        .status(400)
-        .json({ isSuccess: false, message: "Category name is required" });
+    if (!name?.trim()) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Category name is required",
+      });
+    }
 
-    // Prevent duplicate names
+    // ❌ Duplicate check
     const existing = await Category.findOne({
       name: { $regex: `^${name}$`, $options: "i" },
     });
-    if (existing)
-      return res
-        .status(400)
-        .json({ isSuccess: false, message: "Category already exists" });
-    // 🔢 Decide order number
+    if (existing) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Category already exists",
+      });
+    }
+
+    /* ----------------------------------
+     * 📁 ENSURE FOLDER EXISTS
+     * ---------------------------------- */
+    const uploadDir = path.join(process.cwd(), "uploads", "category_images");
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+
+    /* ----------------------------------
+     * 🔢 ORDER LOGIC (100% SAFE)
+     * ---------------------------------- */
+    const totalCategories = await Category.countDocuments();
     let finalOrder;
-    if (order) {
+
+    if (order !== undefined && order !== "") {
       finalOrder = Number(order);
 
-      // shift categories
+      if (isNaN(finalOrder) || finalOrder < 1) {
+        return res.status(400).json({
+          isSuccess: false,
+          message: "Invalid order number",
+        });
+      }
+
+      // clamp value (important)
+      if (finalOrder > totalCategories + 1) {
+        finalOrder = totalCategories + 1;
+      }
+
+      // shift categories AFTER this order
       await Category.updateMany(
         { order: { $gte: finalOrder } },
-        { $inc: { order: 1 } }
+        { $inc: { order: 1 } },
       );
     } else {
-      const lastCategory = await Category.findOne().sort({ order: -1 });
-      finalOrder = lastCategory ? lastCategory.order + 1 : 1;
+      finalOrder = totalCategories + 1;
     }
 
-    // Upload image if provided
+    /* ----------------------------------
+     * 🖼 IMAGE
+     * ---------------------------------- */
     let imageUrl = null;
-    const base = process.env.BASE_URL;
-
     if (req.file) {
-      imageUrl = `${base}/uploads/category_images/${req.file.filename}`;
-      console.log("🖼 Category image saved:", imageUrl);
+      imageUrl = `${process.env.BASE_URL}/uploads/category_images/${req.file.filename}`;
     }
 
-    // AI tags
+    /* ----------------------------------
+     * 🏷 TAGS
+     * ---------------------------------- */
     const autoTags = await getHrFlowTags(name);
 
-    // Manual tags
     let userTags = [];
     if (Array.isArray(tags)) userTags = tags;
     else if (typeof tags === "string") {
@@ -155,36 +183,31 @@ exports.createCategory = async (req, res) => {
       }
     }
 
-    // Merge & deduplicate
     let finalTags = [
       ...new Set(
         [...autoTags, ...userTags.map((t) => t.trim().toLowerCase())].filter(
-          Boolean
-        )
+          Boolean,
+        ),
       ),
     ];
     finalTags = deduplicateSimilarTags(finalTags);
 
-    // Save category
+    /* ----------------------------------
+     * 💾 SAVE
+     * ---------------------------------- */
     const newCategory = new Category({
       name,
       image: imageUrl,
       tags: finalTags,
       order: finalOrder,
     });
-    try {
-      await newCategory.save();
-    } catch (err) {
-      // Rollback image if DB fails
-      //if (imagePublicId) await cloudinary.uploader.destroy(imagePublicId);
-      throw err;
-    }
+
+    await newCategory.save();
 
     return res.status(201).json({
       isSuccess: true,
       message: "Category created successfully",
       data: newCategory,
-      autoTags,
     });
   } catch (err) {
     console.error("❌ createCategory error:", err);
@@ -300,12 +323,12 @@ exports.updateCategory = async (req, res) => {
       if (newOrder > oldOrder) {
         await Category.updateMany(
           { order: { $gt: oldOrder, $lte: newOrder } },
-          { $inc: { order: -1 } }
+          { $inc: { order: -1 } },
         );
       } else {
         await Category.updateMany(
           { order: { $gte: newOrder, $lt: oldOrder } },
-          { $inc: { order: 1 } }
+          { $inc: { order: 1 } },
         );
       }
 
@@ -338,7 +361,7 @@ exports.updateCategory = async (req, res) => {
           "..",
           "uploads",
           "category_images",
-          path.basename(category.image) // only file name
+          path.basename(category.image), // only file name
         );
 
         if (fs.existsSync(oldLocalPath)) {
@@ -387,7 +410,7 @@ exports.deleteCategory = async (req, res) => {
       const imagePath = path.join(
         __dirname,
         "../",
-        category.image.replace(/^\/+/, "")
+        category.image.replace(/^\/+/, ""),
       );
 
       if (fs.existsSync(imagePath)) {
@@ -520,96 +543,140 @@ function isValidImageUrl(url) {
     typeof url === "string" && /^https?:\/\/.+\.(jpg|jpeg|png|webp)$/i.test(url)
   );
 }
+function parseCSVJSON(value) {
+  if (typeof value !== "string") return value;
+
+  let cleaned = value
+    .replace(/\r?\n|\r/g, "") // ⬅️ VERY IMPORTANT (CSV newline fix)
+    .trim();
+
+  // remove outer quotes added by CSV
+  if (cleaned.startsWith('"') && cleaned.endsWith('"')) {
+    cleaned = cleaned.slice(1, -1);
+  }
+
+  // convert CSV escaped quotes "" → "
+  cleaned = cleaned.replace(/""/g, '"');
+
+  return JSON.parse(cleaned);
+}
 
 exports.generateUsersFromCSV = async (req, res) => {
-  try {
-    console.log("\n===== 🚀 generateUsersFromCSV START =====");
+  console.log("\n🚀 ===== CSV UPLOAD STARTED =====");
 
-    // ---------- FILE CHECK ----------
+  try {
     if (!req.file) {
-      console.log("❌ NO CSV FILE IN REQUEST");
+      console.log("❌ NO FILE RECEIVED");
       return res.status(400).json({
         isSuccess: false,
-        message: "No CSV file uploaded",
+        message: "CSV file not uploaded",
       });
     }
 
-    console.log("📂 CSV FILE RECEIVED =", {
-      originalName: req.file.originalname,
-      sizeBytes: req.file.buffer?.length,
-      mimetype: req.file.mimetype,
+    console.log("📂 FILE RECEIVED:", req.file.originalname);
+    const categories = await Category.find({}, { tags: 1 });
+    const validCategoryTags = new Set();
+
+    categories.forEach((cat) => {
+      (cat.tags || []).forEach((tag) =>
+        validCategoryTags.add(tag.toLowerCase()),
+      );
     });
 
-    // ---------- CREATE STREAM ----------
-    console.log("📡 CREATING READABLE STREAM FROM BUFFER...");
+    console.log("✅ VALID CATEGORY TAGS:", validCategoryTags.size);
+    // ---- BUFFER → STREAM ----
     const bufferStream = new Readable();
     bufferStream.push(req.file.buffer);
     bufferStream.push(null);
 
-    const usersData = [];
-    const createdUsers = [];
-    const skippedUsers = [];
-
-    // ---------- PARSE CSV ----------
-    console.log("📡 START CSV PARSE PIPE...");
+    const rows = [];
 
     await new Promise((resolve, reject) => {
       bufferStream
         .pipe(csv())
         .on("data", (row) => {
-          console.log("➡ ROW PARSED RAW =", JSON.stringify(row));
-          usersData.push(row);
+          console.log("➡ CSV ROW READ:", row.email);
+          rows.push(row);
         })
         .on("end", () => {
-          console.log("===== ✅ CSV PARSE FINISHED =====");
-          console.log("🔢 TOTAL ROWS PARSED =", usersData.length);
+          console.log("✅ CSV PARSE COMPLETE. TOTAL ROWS:", rows.length);
           resolve();
         })
-        .on("error", (err) => {
-          console.log("❌ CSV PIPE ERROR =", err.message);
-          reject(err);
-        });
+        .on("error", reject);
     });
 
-    // ---------- PROCESS EACH USER ----------
-    console.log("🧨 START PROCESS LOOP FOR USERS");
+    const createdUsers = [];
+    const skippedUsers = [];
 
-    for (const row of usersData) {
-      console.log("\n🧑 PROCESS USER =", row.email);
+    // ---- PROCESS EACH ROW ----
+    for (const row of rows) {
+      console.log("\n👤 PROCESSING USER:", row.email);
 
       try {
         // ---------- DUPLICATE CHECK ----------
-        console.log("🔍 CHECK DUPLICATE EMAIL...");
         const existingUser = await User.findOne({ email: row.email });
-
         if (existingUser) {
-          console.log("⏭ SKIPPED → DUPLICATE EMAIL =", row.email);
-          skippedUsers.push({
-            email: row.email,
-            reason: "Duplicate Email",
-          });
+          console.log("⏭ DUPLICATE USER:", row.email);
+          skippedUsers.push({ email: row.email, reason: "Duplicate email" });
           continue;
         }
 
-        // ---------- PARSE SERVICES JSON ----------
-        console.log("📦 PARSE services JSON FIELD...");
+        // ---------- PARSE SERVICES (DOUBLE JSON SAFE) ----------
+        let parsedServices;
+        console.log("🧪 RAW SERVICES:", row.services);
 
-        let services = [];
         try {
-          services = JSON.parse(row.services || "[]");
-          console.log("📦 SERVICES PARSE OK COUNT =", services.length);
-        } catch (err) {
-          console.log("❌ SERVICES JSON BAD FOR USER =", row.email);
+          parsedServices = parseCSVJSON(row.services);
+
+          if (!Array.isArray(parsedServices)) {
+            throw new Error("services is not array");
+          }
+
+          console.log("📦 SERVICES COUNT:", parsedServices.length);
+        } catch (e) {
+          console.log("❌ SERVICES JSON INVALID:", row.email);
+          console.log("❌ RAW VALUE:", row.services);
+
           skippedUsers.push({
             email: row.email,
-            reason: "Invalid services JSON",
+            reason: "Invalid services JSON (CSV escaped)",
           });
           continue;
+        }
+        /* ---------- PARSE TAG ARRAYS ---------- */
+        const rawInterests = row.interests ? parseCSVJSON(row.interests) : [];
+
+        const rawOfferedTags = row.offeredTags
+          ? parseCSVJSON(row.offeredTags)
+          : [];
+
+        /* ---------- AUTO-CLEAN TAGS ---------- */
+        const cleanInterests = rawInterests.filter((t) =>
+          validCategoryTags.has(String(t).toLowerCase()),
+        );
+
+        const cleanOfferedTags = rawOfferedTags.filter((t) =>
+          validCategoryTags.has(String(t).toLowerCase()),
+        );
+
+        const removedInterests = rawInterests.filter(
+          (t) => !cleanInterests.includes(t),
+        );
+
+        const removedOffered = rawOfferedTags.filter(
+          (t) => !cleanOfferedTags.includes(t),
+        );
+
+        if (removedInterests.length || removedOffered.length) {
+          console.log("🧹 TAGS AUTO-CLEANED FOR:", row.email);
+          if (removedInterests.length)
+            console.log("❌ Removed interests:", removedInterests);
+          if (removedOffered.length)
+            console.log("❌ Removed offeredTags:", removedOffered);
         }
 
         // ---------- CREATE USER ----------
-        console.log("💾 CREATE USER OBJECT...");
-        const user = new User({
+        const user = await User.create({
           name: row.name?.trim(),
           email: row.email?.trim(),
           mobile: row.mobile || null,
@@ -617,145 +684,142 @@ exports.generateUsersFromCSV = async (req, res) => {
           bio: row.bio || null,
           city: row.city || null,
           age: row.age ? Number(row.age) : null,
-          is_fake: String(row.is_fake).trim().toLowerCase() === "true",
-          is_active: true,
+
+          is_fake: true, // 🔴 CSV user always fake
+
+          languages: row.languages ? parseCSVJSON(row.languages) : [],
+          interests: cleanInterests,
+          offeredTags: cleanOfferedTags,
+
+          lastLocation: {
+            coords: {
+              type: row.lastLocation_type || "Point",
+              coordinates: [
+                Number(row.lastLocation_longitude) || 0,
+                Number(row.lastLocation_latitude) || 0,
+              ],
+            },
+            recordedAt: new Date(),
+            updatedAt: new Date(),
+          },
+
           register_type: "manual",
           login_type: "manual",
+          status: "active",
+          is_active: true,
         });
 
-        console.log("💾 SAVING USER →", row.email);
-        const savedUser = await user.save();
-        console.log("🎉 USER SAVED ID =", savedUser._id);
+        console.log("✅ USER CREATED:", user.email);
+
+        const createdServiceIds = [];
 
         // ---------- CREATE SERVICES ----------
-        const createdServices = [];
+        for (const s of parsedServices) {
+          console.log("🔧 CREATING SERVICE:", s.title);
 
-        for (const s of services) {
-          console.log("\n🔧 START SERVICE FOR USER =", row.email);
-
-          // ---------- VALIDATE CATEGORY ----------
-          console.log("🔍 VALIDATE CATEGORY ID =", s.categoryId);
           const category = await Category.findById(s.categoryId);
-
           if (!category) {
-            console.log("❌ SKIP USER → CATEGORY INVALID =", s.categoryId);
-            savedUser.is_active = false;
-            await savedUser.save();
-
-            skippedUsers.push({
-              email: row.email,
-              reason: `Invalid CategoryId ${s.categoryId}`,
-            });
-
-            throw new Error("Category validation failed");
+            user.is_active = false;
+            await user.save();
+            throw new Error(`Invalid categoryId: ${s.categoryId}`);
           }
-
-          // ---------- BUILD SERVICE DATA ----------
-          const base = process.env.BASE_URL || "";
 
           const serviceData = {
             title: s.title || "Untitled Service",
-            Language: s.Language || category.Language || "English",
+            Language: s.Language || "English",
+
+            isFree: String(s.isFree).toLowerCase() === "true",
+            price: s.price ? Number(s.price) : 0,
+            currency: s.currency || "EUR",
+            description: s.description || null,
+
             category: category._id,
             tags: s.selectedTags || [],
-            owner: savedUser._id,
-            city: s.city || savedUser.city || null,
+            max_participants: Number(s.max_participants) || 1,
+
+            owner: user._id,
+            city: s.city || user.city || null,
 
             location_name: s.location?.name || null,
-
             location: {
               type: "Point",
               coordinates: [
-                parseFloat(s.location?.longitude),
-                parseFloat(s.location?.latitude),
+                Number(s.location?.longitude),
+                Number(s.location?.latitude),
               ],
             },
 
-            image: null,
+            isDoorstepService:
+              String(s.isDoorstepService).toLowerCase() === "true",
+
+            image:
+              s.image && s.image.startsWith("http")
+                ? s.image
+                : category.image || null,
+
+            service_type: s.service_type || "one_time",
+
+            date: null,
+            start_time: null,
+            end_time: null,
+            recurring_schedule: [],
           };
 
-          // ---------- IMAGE LOGIC ----------
-          console.log("🖼 CHECK CSV SERVICE IMAGE...");
-
-          if (s.image && typeof s.image === "string" && s.image.startsWith("http")) {
-            serviceData.image = s.image.trim();
-            console.log("✔ CSV IMAGE URL USED =", serviceData.image);
-          } else if (category.image) {
-            serviceData.image = category.image;
-            console.log("✔ FALLBACK CATEGORY IMAGE =", serviceData.image);
+          // ---- ONE TIME ----
+          if (serviceData.service_type === "one_time") {
+            serviceData.date = s.date || null;
+            serviceData.start_time = s.start_time || null;
+            serviceData.end_time = s.end_time || null;
           }
 
-          console.log("📦 FINAL SERVICE DATA =", JSON.stringify(serviceData));
-
-          // ---------- SAVE SERVICE ----------
-          console.log("💾 SAVING SERVICE...");
-          const service = new Service(serviceData);
-
-          try {
-            const savedService = await service.save();
-            console.log("🎉 SERVICE SAVED ID =", savedService._id);
-
-            createdServices.push(savedService._id);
-          } catch (err) {
-            console.log("❌ SERVICE SAVE ERROR =", err.message);
-            console.log("🧨 SERVICE VALIDATION ERROR OBJECT =", err);
-
-            // mark user inactive
-            savedUser.is_active = false;
-            await savedUser.save();
-
-            skippedUsers.push({
-              email: row.email,
-              reason: err.message,
-            });
-
-            throw err;
+          // ---- RECURRING ----
+          if (serviceData.service_type === "recurring") {
+            serviceData.recurring_schedule = Array.isArray(s.recurring_schedule)
+              ? s.recurring_schedule
+              : [];
           }
+
+          const service = await Service.create(serviceData);
+          console.log("✅ SERVICE SAVED:", service._id);
+
+          createdServiceIds.push(service._id);
         }
 
-        // ---------- ATTACH SERVICES TO USER ----------
-        savedUser.services = createdServices;
-        await savedUser.save();
+        // ---------- ATTACH SERVICES ----------
+        user.services = createdServiceIds;
+        await user.save();
+
+        console.log(
+          "🎉 USER COMPLETED:",
+          user.email,
+          "SERVICES:",
+          createdServiceIds.length,
+        );
 
         createdUsers.push({
-          id: savedUser._id,
-          name: savedUser.name,
-          servicesCreated: createdServices.length,
+          email: user.email,
+          servicesCreated: createdServiceIds.length,
         });
-
-        console.log("🎉 USER + SERVICES COMPLETE =", row.email);
-
       } catch (err) {
-        console.log("⏭ USER SKIPPED DUE ERROR =", row.email);
-        console.log("❌ ERROR REASON =", err.message);
-
-        skippedUsers.push({
-          email: row.email,
-          reason: err.message,
-        });
+        console.log("⛔ USER FAILED:", row.email, err.message);
+        skippedUsers.push({ email: row.email, reason: err.message });
       }
     }
 
-    console.log("\n===== ✅ PROCESS FINISHED =====");
-    console.log("✔ CREATED USERS =", createdUsers.length);
-    console.log("⏭ SKIPPED USERS =", skippedUsers.length);
+    console.log("\n✅ ===== CSV PROCESS FINISHED =====");
+    console.log("✔ USERS CREATED:", createdUsers.length);
+    console.log("⏭ USERS SKIPPED:", skippedUsers.length);
 
     return res.json({
       isSuccess: true,
-      message: "CSV processed with console",
-      createdCount: createdUsers.length,
-      skippedCount: skippedUsers.length,
       createdUsers,
       skippedUsers,
     });
-
   } catch (err) {
-    console.log("🧨 FATAL OUTER ERROR =", err.message);
-
+    console.log("🔥 FATAL ERROR:", err.message);
     return res.status(500).json({
       isSuccess: false,
       message: "Server error",
-      error: err.message,
     });
   }
 };
@@ -764,7 +828,7 @@ exports.generateUsersFromCSV = async (req, res) => {
 exports.getFakeUsers = async (req, res) => {
   try {
     const fakeUsers = await User.find({ is_fake: true }).select(
-      "name email mobile city age profile_image created_at"
+      "name email mobile city age profile_image created_at",
     );
 
     res.json({
@@ -932,7 +996,7 @@ exports.editProfile = async (req, res) => {
           "..",
           "uploads",
           "profile_images",
-          oldFile
+          oldFile,
         );
 
         if (fs.existsSync(oldPath)) {
@@ -949,7 +1013,7 @@ exports.editProfile = async (req, res) => {
 
     if (Array.isArray(interests) && interests.length > 0) {
       const tagRegexes = interests.map(
-        (t) => new RegExp(`^${escapeRegExp(t)}$`, "i")
+        (t) => new RegExp(`^${escapeRegExp(t)}$`, "i"),
       );
       const foundCategories = await Category.find({
         tags: { $in: tagRegexes },
@@ -960,7 +1024,7 @@ exports.editProfile = async (req, res) => {
 
     if (Array.isArray(offeredTags) && offeredTags.length > 0) {
       const tagRegexes = offeredTags.map(
-        (t) => new RegExp(`^${escapeRegExp(t)}$`, "i")
+        (t) => new RegExp(`^${escapeRegExp(t)}$`, "i"),
       );
       const foundCategories = await Category.find({
         tags: { $in: tagRegexes },
@@ -1211,7 +1275,7 @@ exports.updateService = async (req, res) => {
       const validTags = category.tags.filter((tag) =>
         selectedTags
           .map((t) => String(t).toLowerCase())
-          .includes(tag.toLowerCase())
+          .includes(tag.toLowerCase()),
       );
 
       if (validTags.length) updatePayload.tags = validTags;
@@ -1277,7 +1341,7 @@ exports.updateService = async (req, res) => {
     const updatedService = await Service.findByIdAndUpdate(
       serviceId,
       { $set: updatePayload },
-      { new: true }
+      { new: true },
     );
 
     return res.json({
@@ -1376,7 +1440,7 @@ exports.getAllBookings = async (req, res) => {
       if (!booking.service || !booking.customer || !booking.provider) {
         console.log(
           "⚠️ Skipping booking due to missing reference:",
-          booking._id
+          booking._id,
         );
         return;
       }
@@ -1550,7 +1614,7 @@ exports.adminForceDeleteService = async (req, res) => {
     // ===============================
     const service = await Service.findById(serviceId).populate(
       "owner",
-      "name email services fcmToken"
+      "name email services fcmToken",
     );
 
     if (!service) {
@@ -1569,7 +1633,9 @@ exports.adminForceDeleteService = async (req, res) => {
     const bookings = await Booking.find({
       service: serviceId,
       status: { $in: ["booked", "started"] },
-    }).populate("user", "name email fcmToken");
+    })
+      .populate("customer", "name email fcmToken")
+      .populate("provider", "name email fcmToken");
 
     console.log(`📦 Bookings found: ${bookings.length}`);
 
@@ -1591,7 +1657,7 @@ exports.adminForceDeleteService = async (req, res) => {
       if (!payment) continue;
 
       const paymentIntent = await stripe.paymentIntents.retrieve(
-        payment.paymentIntentId
+        payment.paymentIntentId,
       );
 
       if (paymentIntent.status === "requires_capture") {
@@ -1637,7 +1703,7 @@ exports.adminForceDeleteService = async (req, res) => {
 
     await User.updateOne(
       { _id: service.owner._id },
-      { $pull: { services: service._id } }
+      { $pull: { services: service._id } },
     );
 
     service.deleteRequestStatus = "admin_deleted";
@@ -1657,14 +1723,14 @@ exports.adminForceDeleteService = async (req, res) => {
           email: service.owner.email,
         },
         service,
-        "provider"
+        "provider",
       );
 
       let customers = [];
 
       // CUSTOMER EMAILS
       if (bookings.length > 0) {
-        customers = bookings.map((b) => b.user).filter(Boolean);
+        customers = bookings.map((b) => b.customer).filter(Boolean);
 
         for (const customer of customers) {
           await sendServiceForceDeletedEmail(
@@ -1673,7 +1739,7 @@ exports.adminForceDeleteService = async (req, res) => {
               email: customer.email,
             },
             service,
-            "customer"
+            "customer",
           );
         }
       }
@@ -1723,6 +1789,237 @@ exports.getPendingDeleteCount = async (req, res) => {
     return res.status(500).json({
       isSuccess: false,
       message: "Server error",
+    });
+  }
+};
+
+//Block User by Admin
+
+exports.blockUser = async (req, res) => {
+  console.log("🛑 BLOCK USER API HIT");
+
+  try {
+    const { userId } = req.body;
+    console.log("📥 Received userId:", userId);
+
+    if (!userId) {
+      console.log("❌ userId missing in request");
+      return res.status(400).json({
+        success: false,
+        message: "userId required",
+      });
+    }
+
+    console.log("🔍 Finding user in DB...");
+    const user = await User.findById(userId);
+
+    if (!user) {
+      console.log("❌ User not found for ID:", userId);
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    console.log("✅ User found:", {
+      id: user._id,
+      email: user.email,
+      status: user.status,
+      is_active: user.is_active,
+      session_id: user.session_id,
+      fcmTokens: user.fcmToken?.length || 0,
+    });
+
+    // 🔥 BLOCK USER
+    console.log("🚫 Blocking user now...");
+    user.status = "banned";
+    user.is_active = false;
+
+    // 🔥 kill all sessions
+    console.log("🔐 Clearing session & access token");
+    user.session_id = null;
+    user.access_token = null;
+
+    // 🔥 mobile push logout
+    console.log("📵 Clearing FCM tokens");
+    user.fcmToken = [];
+
+    await user.save();
+
+    console.log("✅ USER BLOCKED SUCCESSFULLY:", {
+      id: user._id,
+      status: user.status,
+      is_active: user.is_active,
+      session_id: user.session_id,
+      fcmTokens: user.fcmToken.length,
+    });
+
+    return res.json({
+      success: true,
+      message: "User blocked and logged out from all devices",
+    });
+  } catch (err) {
+    console.error("❌ Block user error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
+  }
+};
+exports.unblockUser = async (req, res) => {
+  try {
+    const { userId } = req.body;
+
+    console.log("🟢 Unblock request for user:", userId);
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: "userId required",
+      });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    // 🔓 UNBLOCK USER
+    user.status = "active";
+    user.is_active = true;
+
+    // ❗ DO NOT auto-login
+    user.session_id = null;
+    user.access_token = null;
+
+    await user.save();
+
+    console.log("✅ User unblocked:", user.email);
+
+    return res.json({
+      success: true,
+      message: "User unblocked successfully",
+    });
+  } catch (err) {
+    console.error("Unblock user error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
+  }
+};
+//fake promote
+exports.adminPromoteService = async (req, res) => {
+  console.log("🚀 Admin Promote Service API CALLED");
+
+  try {
+    const { serviceId } = req.body;
+    console.log("📦 Request Body:", req.body);
+
+    if (!serviceId) {
+      console.error("❌ serviceId missing in request body");
+      return res.status(400).json({
+        success: false,
+        message: "serviceId is required",
+      });
+    }
+
+    const now = new Date();
+    const end = new Date();
+    end.setDate(end.getDate() + 30);
+
+    console.log("🔍 Finding service with ID:", serviceId);
+
+    const service = await Service.findByIdAndUpdate(
+      serviceId,
+      {
+        isPromoted: true,
+        promotionType: "one_time",
+        promotionPlanDays: 30,
+        promotionStart: now,
+        promotionEnd: end,
+        promotionAmount: 0,
+        promotionStatus: "active",
+      },
+      { new: true },
+    ).populate("owner"); // 🔴 IMPORTANT
+
+    if (!service) {
+      console.error("❌ Service not found:", serviceId);
+      return res.status(404).json({
+        success: false,
+        message: "Service not found",
+      });
+    }
+
+    console.log("✅ Service promoted successfully:", {
+      id: service._id,
+      title: service.title,
+    });
+
+    // 🔔 🔔 🔔 CALL NOTIFICATION FUNCTION HERE
+    try {
+      await notifyOnServicePromoted(service);
+    } catch (notifyErr) {
+      console.error("⚠️ Promotion notification failed:", notifyErr.message);
+      // ❗ notification fail hone se API fail nahi hogi
+    }
+
+    return res.json({
+      success: true,
+      message: "Service promoted for 30 days by admin",
+      data: service,
+    });
+  } catch (err) {
+    console.error("🔥 Admin promotion error:", err);
+
+    return res.status(500).json({
+      success: false,
+      message: "Admin promotion failed",
+      error: err.message,
+    });
+  }
+};
+exports.adminCancelPromotion = async (req, res) => {
+  try {
+    const { serviceId } = req.body;
+
+    if (!serviceId) {
+      return res.status(400).json({
+        success: false,
+        message: "serviceId is required",
+      });
+    }
+
+    const service = await Service.findByIdAndUpdate(
+      serviceId,
+      {
+        isPromoted: false,
+        promotionStatus: "cancelled",
+        promotionCancelledAt: new Date(),
+      },
+      { new: true },
+    );
+
+    if (!service) {
+      return res.status(404).json({
+        success: false,
+        message: "Service not found",
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: "Promotion cancelled by admin",
+      data: service,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: "Failed to cancel promotion",
     });
   }
 };

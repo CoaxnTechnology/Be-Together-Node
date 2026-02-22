@@ -26,7 +26,13 @@ function buildServiceDeletedByAdminForCustomer(service) {
     body: `The service "${service.title}" has been cancelled by admin.`,
   };
 }
-
+// 🔔 Admin promoted service - Provider
+function buildServicePromotedMessage(service) {
+  return {
+    title: "🚀 Service Promoted!",
+    body: `Your service "${service.title}" has been promoted by admin for 30 days.`,
+  };
+}
 // 🔔 Admin approved delete - Provider
 function buildServiceDeleteApprovedForProvider(service) {
   return {
@@ -40,7 +46,7 @@ function buildNewServiceMessage(service, distance) {
   return {
     title: "✨ New Service Created",
     body: `A ${service.title} service is near you (${distance.toFixed(
-      1
+      1,
     )} km away)!`,
   };
 }
@@ -57,7 +63,7 @@ function buildUserInterestUpdateMessage(user, mutualInterests) {
   return {
     title: `👋 Nearby user updated interests!`,
     body: `${user.name} now likes ${mutualInterests.join(
-      ", "
+      ", ",
     )}. Tap to view their profile.`,
   };
 }
@@ -71,7 +77,7 @@ function buildServiceViewMessage(viewer, service) {
 async function notifyUsersForService(service, scenarioType) {
   try {
     console.log(
-      `🚀 Starting notification for service "${service.title}" [${scenarioType}]`
+      `🚀 Starting notification for service "${service.title}" [${scenarioType}]`,
     );
 
     const users = await User.find({
@@ -104,12 +110,12 @@ async function notifyUsersForService(service, scenarioType) {
         service.location.coordinates[1],
         service.location.coordinates[0],
         user.lastLocation.coords.coordinates[1],
-        user.lastLocation.coords.coordinates[0]
+        user.lastLocation.coords.coordinates[0],
       );
 
       if (dist > 10) {
         console.log(
-          `⏩ Skipping ${user.name} - distance ${dist.toFixed(2)}km > 10km`
+          `⏩ Skipping ${user.name} - distance ${dist.toFixed(2)}km > 10km`,
         );
         continue;
       }
@@ -152,7 +158,7 @@ async function notifyUsersForService(service, scenarioType) {
           if (res.success) console.log(`✅ Sent to token: ${token}`);
           else
             console.log(
-              `❌ Failed for token: ${token} - ${res.error?.message}`
+              `❌ Failed for token: ${token} - ${res.error?.message}`,
             );
         });
 
@@ -161,7 +167,7 @@ async function notifyUsersForService(service, scenarioType) {
       } catch (err) {
         console.error(
           `❌ Failed to send notification to ${user.name}:`,
-          err.message
+          err.message,
         );
       }
     }
@@ -175,7 +181,7 @@ async function notifyUsersForService(service, scenarioType) {
   } catch (err) {
     console.error(
       `❌ Notification error [${scenarioType}] for service "${service.title}":`,
-      err.message
+      err.message,
     );
     return 0;
   }
@@ -203,11 +209,12 @@ async function notifyNearbyUsersOnInterestUpdate(userId) {
 
     for (const nearUser of nearbyUsers) {
       // Skip if no token or no location
-      if (!nearUser.fcmToken?.length || !nearUser.lastLocation?.coords) continue;
+      if (!nearUser.fcmToken?.length || !nearUser.lastLocation?.coords)
+        continue;
 
       // Remove any tokens that belong to the updating user
       const tokensToSend = nearUser.fcmToken.filter(
-        (t) => !user.fcmToken?.includes(t)
+        (t) => !user.fcmToken?.includes(t),
       );
       if (!tokensToSend.length) continue; // skip if no valid token
 
@@ -216,13 +223,13 @@ async function notifyNearbyUsersOnInterestUpdate(userId) {
         user.lastLocation.coords.coordinates[1],
         user.lastLocation.coords.coordinates[0],
         nearUser.lastLocation.coords.coordinates[1],
-        nearUser.lastLocation.coords.coordinates[0]
+        nearUser.lastLocation.coords.coordinates[0],
       );
       if (dist > 10) continue; // skip far users
 
       // Find mutual interests
       const mutualInterests = nearUser.interests.filter((i) =>
-        user.interests.includes(i)
+        user.interests.includes(i),
       );
       if (!mutualInterests.length) continue;
 
@@ -230,7 +237,7 @@ async function notifyNearbyUsersOnInterestUpdate(userId) {
       const message = {
         title: "👋 Someone nearby updated their interests!",
         body: `${user.name} now shares your interest in ${mutualInterests.join(
-          ", "
+          ", ",
         )}. Tap to check out their profile!`,
         image: user.profile_image || "", // profile image included
       };
@@ -251,7 +258,7 @@ async function notifyNearbyUsersOnInterestUpdate(userId) {
       try {
         const response = await admin.messaging().sendEachForMulticast(payload);
         console.log(
-          `📩 Sent to ${nearUser.name}: ${response.successCount} success, ${response.failureCount} failed`
+          `📩 Sent to ${nearUser.name}: ${response.successCount} success, ${response.failureCount} failed`,
         );
         notifiedUsers.push(nearUser.name);
       } catch (err) {
@@ -262,10 +269,12 @@ async function notifyNearbyUsersOnInterestUpdate(userId) {
     console.log(`🎯 Done! Notified users: ${notifiedUsers.join(", ")}`);
     return notifiedUsers;
   } catch (err) {
-    console.error("❌ Error in notifyNearbyUsersOnInterestUpdate:", err.message);
+    console.error(
+      "❌ Error in notifyNearbyUsersOnInterestUpdate:",
+      err.message,
+    );
   }
 }
-
 
 const notifiedViewMap = {}; // cooldown memory
 
@@ -281,7 +290,7 @@ async function notifyOnServiceView(service, viewer) {
     // 🧠 Skip if viewer is the same as owner
     if (!owner || String(owner._id) === String(viewer._id)) {
       console.log(
-        `🙈 Self-view detected for ${viewer?.name}, skipping notification`
+        `🙈 Self-view detected for ${viewer?.name}, skipping notification`,
       );
       return;
     }
@@ -293,12 +302,12 @@ async function notifyOnServiceView(service, viewer) {
       owner.fcmToken.length === 0
     ) {
       console.log(
-        `⚠️ Owner ${owner.name} has no FCM token, skipping notification`
+        `⚠️ Owner ${owner.name} has no FCM token, skipping notification`,
       );
       return;
     }
 
-  //  🕒 60-minute cooldown key
+    //  🕒 60-minute cooldown key
     const key = `${service._id}-${viewer._id}-${owner._id}`;
     if (notifiedViewMap[key]) {
       console.log(`⏱ Already notified within the last 60 minutes, skipping`);
@@ -329,14 +338,14 @@ async function notifyOnServiceView(service, viewer) {
     const response = await admin.messaging().sendEachForMulticast(payload);
 
     console.log(
-      `✅ Notified ${owner.name}: ${response.successCount} success, ${response.failureCount} failed`
+      `✅ Notified ${owner.name}: ${response.successCount} success, ${response.failureCount} failed`,
     );
 
     response.responses.forEach((res, i) => {
       if (res.success) console.log(`✅ Sent to token: ${payload.tokens[i]}`);
       else
         console.log(
-          `❌ Failed for token: ${payload.tokens[i]} - ${res.error?.message}`
+          `❌ Failed for token: ${payload.tokens[i]} - ${res.error?.message}`,
         );
     });
   } catch (err) {
@@ -400,7 +409,12 @@ async function sendBookingNotification(customer, provider, service, booking) {
   }
 }
 
-async function sendServiceStartedNotification(customer, provider, service, booking) {
+async function sendServiceStartedNotification(
+  customer,
+  provider,
+  service,
+  booking,
+) {
   try {
     if (!customer.fcmToken?.length) {
       console.log("❌ Customer has no FCM token");
@@ -424,10 +438,18 @@ async function sendServiceStartedNotification(customer, provider, service, booki
 
     console.log("✅ Customer notified: service started");
   } catch (err) {
-    console.error("❌ Error sending service-started notification:", err.message);
+    console.error(
+      "❌ Error sending service-started notification:",
+      err.message,
+    );
   }
 }
-async function sendServiceCompletedNotification(customer, provider, service, booking) {
+async function sendServiceCompletedNotification(
+  customer,
+  provider,
+  service,
+  booking,
+) {
   console.log("🔔 sendServiceCompletedNotification CALLED");
 
   try {
@@ -483,7 +505,13 @@ async function sendServiceCompletedNotification(customer, provider, service, boo
     console.error("❌ Notification error:", err.message);
   }
 }
-async function sendServiceCancelledNotification(customer, provider, service, booking, reason = "") {
+async function sendServiceCancelledNotification(
+  customer,
+  provider,
+  service,
+  booking,
+  reason = "",
+) {
   console.log("🔔 [NOTIFICATION] Function Called");
 
   try {
@@ -563,26 +591,22 @@ async function notifyOnServiceDeleteApproved(service, bookings) {
       }
 
       console.log(
-        `👤 Customer Found → Name: ${customer.name}, Email: ${customer.email}`
+        `👤 Customer Found → Name: ${customer.name}, Email: ${customer.email}`,
       );
 
       if (!customer.fcmToken || !customer.fcmToken.length) {
-        console.log(
-          `⚠️ Customer ${customer.name} has NO FCM tokens, skipping`
-        );
+        console.log(`⚠️ Customer ${customer.name} has NO FCM tokens, skipping`);
         continue;
       }
 
       console.log(
         `📲 Customer FCM Tokens (${customer.fcmToken.length}):`,
-        customer.fcmToken
+        customer.fcmToken,
       );
 
       const message = buildServiceDeletedByAdminForCustomer(service);
 
-      console.log(
-        `📨 Sending notification to CUSTOMER: ${customer.name}`
-      );
+      console.log(`📨 Sending notification to CUSTOMER: ${customer.name}`);
 
       const response = await admin.messaging().sendEachForMulticast({
         tokens: customer.fcmToken,
@@ -596,7 +620,7 @@ async function notifyOnServiceDeleteApproved(service, bookings) {
       });
 
       console.log(
-        `📬 Customer ${customer.name} → Success: ${response.successCount}, Failed: ${response.failureCount}`
+        `📬 Customer ${customer.name} → Success: ${response.successCount}, Failed: ${response.failureCount}`,
       );
 
       response.responses.forEach((res, index) => {
@@ -605,7 +629,7 @@ async function notifyOnServiceDeleteApproved(service, bookings) {
           console.log(`✅ Sent to customer token: ${token}`);
         } else {
           console.log(
-            `❌ Failed customer token: ${token} - ${res.error?.message}`
+            `❌ Failed customer token: ${token} - ${res.error?.message}`,
           );
         }
       });
@@ -622,24 +646,20 @@ async function notifyOnServiceDeleteApproved(service, bookings) {
       console.log("❌ No provider found on service");
     } else {
       console.log(
-        `👤 Provider Found → Name: ${provider.name}, Email: ${provider.email}`
+        `👤 Provider Found → Name: ${provider.name}, Email: ${provider.email}`,
       );
 
       if (!provider.fcmToken || !provider.fcmToken.length) {
-        console.log(
-          `⚠️ Provider ${provider.name} has NO FCM tokens, skipping`
-        );
+        console.log(`⚠️ Provider ${provider.name} has NO FCM tokens, skipping`);
       } else {
         console.log(
           `📲 Provider FCM Tokens (${provider.fcmToken.length}):`,
-          provider.fcmToken
+          provider.fcmToken,
         );
 
         const message = buildServiceDeleteApprovedForProvider(service);
 
-        console.log(
-          `📨 Sending notification to PROVIDER: ${provider.name}`
-        );
+        console.log(`📨 Sending notification to PROVIDER: ${provider.name}`);
 
         const response = await admin.messaging().sendEachForMulticast({
           tokens: provider.fcmToken,
@@ -652,7 +672,7 @@ async function notifyOnServiceDeleteApproved(service, bookings) {
         });
 
         console.log(
-          `📬 Provider ${provider.name} → Success: ${response.successCount}, Failed: ${response.failureCount}`
+          `📬 Provider ${provider.name} → Success: ${response.successCount}, Failed: ${response.failureCount}`,
         );
 
         response.responses.forEach((res, index) => {
@@ -661,7 +681,7 @@ async function notifyOnServiceDeleteApproved(service, bookings) {
             console.log(`✅ Sent to provider token: ${token}`);
           } else {
             console.log(
-              `❌ Failed provider token: ${token} - ${res.error?.message}`
+              `❌ Failed provider token: ${token} - ${res.error?.message}`,
             );
           }
         });
@@ -671,10 +691,7 @@ async function notifyOnServiceDeleteApproved(service, bookings) {
     console.log("🎉 All delete-approval notifications COMPLETED");
     console.log("🔔 ===============================");
   } catch (err) {
-    console.error(
-      "❌ Error in notifyOnServiceDeleteApproved:",
-      err.message
-    );
+    console.error("❌ Error in notifyOnServiceDeleteApproved:", err.message);
   }
 }
 
@@ -692,8 +709,8 @@ async function sendServiceForceDeletedNotification({
     const providerTokens = Array.isArray(provider?.fcmToken)
       ? provider.fcmToken
       : provider?.fcmToken
-      ? [provider.fcmToken]
-      : [];
+        ? [provider.fcmToken]
+        : [];
 
     if (providerTokens.length > 0) {
       try {
@@ -723,20 +740,18 @@ async function sendServiceForceDeletedNotification({
     // ===============================
     if (Array.isArray(customers) && customers.length > 0) {
       console.log(
-        `📨 Sending notifications to ${customers.length} customer(s)...`
+        `📨 Sending notifications to ${customers.length} customer(s)...`,
       );
 
       for (const customer of customers) {
         const customerTokens = Array.isArray(customer?.fcmToken)
           ? customer.fcmToken
           : customer?.fcmToken
-          ? [customer.fcmToken]
-          : [];
+            ? [customer.fcmToken]
+            : [];
 
         if (!customerTokens.length) {
-          console.log(
-            `⚠️ Customer ${customer._id} has no FCM token, skipped`
-          );
+          console.log(`⚠️ Customer ${customer._id} has no FCM token, skipped`);
           continue;
         }
 
@@ -758,7 +773,7 @@ async function sendServiceForceDeletedNotification({
         } catch (err) {
           console.error(
             `❌ Customer notification failed (${customer._id}):`,
-            err.message
+            err.message,
           );
         }
       }
@@ -766,23 +781,65 @@ async function sendServiceForceDeletedNotification({
       console.log("ℹ️ No booked customers → customer notifications skipped");
     }
   } catch (err) {
-    console.error(
-      "❌ Force delete notification block failed:",
-      err.message
-    );
+    console.error("❌ Force delete notification block failed:", err.message);
   }
 }
+async function notifyOnServicePromoted(service) {
+  try {
+    console.log("🔔 notifyOnServicePromoted CALLED");
 
+    const provider = service.owner;
 
+    if (!provider) {
+      console.log("❌ No provider found for service");
+      return;
+    }
+
+    // populate safety
+    if (!provider.fcmToken || !provider.fcmToken.length) {
+      console.log(`⚠️ Provider ${provider.name} has NO FCM tokens, skipping`);
+      return;
+    }
+
+    const message = buildServicePromotedMessage(service);
+
+    const payload = {
+      tokens: provider.fcmToken,
+      notification: message,
+      data: {
+        type: "service_promoted",
+        pageType: "ProviderServicePage",
+        serviceId: service._id.toString(),
+      },
+    };
+
+    console.log(
+      "📨 Sending promotion notification to provider:",
+      provider.name,
+    );
+
+    const response = await admin.messaging().sendEachForMulticast(payload);
+
+    console.log(
+      `✅ Promotion notification sent → Success: ${response.successCount}, Failed: ${response.failureCount}`,
+    );
+  } catch (err) {
+    console.error("❌ Error in notifyOnServicePromoted:", err.message);
+  }
+}
 // Exports
 exports.notifyOnNewService = (service) => notifyUsersForService(service, "new");
 exports.notifyOnUpdate = (service) => notifyUsersForService(service, "update");
 exports.notifyOnUserInterestUpdate = notifyNearbyUsersOnInterestUpdate;
 exports.notifyOnServiceView = notifyOnServiceView;
-module .exports.sendBookingNotification = sendBookingNotification;
-module .exports.sendServiceStartedNotification = sendServiceStartedNotification;
-module .exports.sendServiceCompletedNotification = sendServiceCompletedNotification;
-module .exports.sendServiceCancelledNotification = sendServiceCancelledNotification;
+module.exports.sendBookingNotification = sendBookingNotification;
+module.exports.sendServiceStartedNotification = sendServiceStartedNotification;
+module.exports.sendServiceCompletedNotification =
+  sendServiceCompletedNotification;
+module.exports.sendServiceCancelledNotification =
+  sendServiceCancelledNotification;
 module.exports.notifyOnServiceDeleteApproved = notifyOnServiceDeleteApproved;
-module.exports.sendServiceForceDeletedNotification = sendServiceForceDeletedNotification;
+module.exports.sendServiceForceDeletedNotification =
+  sendServiceForceDeletedNotification;
+module.exports.notifyOnServicePromoted = notifyOnServicePromoted;
 //notificaton addd

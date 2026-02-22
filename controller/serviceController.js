@@ -43,6 +43,12 @@ function formatTimeToAMPM(timeStr) {
   if (!m.isValid()) return null;
   return m.format("hh:mm A");
 }
+const SUBSCRIPTION_PLANS = {
+  basic: { days: 7 },
+  standard: { days: 15 },
+  premium: { days: 30 },
+};
+
 // Main createService function
 exports.createService = async (req, res) => {
   try {
@@ -95,10 +101,6 @@ exports.createService = async (req, res) => {
     const max_participants = Number(body.max_participants || 1);
     const categoryId = body.categoryId;
     const selectedTags = tryParse(body.selectedTags) || [];
-    const promoteService =
-      body.promoteService === true || body.promoteService === "true";
-    const promotionAmount = Number(body.amount || 0);
-    const paymentMethodId = body.paymentMethodId;
     // ⭐ GET CURRENCY (service-level)
     const currency = body.currency || user.currency || "EUR";
 
@@ -142,7 +144,7 @@ exports.createService = async (req, res) => {
       });
 
     const validTags = category.tags.filter((tag) =>
-      selectedTags.map((t) => t.toLowerCase()).includes(tag.toLowerCase())
+      selectedTags.map((t) => t.toLowerCase()).includes(tag.toLowerCase()),
     );
     if (!validTags.length)
       return res.status(400).json({
@@ -217,22 +219,24 @@ exports.createService = async (req, res) => {
     }
 
     // Build service payload
+    // 📦 BUILD SERVICE PAYLOAD
+    // ===============================
     const servicePayload = {
       title,
       description,
       Language: language,
       isFree,
       price,
-      currency, // <-- NOW SAVED IN SERVICE TABLE
-      image: serviceImage, // ✅ added
-    
+      currency,
+      image: serviceImage,
+
       location_name: location.name,
-      // city,
       isDoorstepService,
       location: {
         type: "Point",
         coordinates: [Number(location.longitude), Number(location.latitude)],
       },
+
       category: category._id,
       tags: validTags,
       max_participants,
@@ -240,135 +244,38 @@ exports.createService = async (req, res) => {
       owner: user._id,
     };
 
-    // Handle time/date for one-time service
     if (service_type === "one_time") {
-      const formattedStart = formatTimeToAMPM(start_time);
-      const formattedEnd = formatTimeToAMPM(end_time);
-      if (!formattedStart || !formattedEnd)
-        return res.status(400).json({
-          isSuccess: false,
-          message: "Invalid start_time or end_time",
-        });
-      if (!isValidDateISO(date))
-        return res.status(400).json({
-          isSuccess: false,
-          message: "Valid date (YYYY-MM-DD) required",
-        });
       servicePayload.date = date;
-      servicePayload.start_time = formattedStart;
-      servicePayload.end_time = formattedEnd;
+      servicePayload.start_time = formatTimeToAMPM(start_time);
+      servicePayload.end_time = formatTimeToAMPM(end_time);
     }
 
-    // Save base service
+    // ===============================
+    // 💾 SAVE SERVICE (DB LOCK SAFE)
+    // ===============================
     const createdService = new Service(servicePayload);
-
-    // ---- Promotion Stripe flow ----
-    // if (promoteService && promotionAmount > 0) {
-    //   let customerId = user.stripeCustomerId;
-
-    //   // Create customer in Stripe if not exists
-    //   if (!customerId) {
-    //     const customer = await stripe.customers.create({
-    //       email: user.email,
-    //       name: user.name,
-    //     });
-    //     user.stripeCustomerId = customer.id;
-    //     await user.save();
-    //     customerId = customer.id;
-    //     console.log("Created new Stripe customer:", customerId);
-    //   }
-
-    //   // Ensure payment method is attached
-    //   if (paymentMethodId) {
-    //     const existingPMs = await stripe.paymentMethods.list({
-    //       customer: customerId,
-    //       type: "card",
-    //     });
-    //     console.log(
-    //       "Existing Payment Methods before attach:",
-    //       existingPMs.data.map((pm) => pm.id)
-    //     );
-
-    //     const isAttached = existingPMs.data.some(
-    //       (pm) => pm.id === paymentMethodId
-    //     );
-
-    //     if (!isAttached) {
-    //       try {
-    //         await stripe.paymentMethods.attach(paymentMethodId, {
-    //           customer: customerId,
-    //         });
-    //         console.log(
-    //           "Payment method attached successfully:",
-    //           paymentMethodId
-    //         );
-    //       } catch (err) {
-    //         console.error("Failed to attach payment method:", err);
-    //         return res.status(400).json({
-    //           isSuccess: false,
-    //           message: "Failed to attach payment method",
-    //           error: err.message,
-    //         });
-    //       }
-    //     } else {
-    //       console.log("Payment method already attached:", paymentMethodId);
-    //     }
-
-    //     // Set default payment method
-    //     await stripe.customers.update(customerId, {
-    //       invoice_settings: { default_payment_method: paymentMethodId },
-    //     });
-    //     console.log("Set default payment method:", paymentMethodId);
-
-    //     // Create PaymentIntent
-    //     const paymentIntent = await stripe.paymentIntents.create({
-    //       amount: Math.round(promotionAmount * 100),
-    //       currency: "inr",
-    //       customer: customerId,
-    //       payment_method: paymentMethodId,
-    //       confirm: true,
-    //       off_session: true,
-    //       description: `Promotion payment for service: ${title}`,
-    //     });
-    //     console.log("PaymentIntent created:", paymentIntent.id);
-
-    //     // Mark service as promoted
-    //     const start = new Date();
-    //     const end = new Date();
-    //     end.setDate(start.getDate() + 30);
-
-    //     createdService.isPromoted = true;
-    //     createdService.promotionStart = start;
-    //     createdService.promotionEnd = end;
-    //     createdService.promotionBy = user._id;
-    //     createdService.promotionAmount = promotionAmount;
-    //     createdService.promotionPaymentId = paymentIntent.id;
-    //   }
-    // }
-
-    // Save service
     await createdService.save();
 
-    // Link to user
     user.services.push(createdService._id);
     await user.save();
 
-    // Send notifications
-    const notifiedCount = await notifyOnNewService(createdService);
-    console.log(`📣 Notified ${notifiedCount} users`);
+    console.log("✅ Service created", {
+      serviceId: createdService._id,
+    });
 
     return res.json({
       isSuccess: true,
-      message: promoteService
-        ? "Service created & promoted successfully 🎉"
-        : "Service created successfully ✅",
+      message: "Service created successfully ✅",
       data: createdService,
     });
   } catch (err) {
     console.error("createService error:", err);
-    return res
-      .status(500)
-      .json({ isSuccess: false, message: "Server error", error: err.message });
+
+    return res.status(500).json({
+      isSuccess: false,
+      message: "Server error",
+      error: err.message,
+    });
   }
 };
 
@@ -431,10 +338,10 @@ function bboxForLatLon(lat, lon, radiusKm = 3) {
  */
 
 exports.getServices = async (req, res) => {
-  console.log("\n===== getServices called =====");
+  // console.log("\n===== getServices called =====");
 
   try {
-    console.log("Incoming Body:", JSON.stringify(req.body, null, 2));
+    // console.log("Incoming Body:", JSON.stringify(req.body, null, 2));
 
     const {
       page = 1,
@@ -467,14 +374,14 @@ exports.getServices = async (req, res) => {
     const pageNum = Math.max(1, Number(page));
     const limitNum = Math.max(1, Number(limit));
 
-    console.log("\nParsed Params:", {
-      userLat,
-      userLng,
-      cityLat,
-      cityLng,
-      maxRadius,
-      keyword,
-    });
+    // console.log("\nParsed Params:", {
+    //   userLat,
+    //   userLng,
+    //   cityLat,
+    //   cityLng,
+    //   maxRadius,
+    //   keyword,
+    // });
 
     // -----------------------------
     // BASE MONGO FILTER
@@ -519,7 +426,7 @@ exports.getServices = async (req, res) => {
       baseMatch.isFree = true;
     }
 
-    console.log("\nBase Mongo Filter:", JSON.stringify(baseMatch, null, 2));
+    // console.log("\nBase Mongo Filter:", JSON.stringify(baseMatch, null, 2));
 
     // -----------------------------
     // FETCH DATABASE SERVICES
@@ -529,7 +436,7 @@ exports.getServices = async (req, res) => {
       .populate("owner", "name email profile_image")
       .lean();
 
-    console.log("DB Services Count:", services.length);
+    // console.log("DB Services Count:", services.length);
 
     let finalServices = services;
 
@@ -544,7 +451,7 @@ exports.getServices = async (req, res) => {
 
       const regex = new RegExp(safe, "i");
 
-      console.log("Applying Keyword Filter:", regex);
+      // console.log("Applying Keyword Filter:", regex);
 
       finalServices = finalServices.filter((svc) => {
         return (
@@ -567,7 +474,7 @@ exports.getServices = async (req, res) => {
         );
       });
 
-      console.log("After Keyword Filter:", finalServices.length);
+      //console.log("After Keyword Filter:", finalServices.length);
     }
 
     // -----------------------------
@@ -585,7 +492,7 @@ exports.getServices = async (req, res) => {
         Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
 
       return Number(
-        (R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))).toFixed(2)
+        (R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))).toFixed(2),
       );
     }
 
@@ -596,7 +503,7 @@ exports.getServices = async (req, res) => {
           userLat,
           userLng,
           Number(coords[1]),
-          Number(coords[0])
+          Number(coords[0]),
         );
       } else {
         svc.distance_km = null;
@@ -610,7 +517,7 @@ exports.getServices = async (req, res) => {
     let mapServices = finalServices;
 
     if (bx && bx.north != null) {
-      console.log("\nApplying Bounding Box:", bx);
+      // console.log("\nApplying Bounding Box:", bx);
 
       mapServices = finalServices.filter((svc) => {
         const coords = svc.location?.coordinates;
@@ -625,7 +532,7 @@ exports.getServices = async (req, res) => {
       });
     }
 
-    console.log("Map Services Count:", mapServices.length);
+    //console.log("Map Services Count:", mapServices.length);
 
     // -----------------------------
     // LIST SERVICES — SMART RADIUS LOGIC
@@ -667,7 +574,7 @@ exports.getServices = async (req, res) => {
             centerLat,
             centerLng,
             Number(coords[1]),
-            Number(coords[0])
+            Number(coords[0]),
           );
           return dist <= maxRadius;
         });
@@ -681,26 +588,72 @@ exports.getServices = async (req, res) => {
     // -----------------------------
     // SORT + PAGINATION
     // -----------------------------
+    const isCityFilterApplied = cityLat !== null && cityLng !== null;
     listCandidates.sort((a, b) => {
-      if (a.distance_km === null) return 1;
-      if (b.distance_km === null) return -1;
-      return a.distance_km - b.distance_km;
+      const PROMOTION_RADIUS = 30;
+
+      const aDist = a.distance_km ?? Infinity;
+      const bDist = b.distance_km ?? Infinity;
+      if (isCityFilterApplied) {
+        // 🔥 City filter → Sponsored first (within radius already filtered)
+        if (a.isPromoted && !b.isPromoted) return -1;
+        if (!a.isPromoted && b.isPromoted) return 1;
+
+        return aDist - bDist;
+      }
+
+      const aPromotedInRange = a.isPromoted && aDist <= PROMOTION_RADIUS;
+
+      const bPromotedInRange = b.isPromoted && bDist <= PROMOTION_RADIUS;
+
+      // ✅ 1️⃣ Promoted within 30km get priority
+      if (aPromotedInRange && !bPromotedInRange) return -1;
+      if (!aPromotedInRange && bPromotedInRange) return 1;
+
+      // ✅ 2️⃣ Otherwise sort purely by distance
+      return aDist - bDist;
     });
 
     mapServices.sort((a, b) => {
-      if (a.distance_km === null) return 1;
-      if (b.distance_km === null) return -1;
-      return a.distance_km - b.distance_km;
+      const PROMOTION_RADIUS = 30;
+
+      const aDist = a.distance_km ?? Infinity;
+      const bDist = b.distance_km ?? Infinity;
+
+      if (isCityFilterApplied) {
+        if (a.isPromoted && !b.isPromoted) return -1;
+        if (!a.isPromoted && b.isPromoted) return 1;
+
+        return aDist - bDist;
+      }
+      const aPromotedInRange = a.isPromoted && aDist <= PROMOTION_RADIUS;
+
+      const bPromotedInRange = b.isPromoted && bDist <= PROMOTION_RADIUS;
+
+      // ✅ Priority only if promoted AND within 30km
+      if (aPromotedInRange && !bPromotedInRange) return -1;
+      if (!aPromotedInRange && bPromotedInRange) return 1;
+
+      // Otherwise pure distance sort
+      return aDist - bDist;
     });
+
+    const promotedServices = listCandidates
+      .filter((svc) => svc.isPromoted === true)
+      .sort((a, b) => {
+        if (a.distance_km === null) return 1;
+        if (b.distance_km === null) return -1;
+        return a.distance_km - b.distance_km;
+      });
 
     const start = (pageNum - 1) * limitNum;
     const paginated = listCandidates.slice(start, start + limitNum);
 
-    console.log("\nFINAL COUNTS:", {
-      total_list: listCandidates.length,
-      total_map: mapServices.length,
-      page_items: paginated.length,
-    });
+    // console.log("\nFINAL COUNTS:", {
+    //   total_list: listCandidates.length,
+    //   total_map: mapServices.length,
+    //   page_items: paginated.length,
+    // });
 
     // -----------------------------
     // RESPONSE
@@ -713,6 +666,7 @@ exports.getServices = async (req, res) => {
       limit: limitNum,
       listServices: paginated,
       mapServices,
+      promotedServices,
     });
   } catch (err) {
     console.error("ERROR in getServices:", err);
@@ -724,7 +678,206 @@ exports.getServices = async (req, res) => {
   }
 };
 
+// exports.getInterestedUsers = async (req, res) => {
+//   console.log("🔥 FIRST getInterestedUsers HIT");
+
+//   try {
+//     const {
+//       latitude = 0,
+//       longitude = 0,
+
+//       filterLat,
+//       filterLng,
+
+//       radius_km = 10,
+//       categoryId = [],
+//       tags = [],
+//       languages = [],
+//       age,
+//       keyword = "",
+//       page = 1,
+//       limit = 10,
+//       userId,
+//       excludeSelf = false,
+//     } = req.body;
+
+//     const skip = (Number(page) - 1) * Number(limit);
+
+//     //  console.log("===== getInterestedUsers called =====");
+//     // console.log("Incoming body:", req.body);
+
+//     // -----------------------------------------------------
+//     // STEP 1: INTEREST FILTER LOGIC (categories + tags + keyword)
+//     // -----------------------------------------------------
+//     let interestsFilter = [];
+
+//     // Keyword filter
+//     if (keyword.trim() !== "") {
+//       interestsFilter.push(keyword.trim().toLowerCase());
+//     }
+
+//     // Category filter
+//     if (Array.isArray(categoryId) && categoryId.length > 0) {
+//       const categories = await Category.find({ _id: { $in: categoryId } })
+//         .select("name tags")
+//         .lean();
+
+//       categories.forEach((c) => {
+//         if (c.name) interestsFilter.push(c.name.toLowerCase());
+//         if (Array.isArray(c.tags))
+//           interestsFilter.push(...c.tags.map((t) => t.toLowerCase()));
+//       });
+//     }
+
+//     // Tags
+//     if (Array.isArray(tags) && tags.length > 0) {
+//       interestsFilter.push(...tags.map((t) => t.toLowerCase()));
+//     }
+
+//     // Remove duplicates
+//     interestsFilter = [...new Set(interestsFilter)];
+
+//     //    console.log("Final interestsFilter:", interestsFilter);
+
+//     // -----------------------------------------------------
+//     // STEP 2: BUILD MONGO QUERY
+//     // -----------------------------------------------------
+//     const query = {};
+
+//     if (excludeSelf && userId) {
+//       query._id = { $ne: userId };
+//     }
+
+//     // Interest filter
+//     if (interestsFilter.length > 0) {
+//       query.interests = { $in: interestsFilter };
+//     }
+
+//     // Languages filter
+//     if (Array.isArray(languages) && languages.length > 0) {
+//       const regexLanguages = languages
+//         .filter((l) => typeof l === "string" && l.trim())
+//         .map((l) => new RegExp(`^${l.trim()}$`, "i"));
+
+//       if (regexLanguages.length > 0) {
+//         query.languages = { $in: regexLanguages };
+//       }
+//     }
+
+//     // Age filter
+//     if (Array.isArray(age) && age.length > 0) {
+//       query.age = { $in: age };
+//     } else if (!Array.isArray(age) && !isNaN(Number(age))) {
+//       query.age = Number(age);
+//     }
+
+//     // -----------------------------------------------------
+//     // STEP 3: LOCATION (CITY FILTER OR USER LOCATION)
+//     // -----------------------------------------------------
+
+//     let centerLat = null;
+//     let centerLng = null;
+
+//     // CASE 1 → CITY (filterLat/filterLng)
+//     if (filterLat && filterLng) {
+//       centerLat = Number(filterLat);
+//       centerLng = Number(filterLng);
+//       console.log("📌 Radius Center = CITY:", centerLat, centerLng);
+//     }
+//     // CASE 2 → USER LOCATION
+//     else if (latitude && longitude) {
+//       centerLat = Number(latitude);
+//       centerLng = Number(longitude);
+//       console.log("📌 Radius Center = USER:", centerLat, centerLng);
+//     }
+
+//     // Apply radius only if center exists
+//     if (centerLat !== null && centerLng !== null) {
+//       query["lastLocation.coords"] = {
+//         $geoWithin: {
+//           $centerSphere: [[centerLng, centerLat], Number(radius_km) / 6371],
+//         },
+//       };
+//     }
+
+//     // console.log("Final Mongo Query:", JSON.stringify(query, null, 2));
+
+//     // -----------------------------------------------------
+//     // STEP 4: FETCH USERS
+//     // -----------------------------------------------------
+
+//     const mapUsers = await User.find(query)
+//       .select("name email profile_image interests languages age lastLocation")
+//       .lean();
+
+//     const listUsers = await User.find(query)
+//       .select("name email profile_image interests languages age lastLocation")
+//       .skip(skip)
+//       .limit(Number(limit))
+//       .lean();
+
+//     // -----------------------------------------------------
+//     // STEP 5: ALWAYS CALCULATE DISTANCE FROM USER LOCATION
+//     // -----------------------------------------------------
+//     const addDistance = (users) => {
+//       const toRad = (v) => (v * Math.PI) / 180;
+
+//       return users
+//         .map((u) => {
+//           if (u.lastLocation?.coords?.coordinates) {
+//             const [lon2, lat2] = u.lastLocation.coords.coordinates;
+
+//             const lat1 = Number(latitude);
+//             const lon1 = Number(longitude);
+
+//             const R = 6371;
+//             const dLat = toRad(lat2 - lat1);
+//             const dLon = toRad(lon2 - lon1);
+
+//             const a =
+//               Math.sin(dLat / 2) ** 2 +
+//               Math.cos(toRad(lat1)) *
+//                 Math.cos(toRad(lat2)) *
+//                 Math.sin(dLon / 2) ** 2;
+
+//             const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+//             u.distance_km = Number((R * c).toFixed(2));
+//           } else {
+//             u.distance_km = null;
+//           }
+//           return u;
+//         })
+//         .sort((a, b) => (a.distance_km || 999999) - (b.distance_km || 999999));
+//     };
+
+//     const finalMapUsers = addDistance(mapUsers);
+//     const finalListUsers = addDistance(listUsers);
+
+//     // -----------------------------------------------------
+//     // STEP 6: TOTAL COUNT
+//     // -----------------------------------------------------
+//     const total = await User.countDocuments(query);
+
+//     // -----------------------------------------------------
+//     // STEP 7: RESPONSE
+//     // -----------------------------------------------------
+//     res.json({
+//       success: true,
+//       total,
+//       page: Number(page),
+//       limit: Number(limit),
+//       mapUsers: finalMapUsers,
+//       listUsers: finalListUsers,
+//     });
+//   } catch (err) {
+//     console.error("getInterestedUsers error:", err);
+//     res.status(500).json({ success: false, message: err.message });
+//   }
+// };
+
 exports.getInterestedUsers = async (req, res) => {
+  console.log("✅ SECOND getInterestedUsers HIT");
+
   try {
     const {
       latitude = 0,
@@ -747,203 +900,8 @@ exports.getInterestedUsers = async (req, res) => {
 
     const skip = (Number(page) - 1) * Number(limit);
 
-    console.log("===== getInterestedUsers called =====");
-    console.log("Incoming body:", req.body);
-
-    // -----------------------------------------------------
-    // STEP 1: INTEREST FILTER LOGIC (categories + tags + keyword)
-    // -----------------------------------------------------
-    let interestsFilter = [];
-
-    // Keyword filter
-    if (keyword.trim() !== "") {
-      interestsFilter.push(keyword.trim().toLowerCase());
-    }
-
-    // Category filter
-    if (Array.isArray(categoryId) && categoryId.length > 0) {
-      const categories = await Category.find({ _id: { $in: categoryId } })
-        .select("name tags")
-        .lean();
-
-      categories.forEach((c) => {
-        if (c.name) interestsFilter.push(c.name.toLowerCase());
-        if (Array.isArray(c.tags))
-          interestsFilter.push(...c.tags.map((t) => t.toLowerCase()));
-      });
-    }
-
-    // Tags
-    if (Array.isArray(tags) && tags.length > 0) {
-      interestsFilter.push(...tags.map((t) => t.toLowerCase()));
-    }
-
-    // Remove duplicates
-    interestsFilter = [...new Set(interestsFilter)];
-
-    console.log("Final interestsFilter:", interestsFilter);
-
-    // -----------------------------------------------------
-    // STEP 2: BUILD MONGO QUERY
-    // -----------------------------------------------------
-    const query = {};
-
-    if (excludeSelf && userId) {
-      query._id = { $ne: userId };
-    }
-
-    // Interest filter
-    if (interestsFilter.length > 0) {
-      query.interests = { $in: interestsFilter };
-    }
-
-    // Languages filter
-    if (Array.isArray(languages) && languages.length > 0) {
-      const regexLanguages = languages
-        .filter((l) => typeof l === "string" && l.trim())
-        .map((l) => new RegExp(`^${l.trim()}$`, "i"));
-
-      if (regexLanguages.length > 0) {
-        query.languages = { $in: regexLanguages };
-      }
-    }
-
-    // Age filter
-    if (Array.isArray(age) && age.length > 0) {
-      query.age = { $in: age };
-    } else if (!Array.isArray(age) && !isNaN(Number(age))) {
-      query.age = Number(age);
-    }
-
-    // -----------------------------------------------------
-    // STEP 3: LOCATION (CITY FILTER OR USER LOCATION)
-    // -----------------------------------------------------
-
-    let centerLat = null;
-    let centerLng = null;
-
-    // CASE 1 → CITY (filterLat/filterLng)
-    if (filterLat && filterLng) {
-      centerLat = Number(filterLat);
-      centerLng = Number(filterLng);
-      console.log("📌 Radius Center = CITY:", centerLat, centerLng);
-    }
-    // CASE 2 → USER LOCATION
-    else if (latitude && longitude) {
-      centerLat = Number(latitude);
-      centerLng = Number(longitude);
-      console.log("📌 Radius Center = USER:", centerLat, centerLng);
-    }
-
-    // Apply radius only if center exists
-    if (centerLat !== null && centerLng !== null) {
-      query["lastLocation.coords"] = {
-        $geoWithin: {
-          $centerSphere: [[centerLng, centerLat], Number(radius_km) / 6371],
-        },
-      };
-    }
-
-    console.log("Final Mongo Query:", JSON.stringify(query, null, 2));
-
-    // -----------------------------------------------------
-    // STEP 4: FETCH USERS
-    // -----------------------------------------------------
-
-    const mapUsers = await User.find(query)
-      .select("name email profile_image interests languages age lastLocation")
-      .lean();
-
-    const listUsers = await User.find(query)
-      .select("name email profile_image interests languages age lastLocation")
-      .skip(skip)
-      .limit(Number(limit))
-      .lean();
-
-    // -----------------------------------------------------
-    // STEP 5: ALWAYS CALCULATE DISTANCE FROM USER LOCATION
-    // -----------------------------------------------------
-    const addDistance = (users) => {
-      const toRad = (v) => (v * Math.PI) / 180;
-
-      return users
-        .map((u) => {
-          if (u.lastLocation?.coords?.coordinates) {
-            const [lon2, lat2] = u.lastLocation.coords.coordinates;
-
-            const lat1 = Number(latitude);
-            const lon1 = Number(longitude);
-
-            const R = 6371;
-            const dLat = toRad(lat2 - lat1);
-            const dLon = toRad(lon2 - lon1);
-
-            const a =
-              Math.sin(dLat / 2) ** 2 +
-              Math.cos(toRad(lat1)) *
-                Math.cos(toRad(lat2)) *
-                Math.sin(dLon / 2) ** 2;
-
-            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-            u.distance_km = Number((R * c).toFixed(2));
-          } else {
-            u.distance_km = null;
-          }
-          return u;
-        })
-        .sort((a, b) => (a.distance_km || 999999) - (b.distance_km || 999999));
-    };
-
-    const finalMapUsers = addDistance(mapUsers);
-    const finalListUsers = addDistance(listUsers);
-
-    // -----------------------------------------------------
-    // STEP 6: TOTAL COUNT
-    // -----------------------------------------------------
-    const total = await User.countDocuments(query);
-
-    // -----------------------------------------------------
-    // STEP 7: RESPONSE
-    // -----------------------------------------------------
-    res.json({
-      success: true,
-      total,
-      page: Number(page),
-      limit: Number(limit),
-      mapUsers: finalMapUsers,
-      listUsers: finalListUsers,
-    });
-  } catch (err) {
-    console.error("getInterestedUsers error:", err);
-    res.status(500).json({ success: false, message: err.message });
-  }
-};
-
-exports.getInterestedUsers = async (req, res) => {
-  try {
-    const {
-      latitude = 0,
-      longitude = 0,
-
-      filterLat,
-      filterLng,
-
-      radius_km = 10,
-      categoryId = [],
-      tags = [],
-      languages = [],
-      age,
-      keyword = "",
-      page = 1,
-      limit = 10,
-      userId,
-      excludeSelf = false,
-    } = req.body;
-
-    const skip = (Number(page) - 1) * Number(limit);
-
-    console.log("\n===== getInterestedUsers called =====");
-    console.log("Incoming body:", req.body);
+    // console.log("\n===== getInterestedUsers called =====");
+    //console.log("Incoming body:", req.body);
 
     // -----------------------------------------------------
     // STEP 1: INTEREST FILTER LOGIC
@@ -951,9 +909,9 @@ exports.getInterestedUsers = async (req, res) => {
     let interestsFilter = [];
 
     // Keyword
-    if (keyword.trim() !== "") {
-      interestsFilter.push(keyword.trim().toLowerCase());
-    }
+    // if (keyword.trim() !== "") {
+    //   interestsFilter.push(keyword.trim().toLowerCase());
+    // }
 
     // Category filter
     if (Array.isArray(categoryId) && categoryId.length > 0) {
@@ -975,15 +933,32 @@ exports.getInterestedUsers = async (req, res) => {
 
     interestsFilter = [...new Set(interestsFilter)];
 
-    console.log("Final interestsFilter:", interestsFilter);
+    //console.log("Final interestsFilter:", interestsFilter);
 
     // -----------------------------------------------------
     // STEP 2: BUILD MONGO QUERY
     // -----------------------------------------------------
     const query = {};
+    query["lastLocation.coords.coordinates"] = { $ne: [0, 0] };
+    // -----------------------------------------------------
+    // ✅ GLOBAL SEARCH (NAME / EMAIL / PHONE / CITY / TAGS)
+    // -----------------------------------------------------
+    
 
     if (excludeSelf && userId) {
       query._id = { $ne: userId };
+    }
+    if (keyword.trim() !== "") {
+      const kw = keyword.trim();
+
+      query.$or = [
+        { name: { $regex: kw, $options: "i" } },
+        { email: { $regex: kw, $options: "i" } },
+        { mobile: { $regex: kw, $options: "i" } },
+        { city: { $regex: kw, $options: "i" } },
+        { interests: { $regex: kw, $options: "i" } },
+        { offeredTags: { $regex: kw, $options: "i" } },
+      ];
     }
 
     // interests filter
@@ -1031,12 +1006,12 @@ exports.getInterestedUsers = async (req, res) => {
 
     // ⭐ NEW: If keyword exists → DO NOT APPLY RADIUS
     if (keyword.trim() !== "") {
-      console.log("🔍 Keyword exists → SKIPPING RADIUS FILTER COMPLETELY.");
+      //console.log("🔍 Keyword exists → SKIPPING RADIUS FILTER COMPLETELY.");
     }
 
     // Apply radius only when NO keyword
     else if (centerLat !== null && centerLng !== null) {
-      console.log("📏 Applying radius filter:", radius_km, "km");
+      //console.log("📏 Applying radius filter:", radius_km, "km");
 
       query["lastLocation.coords"] = {
         $geoWithin: {
@@ -1045,7 +1020,7 @@ exports.getInterestedUsers = async (req, res) => {
       };
     }
 
-    console.log("Final Mongo Query:", JSON.stringify(query, null, 2));
+    //console.log("Final Mongo Query:", JSON.stringify(query, null, 2));
 
     // -----------------------------------------------------
     // STEP 4: FETCH USERS
@@ -1060,8 +1035,8 @@ exports.getInterestedUsers = async (req, res) => {
       .limit(Number(limit))
       .lean();
 
-    console.log("Fetched mapUsers:", mapUsers.length);
-    console.log("Fetched listUsers:", listUsers.length);
+    //console.log("Fetched mapUsers:", mapUsers.length);
+    //console.log("Fetched listUsers:", listUsers.length);
 
     // -----------------------------------------------------
     // STEP 5: DISTANCE CALCULATOR
@@ -1105,7 +1080,7 @@ exports.getInterestedUsers = async (req, res) => {
     // -----------------------------------------------------
     const total = await User.countDocuments(query);
 
-    console.log("Total matched users:", total);
+    // console.log("Total matched users:", total);
 
     // -----------------------------------------------------
     // STEP 7: RESPONSE
@@ -1119,7 +1094,7 @@ exports.getInterestedUsers = async (req, res) => {
       listUsers: finalListUsers,
     });
   } catch (err) {
-    console.error("getInterestedUsers error:", err);
+    //console.error("getInterestedUsers error:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 };
@@ -1272,7 +1247,7 @@ exports.updateService = async (req, res) => {
       const validTags = category.tags.filter((tag) =>
         selectedTags
           .map((t) => String(t).toLowerCase())
-          .includes(tag.toLowerCase())
+          .includes(tag.toLowerCase()),
       );
       if (validTags.length) updatePayload.tags = validTags;
     }
@@ -1297,7 +1272,7 @@ exports.updateService = async (req, res) => {
     // =========================
     // 🖼 IMAGE UPDATE LOGIC
     // =========================
-   // CASE 1️⃣ New image uploaded → delete old local image
+    // CASE 1️⃣ New image uploaded → delete old local image
     if (req.file) {
       console.log("🖼 New image uploaded");
 
@@ -1332,15 +1307,14 @@ exports.updateService = async (req, res) => {
     const updatedService = await Service.findByIdAndUpdate(
       serviceId,
       { $set: updatePayload },
-      { new: true }
+      { new: true },
     );
     console.log("Sending notification...");
-    const notifiedCount = await notificationController.notifyOnUpdate(
-      updatedService
-    );
+    const notifiedCount =
+      await notificationController.notifyOnUpdate(updatedService);
     console.log("Notification triggered");
     console.log(
-      `📣 Total users notified for service "${updatedService.title}": ${notifiedCount}`
+      `📣 Total users notified for service "${updatedService.title}": ${notifiedCount}`,
     );
     console.log("Notification process completed no errors ✅");
 
@@ -1401,13 +1375,13 @@ exports.getservicbyId = async (req, res) => {
     // Populate owner and category
     await service.populate(
       "owner",
-      "name profile_image notifyOnProfileView fcmToken"
+      "name profile_image notifyOnProfileView fcmToken",
     );
     await service.populate("category", "name");
 
     console.log(`✅ Service found: ${service.title}`);
     console.log(
-      `📌 Owner: ${service.owner.name}, notifyOnProfileView: ${service.owner.notifyOnProfileView}`
+      `📌 Owner: ${service.owner.name}, notifyOnProfileView: ${service.owner.notifyOnProfileView}`,
     );
 
     // Notify owner if viewerId is provided
@@ -1415,10 +1389,10 @@ exports.getservicbyId = async (req, res) => {
       const viewer = await User.findById(viewerId).select("name profile_image");
       if (viewer) {
         console.log(
-          `🚀 Sending view notification to owner for viewer ${viewerId}`
+          `🚀 Sending view notification to owner for viewer ${viewerId}`,
         );
         notifyOnServiceView(service, viewer).catch((err) =>
-          console.error("Notification error:", err)
+          console.error("Notification error:", err),
         );
       } else {
         console.log(`⚠️ Viewer not found: ${viewerId}`);
@@ -1444,7 +1418,7 @@ exports.getservicbyId = async (req, res) => {
       avgRating = Number((total / reviews.length).toFixed(1));
     }
     console.log(
-      `⭐ Reviews fetched: ${reviews.length}, averageRating: ${avgRating}`
+      `⭐ Reviews fetched: ${reviews.length}, averageRating: ${avgRating}`,
     );
 
     return res.json({
@@ -1605,7 +1579,7 @@ exports.approveServiceDelete = async (req, res) => {
     // =============================
     const service = await Service.findById(serviceId).populate(
       "owner",
-      "name email fcmToken"
+      "name email fcmToken",
     );
 
     if (!service) {
@@ -1651,7 +1625,7 @@ exports.approveServiceDelete = async (req, res) => {
       if (!payment) continue;
 
       const paymentIntent = await stripe.paymentIntents.retrieve(
-        payment.paymentIntentId
+        payment.paymentIntentId,
       );
 
       // 🔴 Payment not captured yet → cancel
@@ -1702,7 +1676,7 @@ exports.approveServiceDelete = async (req, res) => {
         await sendServiceDeleteApprovedEmail(
           booking.customer,
           service,
-          "customer"
+          "customer",
         );
       }
     }
@@ -1726,7 +1700,7 @@ exports.approveServiceDelete = async (req, res) => {
 
     await User.updateOne(
       { _id: service.owner._id },
-      { $pull: { services: service._id } }
+      { $pull: { services: service._id } },
     );
 
     service.deleteRequestStatus = "approved";
@@ -1758,7 +1732,7 @@ exports.getDeleteServiceRequests = async (req, res) => {
       .populate("owner", "name email mobile")
       .populate("category", "name")
       .select(
-        "title price currency isFree location_name owner category createdAt deleteRequestedAt deleteRequestReason"
+        "title price currency isFree location_name owner category createdAt deleteRequestedAt deleteRequestReason",
       )
       .sort({ deleteRequestedAt: -1 })
       .lean();

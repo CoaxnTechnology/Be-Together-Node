@@ -1,14 +1,25 @@
 #!/bin/bash
 
-echo "🚀 PROD DEPLOY STARTED"
+echo "🚀 BACKEND PROD DEPLOY STARTED: $(date)"
 
-cd /var/www/backend-prod || exit
+cd /var/www/backend-prod || exit 1
 
-git checkout main
-git pull origin main
+echo "📦 Fetching latest code..."
+git fetch origin
 
+echo "🧹 Resetting to origin/main (safe mode)"
+git reset --hard origin/main
+
+# ❗ IMPORTANT: uploads & .env ko delete hone se bachao
+git clean -fd -e uploads/ -e .env
+
+echo "📦 Installing production dependencies..."
 npm install --production
 
-pm2 restart backend-prod
+echo "🔄 Restarting PM2 app..."
+pm2 restart backend-prod --update-env
 
-echo "✅ PROD DEPLOY COMPLETED"
+echo "💾 Saving PM2 state..."
+pm2 save
+
+echo "✅ BACKEND PROD DEPLOY COMPLETED: $(date)"

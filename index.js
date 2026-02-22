@@ -84,7 +84,18 @@ app.post("/webhook/frontend", (req, res) => {
   exec("bash /var/www/frontend-uat-admin/deploy.sh > /dev/null 2>&1 &");
   res.send("received");
 });
+app.post("/webhook/frontend-prod", (req, res) => {
+  console.log("🔥 FRONTEND PROD DEPLOY HIT");
 
+  exec("bash /var/www/frontend-prod-admin/deploy.sh > /dev/null 2>&1 &");
+
+  res.status(200).send("received");
+});
+app.post(
+  "/api/promotion/stripe/webhook",
+  express.raw({ type: "application/json" }),
+  promotionController.stripeWebhook,
+);
 
 // Middleware
 app.use(express.urlencoded({ extended: true }));

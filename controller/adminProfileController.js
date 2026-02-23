@@ -31,8 +31,6 @@ exports.updateMobile = async (req, res) => {
   }
 };
 
-
-
 const PASSWORD_REGEX =
   /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
 
@@ -73,10 +71,7 @@ exports.updatePassword = async (req, res) => {
     }
 
     // ================= PASSWORD MATCH =================
-    const isMatch = await bcrypt.compare(
-      oldPassword,
-      admin.hashed_password
-    );
+    const isMatch = await bcrypt.compare(oldPassword, admin.hashed_password);
 
     if (!isMatch) {
       return res.status(400).json({
@@ -140,11 +135,7 @@ exports.verifyEmailOtp = async (req, res) => {
 
     const admin = await Admin.findById(adminId);
 
-    if (
-      !admin ||
-      admin.otp_code != otp ||
-      admin.otp_expiry < new Date()
-    ) {
+    if (!admin || admin.otp_code != otp || admin.otp_expiry < new Date()) {
       return res.status(400).json({ message: "Invalid or expired OTP" });
     }
 
@@ -163,7 +154,6 @@ exports.verifyEmailOtp = async (req, res) => {
   }
 };
 
-
 exports.getProfile = async (req, res) => {
   console.log("📄 getProfile CONTROLLER START");
 
@@ -174,7 +164,7 @@ exports.getProfile = async (req, res) => {
     console.log("🆔 Admin ID from token:", adminId);
 
     const admin = await Admin.findById(adminId).select(
-      "name email mobile supportPhone supportEmail supportTime"
+      "name email mobile supportPhone supportEmail supportTime",
     );
 
     console.log("👤 Admin data from DB:", admin);
@@ -202,23 +192,49 @@ exports.getProfile = async (req, res) => {
   }
 };
 
-
 // ================= GET SUPPORT INFO =================
 exports.getSupportInfo = async (req, res) => {
-  res.json({
-    isSuccess: true,
-    data: supportInfo,
-  });
+  try {
+    const admin = await Admin.findOne().select(
+      "supportPhone supportEmail supportTime",
+    );
+
+    res.json({
+      isSuccess: true,
+      data: {
+        phone: admin.supportPhone,
+        email: admin.supportEmail,
+        time: admin.supportTime,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({
+      isSuccess: false,
+      message: err.message,
+    });
+  }
 };
 
 // ================= UPDATE SUPPORT INFO =================
 exports.updateSupportInfo = async (req, res) => {
-  const { phone, email, time } = req.body;
+  try {
+    const adminId = req.admin.id;
+    const { phone, email, time } = req.body;
 
-  supportInfo = { phone, email, time };
+    await Admin.findByIdAndUpdate(adminId, {
+      supportPhone: phone,
+      supportEmail: email,
+      supportTime: time,
+    });
 
-  res.json({
-    isSuccess: true,
-    message: "Support info updated successfully",
-  });
+    res.json({
+      isSuccess: true,
+      message: "Support info updated successfully",
+    });
+  } catch (err) {
+    res.status(500).json({
+      isSuccess: false,
+      message: err.message,
+    });
+  }
 };

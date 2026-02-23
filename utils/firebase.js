@@ -1,8 +1,8 @@
 const admin = require("firebase-admin");
 
 if (!admin.apps.length) {
-  if (!process.env.FIREBASE_SERVICE_ACCOUNT) {
-    console.warn("⚠️ FIREBASE_SERVICE_ACCOUNT not set, Firebase disabled");
+  if (!process.env.FIREBASE_SERVICE_ACCOUNT_PATH) {
+    console.log("⚠️ FIREBASE_SERVICE_ACCOUNT_PATH not set, Firebase disabled");
   } else {
     try {
       const serviceAccount = JSON.parse(

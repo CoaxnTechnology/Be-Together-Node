@@ -1,27 +1,25 @@
 const admin = require("firebase-admin");
+const fs = require("fs");
 
 if (!admin.apps.length) {
-  if (!process.env.FIREBASE_SERVICE_ACCOUNT_PATH) {
-    console.log("⚠️ FIREBASE_SERVICE_ACCOUNT_PATH not set, Firebase disabled");
-  } else {
-    try {
-      const serviceAccount = JSON.parse(
-        process.env.FIREBASE_SERVICE_ACCOUNT
-      );
+  try {
+    const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH;
 
-      if (serviceAccount.private_key) {
-        serviceAccount.private_key =
-          serviceAccount.private_key.replace(/\\n/g, "\n");
-      }
+    if (!serviceAccountPath) {
+      console.log("⚠️ FIREBASE_SERVICE_ACCOUNT_PATH not set, Firebase disabled");
+    } else {
+      const serviceAccount = JSON.parse(
+        fs.readFileSync(serviceAccountPath, "utf8")
+      );
 
       admin.initializeApp({
         credential: admin.credential.cert(serviceAccount),
       });
 
-      console.log("✅ Firebase Admin initialized successfully");
-    } catch (err) {
-      console.error("❌ Firebase init failed:", err.message);
+      console.log("✅ Firebase initialized successfully");
     }
+  } catch (err) {
+    console.error("❌ Firebase init failed:", err.message);
   }
 }
 

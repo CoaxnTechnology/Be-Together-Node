@@ -69,7 +69,23 @@ exports.createService = async (req, res) => {
       return res
         .status(403)
         .json({ isSuccess: false, message: "User is not active" });
+    // ===============================
+    // ⭐ ENSURE STRIPE CUSTOMER EXISTS
+    // ===============================
+    if (!user.stripeCustomerId) {
+      console.log("🆕 Creating Stripe customer for user...");
 
+      const customer = await stripe.customers.create({
+        email: user.email,
+        name: user.name,
+        phone: user.mobile,
+      });
+
+      user.stripeCustomerId = customer.id;
+      await user.save();
+
+      console.log("✅ Stripe customer created:", customer.id);
+    }
     // --- Debug Stripe info ---
     console.log("User Stripe Customer ID:", user.stripeCustomerId);
     if (user.stripeCustomerId) {
@@ -943,7 +959,6 @@ exports.getInterestedUsers = async (req, res) => {
     // -----------------------------------------------------
     // ✅ GLOBAL SEARCH (NAME / EMAIL / PHONE / CITY / TAGS)
     // -----------------------------------------------------
-    
 
     if (excludeSelf && userId) {
       query._id = { $ne: userId };

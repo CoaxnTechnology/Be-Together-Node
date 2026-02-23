@@ -4,11 +4,6 @@ const { sendOtpEmail } = require("../utils/email");
 
 // ================= SUPPORT INFO (TEMP STORE) =================
 // later MongoDB me dal sakte ho
-let supportInfo = {
-  phone: "+91 98765 43210",
-  email: "support@betogether.com",
-  time: "Mon–Sat, 10 AM – 7 PM",
-};
 
 // ================= UPDATE MOBILE =================
 exports.updateMobile = async (req, res) => {
@@ -202,9 +197,9 @@ exports.getSupportInfo = async (req, res) => {
     res.json({
       isSuccess: true,
       data: {
-        phone: admin.supportPhone,
-        email: admin.supportEmail,
-        time: admin.supportTime,
+        supportPhone: admin.supportPhone,
+        supportEmail: admin.supportEmail,
+        supportTime: admin.supportTime,
       },
     });
   } catch (err) {
@@ -219,13 +214,17 @@ exports.getSupportInfo = async (req, res) => {
 exports.updateSupportInfo = async (req, res) => {
   try {
     const adminId = req.admin.id;
-    const { phone, email, time } = req.body;
+    const { supportPhone, supportEmail, supportTime } = req.body;
 
-    await Admin.findByIdAndUpdate(adminId, {
-      supportPhone: phone,
-      supportEmail: email,
-      supportTime: time,
-    });
+    await Admin.findByIdAndUpdate(
+      adminId,
+      {
+        supportPhone,
+        supportEmail,
+        supportTime,
+      },
+      { new: true },
+    );
 
     res.json({
       isSuccess: true,

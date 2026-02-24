@@ -106,6 +106,25 @@ exports.createService = async (req, res) => {
     const language = body.language || body.Language || "English";
     const isFree = body.isFree === true || body.isFree === "true";
     const price = isFree ? 0 : Number(body.price || 0);
+    // ===============================
+    // 💰 PRICE VALIDATION (STRIPE SAFE)
+    // ===============================
+    if (!isFree) {
+      if (isNaN(price) || price <= 0) {
+        return res.status(400).json({
+          isSuccess: false,
+          message: "Price must be a valid number greater than 0",
+        });
+      }
+
+      const decimalPart = price.toString().split(".")[1];
+      if (decimalPart && decimalPart.length > 2) {
+        return res.status(400).json({
+          isSuccess: false,
+          message: "Price can have maximum 2 decimal places only",
+        });
+      }
+    }
     const location = tryParse(body.location);
     // const city = body.city;
     const isDoorstepService =

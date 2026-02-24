@@ -74,7 +74,7 @@ exports.bookService = async (req, res) => {
         serviceDetails,
         provider,
         booking,
-        "customer"
+        "customer",
       ).catch((err) => console.log("❌ Customer Email error:", err));
 
       // Send provider email
@@ -83,7 +83,7 @@ exports.bookService = async (req, res) => {
         serviceDetails,
         provider,
         booking,
-        "provider"
+        "provider",
       ).catch((err) => console.log("❌ Provider Email error:", err));
 
       // ⭐ Send Notification
@@ -92,7 +92,7 @@ exports.bookService = async (req, res) => {
         customer,
         provider,
         serviceDetails,
-        booking
+        booking,
       ).catch((err) => console.log("❌ Notification error:", err));
 
       return res.status(200).json({
@@ -106,11 +106,28 @@ exports.bookService = async (req, res) => {
       return res
         .status(400)
         .json({ message: "Provider stripe account missing" });
+    // ===============================
+    // 💰 COMMISSION CALCULATION (SAFE)
+    // ===============================
     const commissionSetting = await CommissionSetting.findOne();
     const commissionPercent = commissionSetting?.percentage || 20;
-    const commission = Math.round((amount * commissionPercent) / 100);
-    const providerAmount = amount - commission;
 
+    // 🔹 Convert amount to cents
+    const amountInCents = Math.round(amount * 100);
+
+    // 🔹 Calculate commission in cents
+    const commissionInCents = Math.round(
+      (amountInCents * commissionPercent) / 100,
+    );
+
+    // 🔹 Final values
+    const commission = commissionInCents / 100;
+    const providerAmount = (amountInCents - commissionInCents) / 100;
+
+    console.log("💰 Amount:", amount);
+    console.log("💰 Commission %:", commissionPercent);
+    console.log("💰 Commission:", commission);
+    console.log("💰 Provider Amount:", providerAmount);
     // Stripe customer
     let customerStripeId = customer.stripeCustomerId;
     if (!customerStripeId) {
@@ -199,7 +216,7 @@ exports.updateBookingStatus = async (req, res) => {
 
     console.log("🔎 Fetching PaymentIntent…");
     const paymentIntent = await stripe.paymentIntents.retrieve(
-      session.payment_intent
+      session.payment_intent,
     );
 
     console.log("💳 PaymentIntent Status:", paymentIntent.status);
@@ -290,7 +307,7 @@ exports.updateBookingStatus = async (req, res) => {
       service,
       provider,
       booking,
-      "customer"
+      "customer",
     ).catch((err) => console.log("❌ Customer Email error:", err));
 
     sendServiceBookedEmail(
@@ -298,7 +315,7 @@ exports.updateBookingStatus = async (req, res) => {
       service,
       provider,
       booking,
-      "provider"
+      "provider",
     ).catch((err) => console.log("❌ Provider Email error:", err));
 
     // =============================================
@@ -307,7 +324,7 @@ exports.updateBookingStatus = async (req, res) => {
     console.log("🔔 Calling sendBookingNotification…");
 
     sendBookingNotification(customer, provider, service, booking).catch((err) =>
-      console.log("❌ Notification error:", err)
+      console.log("❌ Notification error:", err),
     );
 
     // =============================================
@@ -391,7 +408,7 @@ exports.verifyServiceOtp = async (req, res) => {
       booking.customer,
       booking.provider,
       booking.service,
-      booking
+      booking,
     );
 
     return res.json({
@@ -440,7 +457,7 @@ exports.completeService = async (req, res) => {
         customer,
         provider,
         service,
-        booking
+        booking,
       );
 
       return res.json({
@@ -485,7 +502,7 @@ exports.completeService = async (req, res) => {
       customer,
       provider,
       service,
-      booking
+      booking,
     );
 
     return res.json({
@@ -634,7 +651,7 @@ exports.refundBooking = async (req, res) => {
     console.log("➡ Retrieving PaymentIntent…");
 
     const paymentIntent = await stripe.paymentIntents.retrieve(
-      payment.paymentIntentId
+      payment.paymentIntentId,
     );
 
     console.log("✔ PaymentIntent Status:", paymentIntent.status);
@@ -657,7 +674,7 @@ exports.refundBooking = async (req, res) => {
 
     const totalAmount = payment.amount;
     const cancellationFee = Math.round(
-      (totalAmount * cancellationPercent) / 100
+      (totalAmount * cancellationPercent) / 100,
     );
     const refundAmount = totalAmount - cancellationFee;
 
@@ -729,7 +746,7 @@ exports.refundBooking = async (req, res) => {
       booking.provider,
       booking.service,
       booking,
-      reason
+      reason,
     );
 
     // ---------------------------------------------------------
@@ -742,7 +759,7 @@ exports.refundBooking = async (req, res) => {
       booking.provider,
       booking.service,
       booking,
-      reason
+      reason,
     );
 
     console.log("🎉 refundBooking Completed Successfully");

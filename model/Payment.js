@@ -13,6 +13,19 @@ const paymentSchema = new mongoose.Schema(
       ref: "Service",
       required: true,
     },
+    contactPhone: { type: String },
+    location_name: { type: String, default: null },
+    location: {
+      type: {
+        type: String,
+        enum: ["Point"],
+        default: "Point",
+      },
+      coordinates: {
+        type: [Number], // [lng, lat]
+        default: null,
+      },
+    },
     bookingId: { type: String, required: false },
     checkoutSessionId: { type: String, required: true },
 
@@ -20,7 +33,7 @@ const paymentSchema = new mongoose.Schema(
     customerStripeId: { type: String, required: true },
     providerStripeId: { type: String, required: true },
     amount: { type: Number, required: true },
-    
+
     appCommission: { type: Number, default: 0 },
     providerAmount: { type: Number, default: 0 },
     currency: { type: String, default: null },
@@ -35,7 +48,7 @@ const paymentSchema = new mongoose.Schema(
     completedAt: { type: Date, default: null },
     refundedAt: { type: Date, default: null },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 //
 

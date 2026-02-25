@@ -26,7 +26,31 @@ const updateProviderPerformance = require("../utils/providerPerformance");
 // -----------------------------
 exports.bookService = async (req, res) => {
   try {
-    const { userId, providerId, serviceId } = req.body;
+    const {
+      userId,
+      providerId,
+      serviceId,
+      phone, // REQUIRED
+      location_name, // OPTIONAL
+      latitude, // OPTIONAL
+      longitude,
+    } = req.body;
+    // =========================
+    // BASIC VALIDATION
+    // =========================
+    if (!userId || !providerId || !serviceId) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Missing required data",
+      });
+    }
+
+    if (!phone) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Phone number is required",
+      });
+    }
     // Data
     const customer = await User.findById(userId);
     const provider = await User.findById(providerId);
@@ -37,6 +61,24 @@ exports.bookService = async (req, res) => {
 
     if (!customer || !provider || !serviceDetails)
       return res.status(404).json({ message: "Data not found" });
+    // =========================
+    // SAVE PHONE IN USER PROFILE (ONLY IF EMPTY)
+    // =========================
+    if (!customer.mobile) {
+      customer.mobile = phone;
+      await customer.save();
+    }
+
+    // =========================
+    // PREPARE BOOKING LOCATION (OPTIONAL)
+    // =========================
+    let bookingLocation = null;
+    if (latitude && longitude) {
+      bookingLocation = {
+        type: "Point",
+        coordinates: [Number(longitude), Number(latitude)],
+      };
+    }
 
     const amount = serviceDetails.isFree ? 0 : serviceDetails.price;
     // Commission
@@ -65,6 +107,10 @@ exports.bookService = async (req, res) => {
         service: serviceId,
         amount: 0,
         status: "booked", // directly booked
+        // ⭐ NEW FIELDS
+        contactPhone: phone,
+        location_name: location_name || null,
+        location: bookingLocation,
       });
       // ⭐ Send Email
       console.log("📧 Calling sendServiceBookedEmail…");
@@ -74,7 +120,7 @@ exports.bookService = async (req, res) => {
         serviceDetails,
         provider,
         booking,
-        "customer"
+        "customer",
       ).catch((err) => console.log("❌ Customer Email error:", err));
 
       // Send provider email
@@ -83,7 +129,7 @@ exports.bookService = async (req, res) => {
         serviceDetails,
         provider,
         booking,
-        "provider"
+        "provider",
       ).catch((err) => console.log("❌ Provider Email error:", err));
 
       // ⭐ Send Notification
@@ -92,7 +138,7 @@ exports.bookService = async (req, res) => {
         customer,
         provider,
         serviceDetails,
-        booking
+        booking,
       ).catch((err) => console.log("❌ Notification error:", err));
 
       return res.status(200).json({
@@ -165,6 +211,10 @@ exports.bookService = async (req, res) => {
       providerAmount,
       paymentIntentId: session.payment_intent,
       status: "pending",
+      // ⭐ SAVE BOOKING DATA TEMPORARILY
+      contactPhone: phone,
+      location_name: location_name || null,
+      location: bookingLocation,
     });
 
     res.json({
@@ -199,7 +249,7 @@ exports.updateBookingStatus = async (req, res) => {
 
     console.log("🔎 Fetching PaymentIntent…");
     const paymentIntent = await stripe.paymentIntents.retrieve(
-      session.payment_intent
+      session.payment_intent,
     );
 
     console.log("💳 PaymentIntent Status:", paymentIntent.status);
@@ -266,6 +316,10 @@ exports.updateBookingStatus = async (req, res) => {
       currency: payment.currency,
       paymentId: payment._id,
       status: "booked",
+      // ⭐ COPY FROM PAYMENT
+      contactPhone: payment.contactPhone,
+      location_name: payment.location_name,
+      location: payment.location,
     });
 
     console.log("✅ Booking Created:", booking._id);
@@ -290,7 +344,7 @@ exports.updateBookingStatus = async (req, res) => {
       service,
       provider,
       booking,
-      "customer"
+      "customer",
     ).catch((err) => console.log("❌ Customer Email error:", err));
 
     sendServiceBookedEmail(
@@ -298,7 +352,7 @@ exports.updateBookingStatus = async (req, res) => {
       service,
       provider,
       booking,
-      "provider"
+      "provider",
     ).catch((err) => console.log("❌ Provider Email error:", err));
 
     // =============================================
@@ -307,7 +361,7 @@ exports.updateBookingStatus = async (req, res) => {
     console.log("🔔 Calling sendBookingNotification…");
 
     sendBookingNotification(customer, provider, service, booking).catch((err) =>
-      console.log("❌ Notification error:", err)
+      console.log("❌ Notification error:", err),
     );
 
     // =============================================
@@ -391,7 +445,7 @@ exports.verifyServiceOtp = async (req, res) => {
       booking.customer,
       booking.provider,
       booking.service,
-      booking
+      booking,
     );
 
     return res.json({
@@ -440,7 +494,7 @@ exports.completeService = async (req, res) => {
         customer,
         provider,
         service,
-        booking
+        booking,
       );
 
       return res.json({
@@ -485,7 +539,7 @@ exports.completeService = async (req, res) => {
       customer,
       provider,
       service,
-      booking
+      booking,
     );
 
     return res.json({
@@ -645,7 +699,7 @@ exports.refundBooking = async (req, res) => {
     console.log("➡ Retrieving PaymentIntent…");
 
     const paymentIntent = await stripe.paymentIntents.retrieve(
-      payment.paymentIntentId
+      payment.paymentIntentId,
     );
 
     console.log("✔ PaymentIntent Status:", paymentIntent.status);
@@ -668,7 +722,7 @@ exports.refundBooking = async (req, res) => {
 
     const totalAmount = payment.amount;
     const cancellationFee = Math.round(
-      (totalAmount * cancellationPercent) / 100
+      (totalAmount * cancellationPercent) / 100,
     );
     const refundAmount = totalAmount - cancellationFee;
 
@@ -740,7 +794,7 @@ exports.refundBooking = async (req, res) => {
       booking.provider,
       booking.service,
       booking,
-      reason
+      reason,
     );
 
     // ---------------------------------------------------------
@@ -753,7 +807,7 @@ exports.refundBooking = async (req, res) => {
       booking.provider,
       booking.service,
       booking,
-      reason
+      reason,
     );
 
     console.log("🎉 refundBooking Completed Successfully");

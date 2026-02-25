@@ -509,14 +509,25 @@ exports.getUserBookings = async (req, res) => {
 
     // Customer bookings
     const customerBookings = await Booking.find({ customer: userId })
-      .populate("service")
-      .populate("provider", "name email")
+      .populate({
+        path: "service",
+        populate: {
+          path: "category",
+          select: "categoryId name",
+        },
+      })
+      .populate("provider", "name email profile_image")
       .sort({ createdAt: -1 });
-
     // Provider bookings
     const providerBookings = await Booking.find({ provider: userId })
-      .populate("service")
-      .populate("customer", "name email")
+      .populate({
+        path: "service",
+        populate: {
+          path: "category",
+          select: "categoryId name",
+        },
+      })
+      .populate("customer", "name email profile_image")
       .sort({ createdAt: -1 });
 
     const bookings = [];

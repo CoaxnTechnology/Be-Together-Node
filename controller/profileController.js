@@ -122,7 +122,7 @@ exports.editProfile = async (req, res) => {
           user.interests = [];
         } else {
           const tagRegexes = inputClean.map(
-            (t) => new RegExp(`^${escapeRegExp(t)}$`, "i")
+            (t) => new RegExp(`^${escapeRegExp(t)}$`, "i"),
           );
 
           const foundCategories = await Category.find({
@@ -190,7 +190,7 @@ exports.editProfile = async (req, res) => {
         } else {
           // Build regexes and query categories for matching tags
           const tagRegexes = inputClean.map(
-            (t) => new RegExp(`^${escapeRegExp(t)}$`, "i")
+            (t) => new RegExp(`^${escapeRegExp(t)}$`, "i"),
           );
 
           const foundCategories = await Category.find({
@@ -243,7 +243,7 @@ exports.editProfile = async (req, res) => {
     console.log("User profile saved successfully");
     // ✅ Refresh user from DB to get latest saved interests
     const updatedUser = await User.findById(user._id).select(
-      "name interests lastLocation fcmToken"
+      "name interests lastLocation fcmToken",
     );
     // Only trigger if interests were updated
     const interestsChanged =
@@ -256,7 +256,7 @@ exports.editProfile = async (req, res) => {
       await notificationController
         .notifyOnUserInterestUpdate(updatedUser)
         .catch((err) =>
-          console.error("Interest notification failed:", err.message)
+          console.error("Interest notification failed:", err.message),
         );
     } else {
       console.log("Interests not changed, skipping notifications");
@@ -342,6 +342,8 @@ exports.getUserProfileByEmail = async (req, res) => {
         id: user._id,
         name: user.name,
         email: user.email,
+        // ✅ ADD THIS LINE
+        mobile: user.mobile || "",
         profile_image: getFullImageUrl(user.profile_image),
         bio: user.bio || "",
         city: user.city || "",

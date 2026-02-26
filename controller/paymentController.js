@@ -592,6 +592,11 @@ exports.getUserBookings = async (req, res) => {
         role: "customer",
         service: b.service,
         otherUser: b.provider,
+        // ✅ ADD THESE
+        contactPhone: b.contactPhone,
+        location_name: b.location_name,
+        location: b.location,
+
         status: b.status,
         amount: b.amount,
         createdAt: b.createdAt,
@@ -604,6 +609,11 @@ exports.getUserBookings = async (req, res) => {
         role: "provider",
         service: b.service,
         otherUser: b.customer,
+        // ✅ ADD THESE
+        contactPhone: b.contactPhone,
+        location_name: b.location_name,
+        location: b.location,
+
         status: b.status,
         amount: b.amount,
         createdAt: b.createdAt,

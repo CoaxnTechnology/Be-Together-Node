@@ -9,7 +9,6 @@ const { getFullImageUrl } = require("../utils/image");
 const { randomUUID } = require("crypto");
 const crypto = require("crypto");
 const { createResetToken } = require("../utils/token");
-//const { sendResetEmail, sendOtpEmail } = require("../utils/email");
 const cloudinary = require("cloudinary").v2;
 const streamifier = require("streamifier");
 const multer = require("multer"); // for MulterError checks
@@ -744,35 +743,35 @@ exports.resendOtp = async (req, res) => {
 
 exports.forgotOrResetPassword = async (req, res) => {
   try {
-    const { email, token, new_password } = req.body;
+    const { email, token, new_password, confirm_password } = req.body;
     if (!email) {
       return res
         .status(400)
-        .json({ IsSucces: false, message: "Email required" });
+        .json({ isSuccess: false, message: "Email required" });
     }
 
     const lowerEmail = String(email).toLowerCase();
     const user = await User.findOne({ email: lowerEmail });
     if (!user) {
-      // Keep same behavior as your other endpoints (404). You can also return generic response for security.
-      return res
-        .status(404)
-        .json({ IsSucces: false, message: "User not found" });
+      return res.json({
+        isSuccess: true,
+        message: "If the email is registered, a reset link has been sent.",
+      });
     }
     if (user.status === "banned" || user.is_active === false) {
       return res.status(403).json({
-        IsSucces: false,
+        isSuccess: false,
         message: "Your account has been blocked by admin",
       });
     }
 
     // Mode 1: request reset (no token & no new_password provided)
-    if (!token && !new_password) {
+    if (!token && !new_password ) {
       // Optionally block google_auth accounts from password reset
       if (user.register_type === "google_auth" || user.is_google_auth) {
         return res.status(400).json({
-          IsSucces: false,
-          message: "Password reset not allowed for Google accounts",
+          isSuccess: false,
+          message: "Password reset is not allowed for Google accounts",
         });
       }
 
@@ -784,7 +783,7 @@ exports.forgotOrResetPassword = async (req, res) => {
         );
         if (elapsedSec < COOLDOWN_SECONDS) {
           return res.status(429).json({
-            IsSucces: false,
+            isSuccess: false,
             message: `Please wait ${
               COOLDOWN_SECONDS - elapsedSec
             } seconds before requesting again.`,
@@ -812,16 +811,32 @@ exports.forgotOrResetPassword = async (req, res) => {
       }
 
       return res.json({
-        IsSucces: true,
+        isSuccess: true,
         message: "If the email is registered, a reset link has been sent.",
       });
     }
 
     // Mode 2: perform reset (token + new_password provided)
-    if (!token || !new_password) {
+    // Mode 2: perform reset (token + new_password provided)
+    if (!token || !new_password || !confirm_password) {
       return res.status(400).json({
-        IsSucces: false,
-        message: "Token and new_password required to reset password.",
+        isSuccess: false,
+        message: "Token, new_password and confirm_password are required.",
+      });
+    }
+
+    if (new_password !== confirm_password) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "New password and confirm password do not match",
+      });
+    }
+
+    // Optional: password strength check
+    if (String(new_password).length < 8) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Password must be at least 8 characters long",
       });
     }
 
@@ -829,21 +844,26 @@ exports.forgotOrResetPassword = async (req, res) => {
     if (!user.reset_password_token || !user.reset_password_expiry) {
       return res
         .status(400)
-        .json({ IsSucces: false, message: "No active reset request found" });
+        .json({ isSuccess: false, message: "No active reset request found" });
     }
 
     if (user.reset_password_used) {
       return res.status(400).json({
-        IsSucces: false,
+        isSuccess: false,
         message: "This reset link has already been used",
       });
     }
 
     // check expiry
     if (Date.now() > new Date(user.reset_password_expiry).getTime()) {
+      user.reset_password_token = null;
+      user.reset_password_expiry = null;
+      user.reset_password_used = true;
+      await user.save();
+
       return res
         .status(400)
-        .json({ IsSucces: false, message: "Reset link expired" });
+        .json({ isSuccess: false, message: "Reset link expired" });
     }
 
     // validate token
@@ -854,28 +874,44 @@ exports.forgotOrResetPassword = async (req, res) => {
     if (hashedToken !== user.reset_password_token) {
       return res
         .status(400)
-        .json({ IsSucces: false, message: "Invalid reset token" });
+        .json({ isSuccess: false, message: "Invalid reset token" });
     }
-
+    if (user.hashed_password) {
+      const samePassword = await bcrypt.compare(
+        new_password,
+        user.hashed_password,
+      );
+      if (samePassword) {
+        return res.status(400).json({
+          isSuccess: false,
+          message: "New password must be different from old password",
+        });
+      }
+    }
     // all good -> update password
     const hashedPassword = await bcrypt.hash(String(new_password), 10);
     user.hashed_password = hashedPassword;
-
-    // invalidate reset token so link cannot be reused
+    // 🔥 Invalidate everything
     user.reset_password_token = null;
     user.reset_password_expiry = null;
     user.reset_password_used = true;
     user.lastPasswordResetAt = new Date();
 
+    // 🔥 Logout from all devices
+    user.access_token = null;
+    user.session_id = null;
+    user.fcmToken = [];
+    user.last_login = null;
+
     await user.save();
 
     return res.json({
-      IsSucces: true,
+      isSuccess: true,
       message: "Password updated successfully",
     });
   } catch (err) {
     console.error("❌ forgotOrResetPassword Error:", err);
-    return res.status(500).json({ IsSucces: false, message: "Server error" });
+    return res.status(500).json({ isSuccess: false, message: "Server error" });
   }
 };
 

@@ -150,7 +150,7 @@ app.use("/api", promotionPlanAdminRoutes);
 // Connect to MongoDB (live Atlas)
 app.use("/api/admin", AdminRoutes);
 console.log("Product ID:", process.env.STRIPE_PROMOTION_PRODUCT_ID);
-
+console.log("RESET:", process.env.FRONTEND_RESET_URL);
 // Start server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));

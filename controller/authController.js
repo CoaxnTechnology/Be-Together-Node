@@ -937,12 +937,6 @@ exports.forgotOrResetPassword = async (req, res) => {
     user.reset_password_expiry = null;
     user.reset_password_used = true;
     user.lastPasswordResetAt = new Date();
-
-    user.access_token = null;
-    user.session_id = null;
-    user.fcmToken = [];
-    user.last_login = null;
-
     await user.save();
 
     console.log("🎉 PASSWORD RESET SUCCESS");

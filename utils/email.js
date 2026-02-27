@@ -28,7 +28,14 @@ async function sendResetEmail(to, token) {
   const templatePath = path.join(__dirname, "../templates/email_reset.html");
   let html = fs.readFileSync(templatePath, "utf-8");
 
-  const resetLink = `${FRONTEND_RESET_URL}?token=${token}`;
+  // ✅ IMPORTANT FIX: email + token BOTH + URL ENCODE
+  const resetLink =
+    `${FRONTEND_RESET_URL}` +
+    `?email=${encodeURIComponent(to)}` +
+    `&token=${encodeURIComponent(token)}`;
+
+  console.log("📨 Reset link generated:", resetLink);
+
   html = html.replace("{{reset_link}}", resetLink);
   html = html.replace("{{date}}", new Date().toLocaleString());
 

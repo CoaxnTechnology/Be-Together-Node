@@ -11,7 +11,7 @@ const BASE_URL = process.env.BASE_URL;
 exports.editProfile = async (req, res) => {
   try {
     // don't set defaults here; we need to detect if a field was provided
-    let { email, name, bio, city, age } = req.body;
+    let { email, name, bio, city, age,mobile  } = req.body;
 
     // helper: try parse JSON string fields (common with multipart/form-data)
     const tryParse = (val) => {
@@ -69,6 +69,30 @@ exports.editProfile = async (req, res) => {
         });
       }
       user.age = ageNumber;
+    }
+    // ---------------- MOBILE NUMBER (NEW) ----------------
+    if (mobile !== undefined) {
+      if (typeof mobile !== "string") {
+        return res.status(400).json({
+          isSuccess: false,
+          message: "Mobile number must be a string",
+        });
+      }
+
+      const normalizedMobile = mobile.trim();
+
+      // E.164 international format validation
+      const mobileRegex = /^\+[1-9]\d{7,14}$/;
+
+      if (!mobileRegex.test(normalizedMobile)) {
+        return res.status(400).json({
+          isSuccess: false,
+          message:
+            "Invalid mobile number. Use international format (e.g. +919876543210)",
+        });
+      }
+
+      user.mobile = normalizedMobile;
     }
 
     // keep track of old Cloudinary public_id (if any) to delete later
@@ -270,6 +294,7 @@ exports.editProfile = async (req, res) => {
         uid: user.uid,
         name: user.name,
         email: user.email,
+        mobile: user.mobile || "",
         profile_image: getFullImageUrl(user.profile_image),
         bio: user.bio,
         city: user.city,

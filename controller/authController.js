@@ -743,44 +743,62 @@ exports.resendOtp = async (req, res) => {
 
 exports.forgotOrResetPassword = async (req, res) => {
   try {
+    console.log("🔐 [FORGOT/RESET] API HIT");
+    console.log("📥 Request body:", req.body);
+
     const { email, token, new_password, confirm_password } = req.body;
+
     if (!email) {
+      console.log("❌ Email missing");
       return res
         .status(400)
         .json({ isSuccess: false, message: "Email required" });
     }
 
     const lowerEmail = String(email).toLowerCase();
+    console.log("📧 Normalized email:", lowerEmail);
+
     const user = await User.findOne({ email: lowerEmail });
+
     if (!user) {
+      console.log("⚠️ User not found (safe response)");
       return res.json({
         isSuccess: true,
         message: "If the email is registered, a reset link has been sent.",
       });
     }
+
+    console.log("👤 User found:", user._id);
+
     if (user.status === "banned" || user.is_active === false) {
+      console.log("🚫 User blocked");
       return res.status(403).json({
         isSuccess: false,
         message: "Your account has been blocked by admin",
       });
     }
 
-    // Mode 1: request reset (no token & no new_password provided)
-    if (!token && !new_password ) {
-      // Optionally block google_auth accounts from password reset
+    // ===============================
+    // MODE 1: REQUEST RESET LINK
+    // ===============================
+    if (!token && !new_password) {
+      console.log("📨 MODE 1: Reset link request");
+
       if (user.register_type === "google_auth" || user.is_google_auth) {
+        console.log("❌ Google auth user – reset blocked");
         return res.status(400).json({
           isSuccess: false,
           message: "Password reset is not allowed for Google accounts",
         });
       }
 
-      // Optional cooldown for abuse prevention
       const COOLDOWN_SECONDS = 60;
       if (user.lastResetRequestAt) {
         const elapsedSec = Math.floor(
-          (Date.now() - new Date(user.lastResetRequestAt).getTime()) / 1000,
+          (Date.now() - new Date(user.lastResetRequestAt).getTime()) / 1000
         );
+        console.log("⏱ Cooldown elapsed:", elapsedSec);
+
         if (elapsedSec < COOLDOWN_SECONDS) {
           return res.status(429).json({
             isSuccess: false,
@@ -791,9 +809,12 @@ exports.forgotOrResetPassword = async (req, res) => {
         }
       }
 
-      // Generate secure token + hashed version
       const { token: plainToken, hashed } = createResetToken();
-      const expiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour expiry
+      const expiry = new Date(Date.now() + 60 * 60 * 1000);
+
+      console.log("🔑 Plain token (email):", plainToken);
+      console.log("🔐 Hashed token (DB):", hashed);
+      console.log("⏳ Expiry:", expiry);
 
       user.reset_password_token = hashed;
       user.reset_password_expiry = expiry;
@@ -801,13 +822,13 @@ exports.forgotOrResetPassword = async (req, res) => {
       user.lastResetRequestAt = new Date();
 
       await user.save();
+      console.log("💾 Reset token saved in DB");
 
-      // Send email with plaintext token link (best-effort)
       try {
         await sendResetEmail(user.email, plainToken);
+        console.log("📧 Reset email sent");
       } catch (emailErr) {
-        console.error("Failed to send reset email (non-fatal):", emailErr);
-        // Still respond success to avoid leaking info
+        console.error("❌ Email send failed:", emailErr);
       }
 
       return res.json({
@@ -816,88 +837,107 @@ exports.forgotOrResetPassword = async (req, res) => {
       });
     }
 
-    // Mode 2: perform reset (token + new_password provided)
-    // Mode 2: perform reset (token + new_password provided)
+    // ===============================
+    // MODE 2: RESET PASSWORD
+    // ===============================
+    console.log("🔁 MODE 2: Reset password attempt");
+
     if (!token || !new_password || !confirm_password) {
+      console.log("❌ Missing token or passwords");
       return res.status(400).json({
         isSuccess: false,
         message: "Token, new_password and confirm_password are required.",
       });
     }
 
+    console.log("🔑 Token received from frontend:", token);
+
     if (new_password !== confirm_password) {
+      console.log("❌ Password mismatch");
       return res.status(400).json({
         isSuccess: false,
         message: "New password and confirm password do not match",
       });
     }
 
-    // Optional: password strength check
     if (String(new_password).length < 8) {
+      console.log("❌ Password too short");
       return res.status(400).json({
         isSuccess: false,
         message: "Password must be at least 8 characters long",
       });
     }
 
-    // check there's an active reset
     if (!user.reset_password_token || !user.reset_password_expiry) {
-      return res
-        .status(400)
-        .json({ isSuccess: false, message: "No active reset request found" });
+      console.log("❌ No active reset data in DB");
+      return res.status(400).json({
+        isSuccess: false,
+        message: "No active reset request found",
+      });
     }
 
     if (user.reset_password_used) {
+      console.log("❌ Reset link already used");
       return res.status(400).json({
         isSuccess: false,
         message: "This reset link has already been used",
       });
     }
 
-    // check expiry
     if (Date.now() > new Date(user.reset_password_expiry).getTime()) {
+      console.log("⏰ Reset link expired");
+
       user.reset_password_token = null;
       user.reset_password_expiry = null;
       user.reset_password_used = true;
       await user.save();
 
-      return res
-        .status(400)
-        .json({ isSuccess: false, message: "Reset link expired" });
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Reset link expired",
+      });
     }
 
-    // validate token
     const hashedToken = crypto
       .createHash("sha256")
       .update(String(token))
       .digest("hex");
+
+    console.log("🔐 Hashed token from request:", hashedToken);
+    console.log("🗄 Hashed token in DB:", user.reset_password_token);
+
     if (hashedToken !== user.reset_password_token) {
-      return res
-        .status(400)
-        .json({ isSuccess: false, message: "Invalid reset token" });
+      console.log("❌ TOKEN MISMATCH");
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Invalid reset token",
+      });
     }
+
+    console.log("✅ Token verified");
+
     if (user.hashed_password) {
       const samePassword = await bcrypt.compare(
         new_password,
-        user.hashed_password,
+        user.hashed_password
       );
       if (samePassword) {
+        console.log("❌ Same password as old");
         return res.status(400).json({
           isSuccess: false,
           message: "New password must be different from old password",
         });
       }
     }
-    // all good -> update password
+
     const hashedPassword = await bcrypt.hash(String(new_password), 10);
     user.hashed_password = hashedPassword;
-    // 🔥 Invalidate everything
+
     user.reset_password_token = null;
     user.reset_password_expiry = null;
     user.reset_password_used = true;
     user.lastPasswordResetAt = new Date();
 
-    // 🔥 Logout from all devices
     user.access_token = null;
     user.session_id = null;
     user.fcmToken = [];
@@ -905,13 +945,18 @@ exports.forgotOrResetPassword = async (req, res) => {
 
     await user.save();
 
+    console.log("🎉 PASSWORD RESET SUCCESS");
+
     return res.json({
       isSuccess: true,
       message: "Password updated successfully",
     });
   } catch (err) {
-    console.error("❌ forgotOrResetPassword Error:", err);
-    return res.status(500).json({ isSuccess: false, message: "Server error" });
+    console.error("❌ forgotOrResetPassword ERROR:", err);
+    return res.status(500).json({
+      isSuccess: false,
+      message: "Server error",
+    });
   }
 };
 

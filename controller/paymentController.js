@@ -683,7 +683,34 @@ exports.refundBooking = async (req, res) => {
         console.log("📉 Updating provider performance (free cancel)…");
         await updateProviderPerformance(booking.provider._id, 0, 1);
       }
+      console.log("📧 Sending cancel email for FREE service...");
+      try {
+        await sendServiceCancelledEmail(
+          booking.customer,
+          booking.provider,
+          booking.service,
+          booking,
+          reason || "Service cancelled",
+        );
+        console.log("✅ Free service cancel email sent");
+      } catch (err) {
+        console.error("❌ Free service email failed", err);
+      }
 
+      // 🔔 SEND NOTIFICATION
+      console.log("🔔 Sending cancel notification for FREE service...");
+      try {
+        await sendServiceCancelledNotification(
+          booking.customer,
+          booking.provider,
+          booking.service,
+          booking,
+          reason || "",
+        );
+        console.log("✅ Free service cancel notification sent");
+      } catch (err) {
+        console.error("❌ Free service notification failed", err);
+      }
       return res.json({
         isSuccess: true,
         message: "Free service cancelled successfully",
@@ -798,14 +825,26 @@ exports.refundBooking = async (req, res) => {
     // 8️⃣ SEND EMAIL
     // ---------------------------------------------------------
     console.log("📧 Sending Cancel Email…");
+    console.log("📧 Customer Email:", booking.customer?.email);
+    console.log("📧 Provider Email:", booking.provider?.email);
+    console.log("📧 Service Title:", booking.service?.title);
+    console.log("📧 Booking ID:", booking._id);
+    console.log("📧 Cancel Reason:", reason);
+    try {
+      const emailResponse = await sendServiceCancelledEmail(
+        booking.customer,
+        booking.provider,
+        booking.service,
+        booking,
+        reason,
+      );
 
-    sendServiceCancelledEmail(
-      booking.customer,
-      booking.provider,
-      booking.service,
-      booking,
-      reason,
-    );
+      console.log("✅ [EMAIL] Email function executed");
+      console.log("📧 Email Response:", emailResponse);
+    } catch (emailErr) {
+      console.error("❌ [EMAIL ERROR] Failed to send cancel email");
+      console.error(emailErr);
+    }
 
     // ---------------------------------------------------------
     // 9️⃣ SEND NOTIFICATIONS

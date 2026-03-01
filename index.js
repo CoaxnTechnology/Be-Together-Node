@@ -78,7 +78,6 @@ app.post(
     res.status(200).send("prod deploy started");
   },
 );
-
 app.post("/webhook/frontend", (req, res) => {
   console.log("🔥 FRONTEND DEPLOY HIT");
   exec("bash /var/www/frontend-uat-admin/deploy.sh > /dev/null 2>&1 &");

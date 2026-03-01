@@ -684,17 +684,26 @@ exports.refundBooking = async (req, res) => {
         await updateProviderPerformance(booking.provider._id, 0, 1);
       }
       console.log("📧 Sending cancel email for FREE service...");
+      console.log("📧 Sending Cancel Email…");
+      console.log("📧 Customer Email:", booking.customer?.email);
+      console.log("📧 Provider Email:", booking.provider?.email);
+      console.log("📧 Service Title:", booking.service?.title);
+      console.log("📧 Booking ID:", booking._id);
+      console.log("📧 Cancel Reason:", reason);
       try {
-        await sendServiceCancelledEmail(
+        const emailResponse = await sendServiceCancelledEmail(
           booking.customer,
           booking.provider,
           booking.service,
           booking,
-          reason || "Service cancelled",
+          reason,
         );
-        console.log("✅ Free service cancel email sent");
-      } catch (err) {
-        console.error("❌ Free service email failed", err);
+
+        console.log("✅ [EMAIL] Email function executed");
+        console.log("📧 Email Response:", emailResponse);
+      } catch (emailErr) {
+        console.error("❌ [EMAIL ERROR] Failed to send cancel email");
+        console.error(emailErr);
       }
 
       // 🔔 SEND NOTIFICATION

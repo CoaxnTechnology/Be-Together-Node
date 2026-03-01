@@ -2,7 +2,7 @@
 const nodemailer = require("nodemailer");
 const fs = require("fs");
 const path = require("path");
-const {sendEmail}=require('./brevoMailer');
+const { sendEmail } = require("./brevoMailer");
 // ---------------- OTP EMAIL ----------------
 async function sendOtpEmail(to, otp) {
   const templatePath = path.join(__dirname, "../templates/email_otp.html");
@@ -12,7 +12,6 @@ async function sendOtpEmail(to, otp) {
   html = html.replace("{{date}}", new Date().toLocaleDateString());
 
   await sendEmail({
-  
     to,
     subject: "Your OTP Code",
     html,
@@ -60,7 +59,6 @@ async function sendServiceOtpEmail(to, data) {
     .replace(/{{date}}/g, new Date().toLocaleDateString());
 
   await sendEmail({
-  
     to,
     subject: "Your Service Start OTP",
     html,
@@ -71,7 +69,7 @@ async function sendServiceBookedEmail(
   service,
   provider,
   booking,
-  type = "customer"
+  type = "customer",
 ) {
   console.log("📧 sendServiceBookedEmail called for:", type);
 
@@ -114,7 +112,7 @@ async function sendServiceBookedEmail(
       .replace(/{{service_name}}/g, service.title)
       .replace(
         /{{date}}/g,
-        service.date ? new Date(service.date).toLocaleString() : "-"
+        service.date ? new Date(service.date).toLocaleString() : "-",
       )
       .replace(/{{amount}}/g, booking.amount);
 
@@ -124,7 +122,6 @@ async function sendServiceBookedEmail(
 
     // --- Send actual HTML email ---
     const info = await sendEmail({
-      
       to: toEmail,
       subject: "Service Booked",
       html,
@@ -139,11 +136,11 @@ async function sendServiceCompletedEmail(customer, provider, service, booking) {
   try {
     const templatePath = path.join(
       __dirname,
-      "../templates/service_completed.html"
+      "../templates/service_completed.html",
     );
 
     let html = fs.readFileSync(templatePath, "utf8");
-     // 📌 Service completed time (NOW)
+    // 📌 Service completed time (NOW)
 
     // Provider section (for customer)
     const providerHTML = `
@@ -164,7 +161,7 @@ async function sendServiceCompletedEmail(customer, provider, service, booking) {
       .replace("{{service_name}}", service.title)
       .replace("{{provider_section}}", providerHTML)
       .replace("{{customer_section}}", customerHTML)
-      
+
       .replace("{{amount}}", booking.amount);
 
     await sendEmail({
@@ -178,18 +175,25 @@ async function sendServiceCompletedEmail(customer, provider, service, booking) {
     console.error("❌ Email error:", err.message);
   }
 }
-async function sendServiceCancelledEmail(customer, provider, service, booking, reason = "") {
+async function sendServiceCancelledEmail(
+  customer,
+  provider,
+  service,
+  booking,
+  reason = "",
+) {
   console.log("📧 [EMAIL] Function Called");
 
   try {
-    console.log("📧 Loading Template…");
-    const templatePath = path.join(__dirname, "../templates/service_cancel.html");
+    const templatePath = path.join(
+      __dirname,
+      "../templates/service_cancel.html",
+    );
 
-    let html = fs.readFileSync(templatePath, "utf8");
+    console.log("📧 Loading Template…");
+    let htmlTemplate = fs.readFileSync(templatePath, "utf8");
     console.log("📧 Template Loaded");
 
-    // Reason
-    console.log("📧 Adding Reason:", reason);
     const reasonSection = reason
       ? `
         <p style="margin: 6px 0; font-size: 15px">
@@ -198,9 +202,12 @@ async function sendServiceCancelledEmail(customer, provider, service, booking, r
       `
       : "";
 
-    console.log("📧 Replacing Variables in Template…");
+    // ===============================
+    // 📧 CUSTOMER EMAIL
+    // ===============================
+    console.log("📧 Preparing CUSTOMER email…");
 
-    html = html
+    let customerHtml = htmlTemplate
       .replace("{{name}}", customer.name)
       .replace("{{service_name}}", service.title)
       .replace("{{provider_name}}", provider.name)
@@ -208,26 +215,50 @@ async function sendServiceCancelledEmail(customer, provider, service, booking, r
       .replace("{{refund_amount}}", booking.amount)
       .replace("{{reason_section}}", reasonSection);
 
-    console.log("📧 Email Ready — Sending…");
-
     await sendEmail({
       to: customer.email,
       subject: "Service Cancelled",
-      html,
+      html: customerHtml,
     });
 
-    console.log("📧 Email Sent Successfully to Customer:", customer.email);
+    console.log("✅ Email sent to CUSTOMER:", customer.email);
+
+    // ===============================
+    // 📧 PROVIDER EMAIL
+    // ===============================
+    console.log("📧 Preparing PROVIDER email…");
+
+    let providerHtml = htmlTemplate
+      .replace("{{name}}", provider.name)
+      .replace("{{service_name}}", service.title)
+      .replace("{{provider_name}}", provider.name)
+      .replace("{{date}}", new Date().toLocaleString("en-IN"))
+      .replace("{{refund_amount}}", booking.amount)
+      .replace(
+        "{{reason_section}}",
+        `<p style="margin:6px 0;font-size:15px">
+          <strong>Cancelled By:</strong> Customer
+        </p>${reasonSection}`,
+      );
+
+    await sendEmail({
+      to: provider.email,
+      subject: "Service Cancelled by Customer",
+      html: providerHtml,
+    });
+
+    console.log("✅ Email sent to PROVIDER:", provider.email);
   } catch (err) {
     console.error("❌ Cancel Email Error:", err.message);
   }
 }
 
 const Admin = require("../model/Admin");
- // adjust path if needed
+// adjust path if needed
 async function sendServiceDeleteApprovedEmail(
   receiver,
   service,
-  type = "customer" // customer | provider
+  type = "customer", // customer | provider
 ) {
   console.log("📧 ===============================");
   console.log("📧 sendServiceDeleteApprovedEmail CALLED");
@@ -242,7 +273,7 @@ async function sendServiceDeleteApprovedEmail(
       !receiver.email.trim().includes("@")
     ) {
       console.log(
-        `⚠️ [EMAIL SKIPPED] Invalid or missing email → ${receiver?.email}`
+        `⚠️ [EMAIL SKIPPED] Invalid or missing email → ${receiver?.email}`,
       );
       console.log("📧 ===============================");
       return;
@@ -264,7 +295,7 @@ async function sendServiceDeleteApprovedEmail(
     console.log("📧 Loading email template...");
     const templatePath = path.join(
       __dirname,
-      "../templates/service_cancel_admin.html"
+      "../templates/service_cancel_admin.html",
     );
 
     let html = fs.readFileSync(templatePath, "utf8");
@@ -335,7 +366,7 @@ async function sendServiceDeleteApprovedEmail(
 async function sendServiceForceDeletedEmail(
   receiver,
   service,
-  type = "customer" // customer | provider
+  type = "customer", // customer | provider
 ) {
   console.log("📧 ===============================");
   console.log("📧 sendServiceForceDeletedEmail CALLED");
@@ -359,7 +390,7 @@ async function sendServiceForceDeletedEmail(
     // ================= LOAD TEMPLATE =================
     const templatePath = path.join(
       __dirname,
-      "../templates/service_cancel_admin.html"
+      "../templates/service_cancel_admin.html",
     );
     let html = fs.readFileSync(templatePath, "utf8");
 
@@ -464,12 +495,11 @@ async function sendServiceForceDeletedEmail(
     // 🔥 IMPORTANT: Email failure should NOT affect API
     console.error(
       `❌ Force delete email failed for ${receiver?.email}:`,
-      err.message
+      err.message,
     );
     console.log("📧 ===============================");
   }
 }
-
 
 module.exports = {
   sendOtpEmail,
@@ -479,5 +509,5 @@ module.exports = {
   sendServiceCompletedEmail,
   sendServiceCancelledEmail,
   sendServiceDeleteApprovedEmail,
-  sendServiceForceDeletedEmail
+  sendServiceForceDeletedEmail,
 };

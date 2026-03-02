@@ -659,8 +659,21 @@ exports.refundBooking = async (req, res) => {
 
     console.log("📌 Booking Status:", booking.status);
 
+    if (booking.status === "completed") {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Service already completed. Cancellation not allowed.",
+      });
+    }
+
+    if (booking.status === "started") {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Service already started. Cancellation not allowed.",
+      });
+    }
+
     if (booking.status !== "booked") {
-      console.log("⚠️ Invalid Status — Cannot Cancel");
       return res.status(400).json({
         isSuccess: false,
         message: "Only booked services can be cancelled.",
@@ -676,8 +689,12 @@ exports.refundBooking = async (req, res) => {
       booking.status = "cancelled";
       booking.cancelledBy = cancelledBy || "customer";
       booking.cancelReason = reason || null;
-      await booking.save();
 
+      // 🔴 ADD THESE LINES (MOST IMPORTANT)
+      booking.cancellationFee = cancellationFee;
+      booking.refundAmount = refundAmount;
+
+      await booking.save();
       // ⭐ PERFORMANCE: Provider cancelled free service → 1 failed
       if (cancelledBy === "provider") {
         console.log("📉 Updating provider performance (free cancel)…");

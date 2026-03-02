@@ -1438,11 +1438,39 @@ exports.getAllBookings = async (req, res) => {
 
     bookings.forEach((booking) => {
       // 🛑 SAFETY CHECK (VERY IMPORTANT)
+      // 🟡 HANDLE DELETED REFERENCES SAFELY
       if (!booking.service || !booking.customer || !booking.provider) {
-        console.log(
-          "⚠️ Skipping booking due to missing reference:",
-          booking._id,
-        );
+        const serviceId = "deleted";
+
+        if (!groupedByService[serviceId]) {
+          groupedByService[serviceId] = {
+            service: {
+              _id: "deleted",
+              title: "Deleted Service",
+              price: 0,
+              isFree: false,
+            },
+            provider: {
+              _id: "deleted",
+              name: "Deleted Provider",
+              email: "",
+            },
+            users: [],
+          };
+        }
+
+        groupedByService[serviceId].users.push({
+          bookingId: booking._id,
+          status: booking.status,
+          cancelledBy: booking.cancelledBy,
+          cancelReason: booking.cancelReason,
+          refundAmount: booking.refundAmount || 0,
+          cancellationFee: booking.cancellationFee || 0,
+          amount: booking.amount,
+          note: "Related user or service was deleted",
+          createdAt: booking.createdAt,
+        });
+
         return;
       }
 

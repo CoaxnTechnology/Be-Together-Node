@@ -596,6 +596,11 @@ exports.getUserBookings = async (req, res) => {
         contactPhone: b.contactPhone,
         location_name: b.location_name,
         location: b.location,
+        // 🔴 ADD THESE
+        cancelledBy: b.cancelledBy,
+        cancelReason: b.cancelReason,
+        refundAmount: b.refundAmount,
+        cancellationFee: b.cancellationFee,
 
         status: b.status,
         amount: b.amount,
@@ -613,7 +618,11 @@ exports.getUserBookings = async (req, res) => {
         contactPhone: b.contactPhone,
         location_name: b.location_name,
         location: b.location,
-
+        // 🔴 ADD THESE
+        cancelledBy: b.cancelledBy,
+        cancelReason: b.cancelReason,
+        refundAmount: b.refundAmount,
+        cancellationFee: b.cancellationFee,
         status: b.status,
         amount: b.amount,
         createdAt: b.createdAt,
@@ -690,9 +699,9 @@ exports.refundBooking = async (req, res) => {
       booking.cancelledBy = cancelledBy || "customer";
       booking.cancelReason = reason || null;
 
-      // 🔴 ADD THESE LINES (MOST IMPORTANT)
-      booking.cancellationFee = cancellationFee;
-      booking.refundAmount = refundAmount;
+      // ✅ Free service = no money
+      booking.cancellationFee = 0;
+      booking.refundAmount = 0;
 
       await booking.save();
       // ⭐ PERFORMANCE: Provider cancelled free service → 1 failed
@@ -820,19 +829,25 @@ exports.refundBooking = async (req, res) => {
     // ---------------------------------------------------------
     console.log("💾 Updating Booking & Payment…");
 
+    // ✅ UPDATE BOOKING (PAID SERVICE)
+    booking.status = "cancelled";
     booking.cancelledBy = cancelledBy || "customer";
     booking.cancelReason = reason || null;
-    booking.status = "cancelled";
-    await booking.save();
 
+    // 🔥 REAL VALUES SAVE KARO
+    booking.cancellationFee = cancellationFee;
+    booking.refundAmount = refundAmount;
+
+    await booking.save();
     console.log("✔ Booking Updated");
 
+    // ✅ UPDATE PAYMENT
     payment.status = "refunded";
     payment.refundedAmount = refundAmount;
     payment.cancellationFee = cancellationFee;
     payment.refundAt = new Date();
-    await payment.save();
 
+    await payment.save();
     console.log("✔ Payment Updated");
 
     // ---------------------------------------------------------

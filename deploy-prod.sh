@@ -11,7 +11,7 @@ echo "🧹 Resetting to origin/main (safe mode)"
 git reset --hard origin/main
 
 # ❗ IMPORTANT: uploads & .env ko delete hone se bachao
-git clean -fd -e uploads/ -e .env
+git clean -fd -e uploads/ -e .env -e firebase/
 
 echo "📦 Installing production dependencies..."
 npm install --production
@@ -23,3 +23,4 @@ echo "💾 Saving PM2 state..."
 pm2 save
 
 echo "✅ BACKEND PROD DEPLOY COMPLETED: $(date)"
+

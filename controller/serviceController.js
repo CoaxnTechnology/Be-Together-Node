@@ -69,7 +69,23 @@ exports.createService = async (req, res) => {
       return res
         .status(403)
         .json({ isSuccess: false, message: "User is not active" });
+    // ===============================
+    // ⭐ ENSURE STRIPE CUSTOMER EXISTS
+    // ===============================
+    if (!user.stripeCustomerId) {
+      console.log("🆕 Creating Stripe customer for user...");
 
+      const customer = await stripe.customers.create({
+        email: user.email,
+        name: user.name,
+        phone: user.mobile,
+      });
+
+      user.stripeCustomerId = customer.id;
+      await user.save();
+
+      console.log("✅ Stripe customer created:", customer.id);
+    }
     // --- Debug Stripe info ---
     console.log("User Stripe Customer ID:", user.stripeCustomerId);
     if (user.stripeCustomerId) {
@@ -90,6 +106,25 @@ exports.createService = async (req, res) => {
     const language = body.language || body.Language || "English";
     const isFree = body.isFree === true || body.isFree === "true";
     const price = isFree ? 0 : Number(body.price || 0);
+    // ===============================
+    // 💰 PRICE VALIDATION (STRIPE SAFE)
+    // ===============================
+    if (!isFree) {
+      if (isNaN(price) || price <= 0) {
+        return res.status(400).json({
+          isSuccess: false,
+          message: "Price must be a valid number greater than 0",
+        });
+      }
+
+      const decimalPart = price.toString().split(".")[1];
+      if (decimalPart && decimalPart.length > 2) {
+        return res.status(400).json({
+          isSuccess: false,
+          message: "Price can have maximum 2 decimal places only",
+        });
+      }
+    }
     const location = tryParse(body.location);
     // const city = body.city;
     const isDoorstepService =
@@ -278,7 +313,7 @@ exports.createService = async (req, res) => {
     });
   }
 };
-
+//new code add
 function looksLikeObjectId(id) {
   return mongoose.Types.ObjectId.isValid(id);
 }
@@ -943,7 +978,6 @@ exports.getInterestedUsers = async (req, res) => {
     // -----------------------------------------------------
     // ✅ GLOBAL SEARCH (NAME / EMAIL / PHONE / CITY / TAGS)
     // -----------------------------------------------------
-    
 
     if (excludeSelf && userId) {
       query._id = { $ne: userId };

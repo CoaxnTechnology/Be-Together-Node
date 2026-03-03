@@ -80,6 +80,11 @@ exports.createPromotionSubscriptionCheckout = async (req, res) => {
       success_url:
         "https://yourapp.com/success?session_id={CHECKOUT_SESSION_ID}",
       cancel_url: "https://yourapp.com/cancel",
+      // 🔴 THIS IS THE KEY PART
+      // metadata: {
+      //   serviceId: service._id.toString(),
+      //   userId: user._id.toString(), // buyer
+      // },
     });
 
     res.json({ isSuccess: true, redirectUrl: session.url });
@@ -157,7 +162,13 @@ exports.stripeWebhook = async (req, res) => {
       service.promotionAutoRenew = true;
 
       await service.save();
+      console.log("✅ Promotion Activated (First Time)");
 
+      // 🔔 SEND NOTIFICATION TO SERVICE OWNER
+      // await notifyServiceOwnerOnSubscription({
+      //   buyerId: data.metadata?.userId, // IMPORTANT
+      //   serviceId: service._id,
+      // });
       console.log("✅ Promotion Activated (First Time)");
     }
 

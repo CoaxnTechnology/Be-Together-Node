@@ -7,7 +7,6 @@ const Service = require("../model/Service");
 const { getFullImageUrl } = require("../utils/image");
 const Review = require("../model/review");
 const moment = require("moment");
-require("dotenv").config();
 const Admin = require("../model/Admin");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");

@@ -152,11 +152,28 @@ exports.bookService = async (req, res) => {
       return res
         .status(400)
         .json({ message: "Provider stripe account missing" });
+    // ===============================
+    // 💰 COMMISSION CALCULATION (SAFE)
+    // ===============================
     const commissionSetting = await CommissionSetting.findOne();
     const commissionPercent = commissionSetting?.percentage || 20;
-    const commission = Math.round((amount * commissionPercent) / 100);
-    const providerAmount = amount - commission;
 
+    // 🔹 Convert amount to cents
+    const amountInCents = Math.round(amount * 100);
+
+    // 🔹 Calculate commission in cents
+    const commissionInCents = Math.round(
+      (amountInCents * commissionPercent) / 100,
+    );
+
+    // 🔹 Final values
+    const commission = commissionInCents / 100;
+    const providerAmount = (amountInCents - commissionInCents) / 100;
+
+    console.log("💰 Amount:", amount);
+    console.log("💰 Commission %:", commissionPercent);
+    console.log("💰 Commission:", commission);
+    console.log("💰 Provider Amount:", providerAmount);
     // Stripe customer
     let customerStripeId = customer.stripeCustomerId;
     if (!customerStripeId) {
@@ -880,12 +897,22 @@ exports.refundBooking = async (req, res) => {
         reason,
       );
 
+<<<<<<< HEAD
       console.log("✅ [EMAIL] Email function executed");
       console.log("📧 Email Response:", emailResponse);
     } catch (emailErr) {
       console.error("❌ [EMAIL ERROR] Failed to send cancel email");
       console.error(emailErr);
     }
+=======
+    sendServiceCancelledEmail(
+      booking.customer,
+      booking.provider,
+      booking.service,
+      booking,
+      reason,
+    );
+>>>>>>> 2bdf93f8041f7e0cacfe6bc8bedcd5d4514c6ec8
 
     // ---------------------------------------------------------
     // 9️⃣ SEND NOTIFICATIONS

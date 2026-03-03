@@ -827,6 +827,44 @@ async function notifyOnServicePromoted(service) {
     console.error("❌ Error in notifyOnServicePromoted:", err.message);
   }
 }
+// async function notifyServiceOwnerOnSubscription({ buyerId, serviceId }) {
+//   try {
+//     const buyer = await User.findById(buyerId);
+//     const service = await Service.findById(serviceId).populate("owner");
+
+//     if (!buyer || !service || !service.owner) return;
+
+//     const owner = service.owner;
+
+//     // ❌ No FCM token → skip
+//     if (!owner.fcmToken?.length) return;
+
+//     const payload = {
+//       tokens: owner.fcmToken,
+//       notification: {
+//         title: "🎉 New Subscription",
+//         body: `${buyer.name} subscribed to your service "${service.title}".`,
+//         image: buyer.profile_image || service.image || "",
+//       },
+//       data: {
+//         type: "ServiceSubscription",
+//         pageType: "ServiceDetail",
+//         serviceId: service._id.toString(),
+//         buyerId: buyer._id.toString(),
+//       },
+//     };
+
+//     const response = await admin.messaging().sendEachForMulticast(payload);
+
+//     console.log(
+//       `📩 Subscription notification sent to service owner (${owner.name}):`,
+//       response.successCount,
+//       "success",
+//     );
+//   } catch (err) {
+//     console.error("❌ notifyServiceOwnerOnSubscription error:", err.message);
+//   }
+// }
 // Exports
 exports.notifyOnNewService = (service) => notifyUsersForService(service, "new");
 exports.notifyOnUpdate = (service) => notifyUsersForService(service, "update");
@@ -842,4 +880,5 @@ module.exports.notifyOnServiceDeleteApproved = notifyOnServiceDeleteApproved;
 module.exports.sendServiceForceDeletedNotification =
   sendServiceForceDeletedNotification;
 module.exports.notifyOnServicePromoted = notifyOnServicePromoted;
+//module.exports.notifyServiceOwnerOnSubscription = notifyServiceOwnerOnSubscription;
 //notificaton addd

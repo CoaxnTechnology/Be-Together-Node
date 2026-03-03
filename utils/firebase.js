@@ -1,27 +1,26 @@
-// firebaseAdmin.js
 const admin = require("firebase-admin");
+const fs = require("fs");
 
 if (!admin.apps.length) {
-  if (!process.env.FIREBASE_SERVICE_ACCOUNT) {
-    throw new Error(
-      "FIREBASE_SERVICE_ACCOUNT environment variable is not set!"
-    );
+  try {
+    const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH;
+
+    if (!serviceAccountPath) {
+      console.log("⚠️ FIREBASE_SERVICE_ACCOUNT_PATH not set, Firebase disabled");
+    } else {
+      const serviceAccount = JSON.parse(
+        fs.readFileSync(serviceAccountPath, "utf8")
+      );
+
+      admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount),
+      });
+
+      console.log("✅ Firebase initialized successfully");
+    }
+  } catch (err) {
+    console.error("❌ Firebase init failed:", err.message);
   }
-
-  // Parse the service account JSON from environment variable
-  const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-
-  // Fix newlines in private_key (Vercel often strips real newlines)
-  if (serviceAccount.private_key) {
-    serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, "\n");
-  }
-
-  // Initialize Firebase Admin SDK
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount),
-  });
-
-  console.log("✅ Firebase Admin initialized successfully");
 }
 
 module.exports = admin;

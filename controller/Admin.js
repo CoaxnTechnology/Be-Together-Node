@@ -2133,3 +2133,40 @@ exports.searchServices = async (req, res) => {
     });
   }
 };
+exports.searchUsers = async (req, res) => {
+  try {
+    console.log("🔍 User Search API Hit");
+
+    const { keyword } = req.query;
+    console.log("👉 Keyword:", keyword);
+
+    if (!keyword) {
+      return res.status(400).json({
+        success: false,
+        message: "Keyword is required",
+      });
+    }
+
+    const users = await User.find({
+      $or: [
+        { name: { $regex: keyword, $options: "i" } },
+        { email: { $regex: keyword, $options: "i" } },
+        { city: { $regex: keyword, $options: "i" } },
+        { age: isNaN(keyword) ? null : Number(keyword) }, // age exact match
+      ].filter(Boolean), // remove null condition
+    });
+
+    console.log("✅ Users found:", users.length);
+
+    res.json({
+      success: true,
+      data: users,
+    });
+  } catch (error) {
+    console.error("🔥 User search error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Search failed",
+    });
+  }
+};

@@ -34,6 +34,7 @@ const {
   adminPromoteService,
   adminCancelPromotion,
   searchServices,
+  searchUsers,
 } = require("../controller/Admin");
 const adminAuth = require("../Middleware/adminAuth");
 const path = require("path");
@@ -195,5 +196,5 @@ router.get("/payment", getAllPayments);
 router.get("/pending-delete-count", adminAuth, getPendingDeleteCount);
 // search services by name or description
 router.get("/admin/search-services", searchServices);
-
+router.get("/admin/search-users", searchUsers);
 module.exports = router;

@@ -2147,13 +2147,20 @@ exports.searchUsers = async (req, res) => {
       });
     }
 
+    const conditions = [
+      { name: keyword },
+      { email: keyword },
+      { city: keyword },
+      { mobile: keyword },
+    ];
+
+    // If keyword is a number → also check age
+    if (!isNaN(keyword)) {
+      conditions.push({ age: Number(keyword) });
+    }
+
     const users = await User.find({
-      $or: [
-        { name: { $regex: keyword, $options: "i" } },
-        { email: { $regex: keyword, $options: "i" } },
-        { city: { $regex: keyword, $options: "i" } },
-        { age: isNaN(keyword) ? null : Number(keyword) }, // age exact match
-      ].filter(Boolean), // remove null condition
+      $or: conditions,
     });
 
     console.log("✅ Users found:", users.length);

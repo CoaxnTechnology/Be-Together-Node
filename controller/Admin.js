@@ -1437,11 +1437,39 @@ exports.getAllBookings = async (req, res) => {
 
     bookings.forEach((booking) => {
       // 🛑 SAFETY CHECK (VERY IMPORTANT)
+      // 🟡 HANDLE DELETED REFERENCES SAFELY
       if (!booking.service || !booking.customer || !booking.provider) {
-        console.log(
-          "⚠️ Skipping booking due to missing reference:",
-          booking._id,
-        );
+        const serviceId = "deleted";
+
+        if (!groupedByService[serviceId]) {
+          groupedByService[serviceId] = {
+            service: {
+              _id: "deleted",
+              title: "Deleted Service",
+              price: 0,
+              isFree: false,
+            },
+            provider: {
+              _id: "deleted",
+              name: "Deleted Provider",
+              email: "",
+            },
+            users: [],
+          };
+        }
+
+        groupedByService[serviceId].users.push({
+          bookingId: booking._id,
+          status: booking.status,
+          cancelledBy: booking.cancelledBy,
+          cancelReason: booking.cancelReason,
+          refundAmount: booking.refundAmount || 0,
+          cancellationFee: booking.cancellationFee || 0,
+          amount: booking.amount,
+          note: "Related user or service was deleted",
+          createdAt: booking.createdAt,
+        });
+
         return;
       }
 
@@ -2020,6 +2048,140 @@ exports.adminCancelPromotion = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to cancel promotion",
+    });
+  }
+};
+// search service by admin
+exports.searchServices = async (req, res) => {
+  try {
+    console.log("🔍 Search API hit");
+
+    const { keyword } = req.query;
+    console.log("👉 Received keyword:", keyword);
+
+    if (!keyword) {
+      console.log("❌ No keyword provided");
+      return res.status(400).json({
+        success: false,
+        message: "Keyword is required",
+      });
+    }
+
+    console.log("🚀 Starting aggregation pipeline...");
+
+    const services = await Service.aggregate([
+      {
+        $lookup: {
+          from: "categories",
+          localField: "category",
+          foreignField: "_id",
+          as: "category",
+        },
+      },
+      {
+        $unwind: {
+          path: "$category",
+          preserveNullAndEmptyArrays: true,
+        },
+      },
+      {
+        $lookup: {
+          from: "users",
+          localField: "owner",
+          foreignField: "_id",
+          as: "owner",
+        },
+      },
+      {
+        $unwind: {
+          path: "$owner",
+          preserveNullAndEmptyArrays: true,
+        },
+      },
+      {
+        $match: {
+          $or: [
+            { title: { $regex: keyword, $options: "i" } },
+            { description: { $regex: keyword, $options: "i" } },
+            { tags: { $regex: keyword, $options: "i" } },
+            { location_name: { $regex: keyword, $options: "i" } },
+            { city: { $regex: keyword, $options: "i" } },
+            { "category.name": { $regex: keyword, $options: "i" } },
+            { "owner.name": { $regex: keyword, $options: "i" } },
+          ],
+        },
+      },
+    ]);
+
+    console.log("✅ Aggregation completed");
+    console.log("📦 Total services found:", services.length);
+
+    res.json({
+      success: true,
+      data: services,
+    });
+
+    console.log("📤 Response sent successfully");
+  } catch (err) {
+    console.error("🔥 Search error occurred:");
+    console.error(err);
+
+    res.status(500).json({
+      success: false,
+      message: "Search failed",
+    });
+  }
+};
+exports.searchUsers = async (req, res) => {
+  try {
+    console.log("🔍 User Search API Hit");
+
+    const { keyword } = req.query;
+    console.log("👉 Keyword:", keyword);
+
+    if (!keyword) {
+      return res.status(400).json({
+        success: false,
+        message: "Keyword is required",
+      });
+    }
+
+    const trimmedKeyword = keyword.trim();
+
+    const conditions = [
+      // Name start match (flexible)
+      { name: { $regex: `^${trimmedKeyword}`, $options: "i" } },
+
+      // Email contains
+      { email: { $regex: trimmedKeyword, $options: "i" } },
+
+      // City start match
+      { city: { $regex: `^${trimmedKeyword}`, $options: "i" } },
+
+      // Mobile exact match
+      { mobile: trimmedKeyword },
+    ];
+
+    // If numeric → check age exact
+    if (!isNaN(trimmedKeyword)) {
+      conditions.push({ age: Number(trimmedKeyword) });
+    }
+
+    const users = await User.find({
+      $or: conditions,
+    });
+
+    console.log("✅ Users found:", users.length);
+
+    res.json({
+      success: true,
+      data: users,
+    });
+  } catch (error) {
+    console.error("🔥 User search error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Search failed",
     });
   }
 };

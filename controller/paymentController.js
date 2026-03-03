@@ -26,7 +26,31 @@ const updateProviderPerformance = require("../utils/providerPerformance");
 // -----------------------------
 exports.bookService = async (req, res) => {
   try {
-    const { userId, providerId, serviceId } = req.body;
+    const {
+      userId,
+      providerId,
+      serviceId,
+      phone, // REQUIRED
+      location_name, // OPTIONAL
+      latitude, // OPTIONAL
+      longitude,
+    } = req.body;
+    // =========================
+    // BASIC VALIDATION
+    // =========================
+    if (!userId || !providerId || !serviceId) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Missing required data",
+      });
+    }
+
+    if (!phone) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Phone number is required",
+      });
+    }
     // Data
     const customer = await User.findById(userId);
     const provider = await User.findById(providerId);
@@ -37,6 +61,24 @@ exports.bookService = async (req, res) => {
 
     if (!customer || !provider || !serviceDetails)
       return res.status(404).json({ message: "Data not found" });
+    // =========================
+    // SAVE PHONE IN USER PROFILE (ONLY IF EMPTY)
+    // =========================
+    if (!customer.mobile) {
+      customer.mobile = phone;
+      await customer.save();
+    }
+
+    // =========================
+    // PREPARE BOOKING LOCATION (OPTIONAL)
+    // =========================
+    let bookingLocation = null;
+    if (latitude && longitude) {
+      bookingLocation = {
+        type: "Point",
+        coordinates: [Number(longitude), Number(latitude)],
+      };
+    }
 
     const amount = serviceDetails.isFree ? 0 : serviceDetails.price;
     // Commission
@@ -65,6 +107,10 @@ exports.bookService = async (req, res) => {
         service: serviceId,
         amount: 0,
         status: "booked", // directly booked
+        // ⭐ NEW FIELDS
+        contactPhone: phone,
+        location_name: location_name || null,
+        location: bookingLocation,
       });
       // ⭐ Send Email
       console.log("📧 Calling sendServiceBookedEmail…");
@@ -182,6 +228,10 @@ exports.bookService = async (req, res) => {
       providerAmount,
       paymentIntentId: session.payment_intent,
       status: "pending",
+      // ⭐ SAVE BOOKING DATA TEMPORARILY
+      contactPhone: phone,
+      location_name: location_name || null,
+      location: bookingLocation,
     });
 
     res.json({
@@ -283,6 +333,10 @@ exports.updateBookingStatus = async (req, res) => {
       currency: payment.currency,
       paymentId: payment._id,
       status: "booked",
+      // ⭐ COPY FROM PAYMENT
+      contactPhone: payment.contactPhone,
+      location_name: payment.location_name,
+      location: payment.location,
     });
 
     console.log("✅ Booking Created:", booking._id);
@@ -555,6 +609,16 @@ exports.getUserBookings = async (req, res) => {
         role: "customer",
         service: b.service,
         otherUser: b.provider,
+        // ✅ ADD THESE
+        contactPhone: b.contactPhone,
+        location_name: b.location_name,
+        location: b.location,
+        // 🔴 ADD THESE
+        cancelledBy: b.cancelledBy,
+        cancelReason: b.cancelReason,
+        refundAmount: b.refundAmount,
+        cancellationFee: b.cancellationFee,
+
         status: b.status,
         amount: b.amount,
         createdAt: b.createdAt,
@@ -567,6 +631,15 @@ exports.getUserBookings = async (req, res) => {
         role: "provider",
         service: b.service,
         otherUser: b.customer,
+        // ✅ ADD THESE
+        contactPhone: b.contactPhone,
+        location_name: b.location_name,
+        location: b.location,
+        // 🔴 ADD THESE
+        cancelledBy: b.cancelledBy,
+        cancelReason: b.cancelReason,
+        refundAmount: b.refundAmount,
+        cancellationFee: b.cancellationFee,
         status: b.status,
         amount: b.amount,
         createdAt: b.createdAt,
@@ -612,8 +685,21 @@ exports.refundBooking = async (req, res) => {
 
     console.log("📌 Booking Status:", booking.status);
 
+    if (booking.status === "completed") {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Service already completed. Cancellation not allowed.",
+      });
+    }
+
+    if (booking.status === "started") {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Service already started. Cancellation not allowed.",
+      });
+    }
+
     if (booking.status !== "booked") {
-      console.log("⚠️ Invalid Status — Cannot Cancel");
       return res.status(400).json({
         isSuccess: false,
         message: "Only booked services can be cancelled.",
@@ -629,14 +715,54 @@ exports.refundBooking = async (req, res) => {
       booking.status = "cancelled";
       booking.cancelledBy = cancelledBy || "customer";
       booking.cancelReason = reason || null;
-      await booking.save();
 
+      // ✅ Free service = no money
+      booking.cancellationFee = 0;
+      booking.refundAmount = 0;
+
+      await booking.save();
       // ⭐ PERFORMANCE: Provider cancelled free service → 1 failed
       if (cancelledBy === "provider") {
         console.log("📉 Updating provider performance (free cancel)…");
         await updateProviderPerformance(booking.provider._id, 0, 1);
       }
+      console.log("📧 Sending cancel email for FREE service...");
+      console.log("📧 Sending Cancel Email…");
+      console.log("📧 Customer Email:", booking.customer?.email);
+      console.log("📧 Provider Email:", booking.provider?.email);
+      console.log("📧 Service Title:", booking.service?.title);
+      console.log("📧 Booking ID:", booking._id);
+      console.log("📧 Cancel Reason:", reason);
+      try {
+        const emailResponse = await sendServiceCancelledEmail(
+          booking.customer,
+          booking.provider,
+          booking.service,
+          booking,
+          reason,
+        );
 
+        console.log("✅ [EMAIL] Email function executed");
+        console.log("📧 Email Response:", emailResponse);
+      } catch (emailErr) {
+        console.error("❌ [EMAIL ERROR] Failed to send cancel email");
+        console.error(emailErr);
+      }
+
+      // 🔔 SEND NOTIFICATION
+      console.log("🔔 Sending cancel notification for FREE service...");
+      try {
+        await sendServiceCancelledNotification(
+          booking.customer,
+          booking.provider,
+          booking.service,
+          booking,
+          reason || "",
+        );
+        console.log("✅ Free service cancel notification sent");
+      } catch (err) {
+        console.error("❌ Free service notification failed", err);
+      }
       return res.json({
         isSuccess: true,
         message: "Free service cancelled successfully",
@@ -720,19 +846,25 @@ exports.refundBooking = async (req, res) => {
     // ---------------------------------------------------------
     console.log("💾 Updating Booking & Payment…");
 
+    // ✅ UPDATE BOOKING (PAID SERVICE)
+    booking.status = "cancelled";
     booking.cancelledBy = cancelledBy || "customer";
     booking.cancelReason = reason || null;
-    booking.status = "cancelled";
-    await booking.save();
 
+    // 🔥 REAL VALUES SAVE KARO
+    booking.cancellationFee = cancellationFee;
+    booking.refundAmount = refundAmount;
+
+    await booking.save();
     console.log("✔ Booking Updated");
 
+    // ✅ UPDATE PAYMENT
     payment.status = "refunded";
     payment.refundedAmount = refundAmount;
     payment.cancellationFee = cancellationFee;
     payment.refundAt = new Date();
-    await payment.save();
 
+    await payment.save();
     console.log("✔ Payment Updated");
 
     // ---------------------------------------------------------
@@ -751,7 +883,28 @@ exports.refundBooking = async (req, res) => {
     // 8️⃣ SEND EMAIL
     // ---------------------------------------------------------
     console.log("📧 Sending Cancel Email…");
+    console.log("📧 Customer Email:", booking.customer?.email);
+    console.log("📧 Provider Email:", booking.provider?.email);
+    console.log("📧 Service Title:", booking.service?.title);
+    console.log("📧 Booking ID:", booking._id);
+    console.log("📧 Cancel Reason:", reason);
+    try {
+      const emailResponse = await sendServiceCancelledEmail(
+        booking.customer,
+        booking.provider,
+        booking.service,
+        booking,
+        reason,
+      );
 
+<<<<<<< HEAD
+      console.log("✅ [EMAIL] Email function executed");
+      console.log("📧 Email Response:", emailResponse);
+    } catch (emailErr) {
+      console.error("❌ [EMAIL ERROR] Failed to send cancel email");
+      console.error(emailErr);
+    }
+=======
     sendServiceCancelledEmail(
       booking.customer,
       booking.provider,
@@ -759,6 +912,7 @@ exports.refundBooking = async (req, res) => {
       booking,
       reason,
     );
+>>>>>>> 2bdf93f8041f7e0cacfe6bc8bedcd5d4514c6ec8
 
     // ---------------------------------------------------------
     // 9️⃣ SEND NOTIFICATIONS

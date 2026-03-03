@@ -78,7 +78,6 @@ app.post(
     res.status(200).send("prod deploy started");
   },
 );
-
 app.post("/webhook/frontend", (req, res) => {
   console.log("🔥 FRONTEND DEPLOY HIT");
   exec("bash /var/www/frontend-uat-admin/deploy.sh > /dev/null 2>&1 &");
@@ -151,7 +150,6 @@ app.use("/api", promotionPlanAdminRoutes);
 app.use("/api/admin", AdminRoutes);
 console.log("Product ID:", process.env.STRIPE_PROMOTION_PRODUCT_ID);
 
-// Start server and ready to code 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
 module.exports = app;

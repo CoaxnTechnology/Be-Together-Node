@@ -16,6 +16,20 @@ const bookingSchema = new mongoose.Schema(
       ref: "Service",
       required: true,
     },
+    // ⭐ NEW FIELDS
+    contactPhone: { type: String, required: true }, // phone required
+    location_name: { type: String, default: null },
+    location: {
+      type: {
+        type: String,
+        enum: ["Point"],
+        default: "Point",
+      },
+      coordinates: {
+        type: [Number], // [longitude, latitude]
+        default: null,
+      },
+    },
     amount: { type: Number, required: true },
     status: {
       type: String,
@@ -37,6 +51,6 @@ const bookingSchema = new mongoose.Schema(
     cancellationFee: Number,
     refundAmount: Number,
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 module.exports = mongoose.model("Booking", bookingSchema);

@@ -11,7 +11,7 @@ const BASE_URL = process.env.BASE_URL;
 exports.editProfile = async (req, res) => {
   try {
     // don't set defaults here; we need to detect if a field was provided
-    let { email, name, bio, city, age } = req.body;
+    let { email, name, bio, city, age,mobile  } = req.body;
 
     // helper: try parse JSON string fields (common with multipart/form-data)
     const tryParse = (val) => {
@@ -70,6 +70,30 @@ exports.editProfile = async (req, res) => {
       }
       user.age = ageNumber;
     }
+    // ---------------- MOBILE NUMBER (NEW) ----------------
+    if (mobile !== undefined) {
+      if (typeof mobile !== "string") {
+        return res.status(400).json({
+          isSuccess: false,
+          message: "Mobile number must be a string",
+        });
+      }
+
+      const normalizedMobile = mobile.trim();
+
+      // E.164 international format validation
+      const mobileRegex = /^\+[1-9]\d{7,14}$/;
+
+      if (!mobileRegex.test(normalizedMobile)) {
+        return res.status(400).json({
+          isSuccess: false,
+          message:
+            "Invalid mobile number. Use international format (e.g. +919876543210)",
+        });
+      }
+
+      user.mobile = normalizedMobile;
+    }
 
     // keep track of old Cloudinary public_id (if any) to delete later
     if (req.file) {
@@ -122,7 +146,7 @@ exports.editProfile = async (req, res) => {
           user.interests = [];
         } else {
           const tagRegexes = inputClean.map(
-            (t) => new RegExp(`^${escapeRegExp(t)}$`, "i")
+            (t) => new RegExp(`^${escapeRegExp(t)}$`, "i"),
           );
 
           const foundCategories = await Category.find({
@@ -190,7 +214,7 @@ exports.editProfile = async (req, res) => {
         } else {
           // Build regexes and query categories for matching tags
           const tagRegexes = inputClean.map(
-            (t) => new RegExp(`^${escapeRegExp(t)}$`, "i")
+            (t) => new RegExp(`^${escapeRegExp(t)}$`, "i"),
           );
 
           const foundCategories = await Category.find({
@@ -243,7 +267,7 @@ exports.editProfile = async (req, res) => {
     console.log("User profile saved successfully");
     // ✅ Refresh user from DB to get latest saved interests
     const updatedUser = await User.findById(user._id).select(
-      "name interests lastLocation fcmToken"
+      "name interests lastLocation fcmToken",
     );
     // Only trigger if interests were updated
     const interestsChanged =
@@ -256,7 +280,7 @@ exports.editProfile = async (req, res) => {
       await notificationController
         .notifyOnUserInterestUpdate(updatedUser)
         .catch((err) =>
-          console.error("Interest notification failed:", err.message)
+          console.error("Interest notification failed:", err.message),
         );
     } else {
       console.log("Interests not changed, skipping notifications");
@@ -270,6 +294,7 @@ exports.editProfile = async (req, res) => {
         uid: user.uid,
         name: user.name,
         email: user.email,
+        mobile: user.mobile || "",
         profile_image: getFullImageUrl(user.profile_image),
         bio: user.bio,
         city: user.city,
@@ -342,6 +367,8 @@ exports.getUserProfileByEmail = async (req, res) => {
         id: user._id,
         name: user.name,
         email: user.email,
+        // ✅ ADD THIS LINE
+        mobile: user.mobile || "",
         profile_image: getFullImageUrl(user.profile_image),
         bio: user.bio || "",
         city: user.city || "",

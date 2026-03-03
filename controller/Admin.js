@@ -2052,3 +2052,84 @@ exports.adminCancelPromotion = async (req, res) => {
     });
   }
 };
+// search service by admin
+exports.searchServices = async (req, res) => {
+  try {
+    console.log("🔍 Search API hit");
+
+    const { keyword } = req.query;
+    console.log("👉 Received keyword:", keyword);
+
+    if (!keyword) {
+      console.log("❌ No keyword provided");
+      return res.status(400).json({
+        success: false,
+        message: "Keyword is required",
+      });
+    }
+
+    console.log("🚀 Starting aggregation pipeline...");
+
+    const services = await Service.aggregate([
+      {
+        $lookup: {
+          from: "categories",
+          localField: "category",
+          foreignField: "_id",
+          as: "category",
+        },
+      },
+      {
+        $unwind: {
+          path: "$category",
+          preserveNullAndEmptyArrays: true,
+        },
+      },
+      {
+        $lookup: {
+          from: "users",
+          localField: "owner",
+          foreignField: "_id",
+          as: "owner",
+        },
+      },
+      {
+        $unwind: {
+          path: "$owner",
+          preserveNullAndEmptyArrays: true,
+        },
+      },
+      {
+        $match: {
+          $or: [
+            { title: { $regex: keyword, $options: "i" } },
+            { description: { $regex: keyword, $options: "i" } },
+            { tags: { $regex: keyword, $options: "i" } },
+            { location_name: { $regex: keyword, $options: "i" } },
+            { city: { $regex: keyword, $options: "i" } },
+            { "category.name": { $regex: keyword, $options: "i" } },
+            { "owner.name": { $regex: keyword, $options: "i" } },
+          ],
+        },
+      },
+    ]);
+
+    console.log("✅ Aggregation completed");
+    console.log("📦 Total services found:", services.length);
+
+    res.json({
+      success: true,
+      data: services,
+    });
+
+    console.log("📤 Response sent successfully");
+  } catch (err) {
+    console.error("🔥 Search error occurred:");
+    console.error(err);
+
+    res.status(500).json({
+      success: false,
+      message: "Search failed",
+    });
+  }
+};

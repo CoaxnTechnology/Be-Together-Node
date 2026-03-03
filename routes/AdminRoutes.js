@@ -33,6 +33,7 @@ const {
   unblockUser,
   adminPromoteService,
   adminCancelPromotion,
+  searchServices,
 } = require("../controller/Admin");
 const adminAuth = require("../Middleware/adminAuth");
 const path = require("path");
@@ -192,6 +193,7 @@ router.get("/payment", getAllPayments);
 
 // admin.routes.js
 router.get("/pending-delete-count", adminAuth, getPendingDeleteCount);
-//
+// search services by name or description
+router.get("/admin/search-services", searchServices);
 
 module.exports = router;

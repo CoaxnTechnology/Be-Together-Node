@@ -2147,16 +2147,25 @@ exports.searchUsers = async (req, res) => {
       });
     }
 
+    const trimmedKeyword = keyword.trim();
+
     const conditions = [
-      { name: keyword },
-      { email: keyword },
-      { city: keyword },
-      { mobile: keyword },
+      // Name start match (flexible)
+      { name: { $regex: `^${trimmedKeyword}`, $options: "i" } },
+
+      // Email contains
+      { email: { $regex: trimmedKeyword, $options: "i" } },
+
+      // City start match
+      { city: { $regex: `^${trimmedKeyword}`, $options: "i" } },
+
+      // Mobile exact match
+      { mobile: trimmedKeyword },
     ];
 
-    // If keyword is a number → also check age
-    if (!isNaN(keyword)) {
-      conditions.push({ age: Number(keyword) });
+    // If numeric → check age exact
+    if (!isNaN(trimmedKeyword)) {
+      conditions.push({ age: Number(trimmedKeyword) });
     }
 
     const users = await User.find({

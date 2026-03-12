@@ -502,19 +502,33 @@ exports.getAllUsers = async (req, res) => {
 //--------------------ALL SERVICES----------
 exports.getAllService = async (req, res) => {
   try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+
+    const skip = (page - 1) * limit;
+
     const services = await Service.find()
       .populate("category", "name")
-      .populate("owner", "name");
-    //console.log(services);
-    // services.forEach(s => {
-    //   console.log(s.title, s.owner); // dekho kaunse null aa rahe
-    // });
-    res.json({ success: true, data: services });
+      .populate("owner", "name")
+      .skip(skip)
+      .limit(limit);
+
+    const total = await Service.countDocuments();
+
+    res.json({
+      success: true,
+      data: services,
+      total,
+      page,
+      totalPages: Math.ceil(total / limit),
+    });
   } catch (err) {
     console.error("Error fetching services:", err);
-    res
-      .status(500)
-      .json({ success: false, message: "Server error", error: err.message });
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: err.message,
+    });
   }
 };
 //--------------------Service By ID----------

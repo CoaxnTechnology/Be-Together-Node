@@ -411,7 +411,7 @@ exports.startService = async (req, res) => {
       otp,
     });
 
-    return res.json({ isSuccess: true, message: "OTP generated & sent", otp }); // otp for testing
+    return res.json({ isSuccess: true, message: "OTP generated & sent to customer email"}); // otp for testing
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

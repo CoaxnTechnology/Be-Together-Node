@@ -11,7 +11,7 @@ git fetch origin
 
 echo "🧹 Resetting to origin/testing"
 git reset --hard origin/testing
-git clean -fd -e uploads/ -e .env
+git clean -fd -e uploads/ -e .env -e firebase/
 
 
 echo "📦 Installing dependencies"

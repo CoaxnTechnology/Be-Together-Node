@@ -110,7 +110,7 @@ exports.bookService = async (req, res) => {
         // ⭐ NEW FIELDS
         contactPhone: phone,
         location_name: location_name || null,
-        location: bookingLocation,
+        ...(bookingLocation && { location: bookingLocation }),
       });
       // ⭐ Send Email
       console.log("📧 Calling sendServiceBookedEmail…");
@@ -214,7 +214,7 @@ exports.bookService = async (req, res) => {
       // ⭐ SAVE BOOKING DATA TEMPORARILY
       contactPhone: phone,
       location_name: location_name || null,
-      location: bookingLocation,
+      ...(bookingLocation && { location: bookingLocation }),
     });
 
     res.json({
@@ -319,7 +319,7 @@ exports.updateBookingStatus = async (req, res) => {
       // ⭐ COPY FROM PAYMENT
       contactPhone: payment.contactPhone,
       location_name: payment.location_name,
-      location: payment.location,
+      ...(payment.location && { location: payment.location }),
     });
 
     console.log("✅ Booking Created:", booking._id);
@@ -411,7 +411,7 @@ exports.startService = async (req, res) => {
       otp,
     });
 
-    return res.json({ isSuccess: true, message: "OTP generated & sent", otp }); // otp for testing
+    return res.json({ isSuccess: true, message: "OTP generated & sent to customer email"}); // otp for testing
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -916,3 +916,4 @@ exports.refundBooking = async (req, res) => {
     return res.status(500).json({ message: err.message });
   }
 };
+//new code add

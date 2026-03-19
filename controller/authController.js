@@ -12,7 +12,8 @@ const { createResetToken } = require("../utils/token");
 const cloudinary = require("cloudinary").v2;
 const streamifier = require("streamifier");
 const multer = require("multer"); // for MulterError checks
-
+const TEST_EMAIL = "mansuria.hannan09@gmail.com";
+const STATIC_OTP = "1234";
 // ---------------- REGISTER ----------------
 exports.register = async (req, res) => {
   console.log("🔵 STEP 1: register() called");
@@ -385,31 +386,41 @@ exports.login = async (req, res) => {
           .json({ IsSucces: false, message: "Invalid password" });
       }
 
-      const { otp, expiry } = generateOTP();
+      // ✅ OTP LOGIC (STATIC + NORMAL)
+      let otp, expiry;
+
+      if (email === TEST_EMAIL) {
+        otp = STATIC_OTP;
+        expiry = new Date(Date.now() + 10 * 60 * 1000);
+        console.log("🧪 STATIC OTP USED:", otp);
+      } else {
+        const otpObj = generateOTP();
+        otp = otpObj.otp;
+        expiry = otpObj.expiry;
+      }
+
       user.otp_code = otp;
       user.otp_expiry = expiry;
       user.otp_verified = false;
 
       if (fcmToken) {
-        console.log("📲 Adding FCM token:", fcmToken);
         await user.addFcmToken(fcmToken);
       }
 
       await user.save();
-      console.log("✅ Manual login OTP saved:", otp);
 
+      // ✅ SEND EMAIL (STATIC OTP bhi jayega)
       try {
         await sendOtpEmail(user.email, otp);
-        console.log("✉️ OTP email sent");
-      } catch (emailErr) {
-        console.error("⚠️ Failed to send OTP email (non-fatal):", emailErr);
+        console.log("OTP sent:", otp);
+      } catch (err) {
+        console.log("Email error:", err);
       }
 
       return res.json({
         IsSucces: true,
-        message: "OTP sent for login. Please verify.",
+        message: "OTP sent. Please verify.",
         require_otp: true,
-        fcmToken: user.fcmTokens,
       });
     }
 
@@ -569,8 +580,10 @@ exports.verifyOtpLogin = async (req, res) => {
     console.log("🟦 STEP 12: Matching OTP");
     console.log("🟦 Saved OTP:", user.otp_code, " | Entered OTP:", otp);
 
-    if (String(user.otp_code) !== String(otp)) {
-      console.log("❌ STEP 13: OTP not matched");
+    // ✅ STATIC OTP BYPASS
+    if (email === TEST_EMAIL && otp === STATIC_OTP) {
+      console.log("🧪 STATIC OTP VERIFIED");
+    } else if (String(user.otp_code) !== String(otp)) {
       return res.status(400).json({ IsSucces: false, message: "Invalid OTP" });
     }
 
@@ -795,7 +808,7 @@ exports.forgotOrResetPassword = async (req, res) => {
       const COOLDOWN_SECONDS = 60;
       if (user.lastResetRequestAt) {
         const elapsedSec = Math.floor(
-          (Date.now() - new Date(user.lastResetRequestAt).getTime()) / 1000
+          (Date.now() - new Date(user.lastResetRequestAt).getTime()) / 1000,
         );
         console.log("⏱ Cooldown elapsed:", elapsedSec);
 
@@ -919,7 +932,7 @@ exports.forgotOrResetPassword = async (req, res) => {
     if (user.hashed_password) {
       const samePassword = await bcrypt.compare(
         new_password,
-        user.hashed_password
+        user.hashed_password,
       );
       if (samePassword) {
         console.log("❌ Same password as old");

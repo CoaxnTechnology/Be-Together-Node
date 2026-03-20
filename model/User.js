@@ -6,7 +6,7 @@ const PointSchema = new mongoose.Schema(
     // GeoJSON order: [longitude, latitude]
     coordinates: { type: [Number], default: [0, 0] },
   },
-  { _id: false }
+  { _id: false },
 );
 
 const userSchema = new mongoose.Schema(
@@ -24,12 +24,12 @@ const userSchema = new mongoose.Schema(
 
     register_type: {
       type: String,
-      enum: ["manual", "google_auth"],
+      enum: ["manual", "google_auth", "apple_auth"],
       default: "manual",
     },
     login_type: {
       type: String,
-      enum: ["manual", "google_auth"],
+      enum: ["manual", "google_auth", "apple_auth"],
       default: "manual",
     },
     status: {
@@ -61,7 +61,11 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
-
+    provider_uid: {
+      type: String,
+      default: null,
+      index: true,
+    },
     services: [{ type: mongoose.Schema.Types.ObjectId, ref: "Service" }],
     lastResendAt: { type: Date, default: null },
     lastLocation: {
@@ -96,7 +100,7 @@ const userSchema = new mongoose.Schema(
         return ret;
       },
     },
-  }
+  },
 );
 
 // Update updated_at automatically

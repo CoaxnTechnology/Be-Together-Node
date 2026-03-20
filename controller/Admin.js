@@ -502,32 +502,76 @@ exports.getAllUsers = async (req, res) => {
 //--------------------ALL SERVICES----------
 exports.getAllService = async (req, res) => {
   try {
+    console.log("🚀 getAllService API called");
+
     const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
+    const limit = parseInt(req.query.limit) || 10;
+    const keyword = req.query.keyword || "";
+
+    console.log("📥 Query Params:", req.query);
+    console.log("📄 Page:", page);
+    console.log("📦 Limit:", limit);
+    console.log("🔎 Keyword:", keyword);
 
     const skip = (page - 1) * limit;
+    console.log("⏭ Skip value:", skip);
 
-    const services = await Service.find()
+    let searchFilter = {};
+    console.log("🟡 Initial searchFilter:", searchFilter);
+
+    if (keyword) {
+      console.log("🔍 Building search filter for keyword...");
+
+      searchFilter = {
+        $or: [
+          { title: { $regex: keyword, $options: "i" } },
+          { description: { $regex: keyword, $options: "i" } },
+          { city: { $regex: keyword, $options: "i" } },
+          { location_name: { $regex: keyword, $options: "i" } },
+          { tags: { $elemMatch: { $regex: keyword, $options: "i" } } },
+        ],
+      };
+
+      console.log("✅ Search filter created:", JSON.stringify(searchFilter));
+    }
+
+    console.log("📡 Starting database query...");
+
+    const services = await Service.find(searchFilter)
       .populate("category", "name")
       .populate("owner", "name")
       .skip(skip)
-      .limit(limit);
+      .limit(limit)
+      .lean();
 
-    const total = await Service.countDocuments();
+    console.log("📦 Services fetched from DB:", services.length);
+
+    const total = await Service.countDocuments(searchFilter);
+
+    console.log("📊 Total matching services:", total);
+
+    const totalPages = Math.ceil(total / limit);
+
+    console.log("📑 Total pages:", totalPages);
+
+    console.log("📤 Sending response...");
 
     res.json({
       success: true,
       data: services,
       total,
       page,
-      totalPages: Math.ceil(total / limit),
+      totalPages,
     });
+
+    console.log("✅ Response sent successfully");
   } catch (err) {
-    console.error("Error fetching services:", err);
+    console.error("🔥 Error in getAllService API:");
+    console.error(err);
+
     res.status(500).json({
       success: false,
       message: "Server error",
-      error: err.message,
     });
   }
 };

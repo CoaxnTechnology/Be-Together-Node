@@ -12,7 +12,21 @@ const { createResetToken } = require("../utils/token");
 const cloudinary = require("cloudinary").v2;
 const streamifier = require("streamifier");
 const multer = require("multer"); // for MulterError checks
-
+const TEST_EMAIL = "mansuria.hannan09@gmail.com";
+const STATIC_OTP = "1234";
+const appleSigninAuth = require("apple-signin-auth");
+const verifyAppleToken = async (identityToken) => {
+  try {
+    const appleData = await appleSigninAuth.verifyIdToken(identityToken, {
+      audience: process.env.APPLE_CLIENT_ID, // ✅ bundle id
+      ignoreExpiration: false,
+    });
+    return appleData;
+  } catch (err) {
+    console.log("❌ Apple token verify failed:", err);
+    return null;
+  }
+};
 // ---------------- REGISTER ----------------
 exports.register = async (req, res) => {
   console.log("🔵 STEP 1: register() called");
@@ -30,6 +44,7 @@ exports.register = async (req, res) => {
       provider_id,
       provider_uid,
       fcmToken,
+      identityToken,
     } = req.body;
 
     console.log("🔵 STEP 4: Extracted fields:", {
@@ -44,15 +59,39 @@ exports.register = async (req, res) => {
     });
 
     if (email) email = String(email).toLowerCase();
+    // 🍎 APPLE TOKEN VERIFY (NO LOGIC CHANGE)
+    if (register_type === "apple_auth") {
+      if (!identityToken) {
+        return res.status(400).json({
+          IsSucces: false,
+          message: "Apple identityToken required",
+        });
+      }
 
-    if (!["manual", "google_auth"].includes(register_type)) {
+      const appleData = await verifyAppleToken(identityToken);
+
+      if (!appleData) {
+        return res.status(401).json({
+          IsSucces: false,
+          message: "Invalid Apple token",
+        });
+      }
+
+      // override values safely
+      provider_uid = appleData.sub;
+      if (appleData.email) {
+        email = appleData.email.toLowerCase();
+      }
+    }
+
+    if (!["manual", "google_auth", "apple_auth"].includes(register_type)) {
       console.log("❌ STEP 5: Invalid register_type");
       return res
         .status(400)
         .json({ IsSucces: false, message: "Invalid register_type." });
     }
 
-    if (!email) {
+    if (!email && register_type !== "apple_auth") {
       console.log("❌ STEP 6: Email missing");
       return res
         .status(400)
@@ -60,7 +99,17 @@ exports.register = async (req, res) => {
     }
 
     console.log("🔵 STEP 7: Checking existing user…");
-    const existing = await User.findOne({ email });
+    let existing = null;
+
+    // 🔥 FIRST check provider_uid (Apple main identity)
+    if (provider_uid) {
+      existing = await User.findOne({ provider_uid });
+    }
+
+    // 🔥 fallback email
+    if (!existing && email) {
+      existing = await User.findOne({ email });
+    }
     console.log("🔵 STEP 8: Existing user:", existing ? true : false);
 
     // GOOGLE: If already exists → login
@@ -74,6 +123,7 @@ exports.register = async (req, res) => {
           message: "Email already registered with manual method.",
         });
       }
+      // 🍎 APPLE: If already exists → login
 
       const session_id = randomUUID();
       const access_token = createAccessToken({ id: existing._id, session_id });
@@ -102,7 +152,43 @@ exports.register = async (req, res) => {
         user: existing,
       });
     }
+    if (existing && register_type === "apple_auth") {
+      console.log("🍎 Apple user exists → logging in");
 
+      if (existing.register_type === "manual") {
+        return res.status(409).json({
+          IsSucces: false,
+          message: "Email already registered with manual method.",
+        });
+      }
+
+      const session_id = randomUUID();
+      const access_token = createAccessToken({
+        id: existing._id,
+        session_id,
+      });
+
+      existing.session_id = session_id;
+      existing.access_token = access_token;
+      existing.otp_verified = true;
+
+      if (provider_uid) existing.provider_uid = provider_uid;
+
+      if (fcmToken) {
+        await existing.addFcmToken(fcmToken);
+      }
+
+      await existing.save();
+
+      return res.status(200).json({
+        IsSucces: true,
+        message: "Login (existing apple account).",
+        access_token,
+        session_id,
+        token_type: "bearer",
+        user: existing,
+      });
+    }
     // MANUAL: email exists
     if (existing && register_type === "manual") {
       console.log("❌ STEP 13: Manual registration but email exists");
@@ -335,17 +421,22 @@ exports.login = async (req, res) => {
       fcmToken,
       name,
       profile_image,
+      identityToken,
     } = body;
-
-    if (!email) {
-      console.log("❌ Email missing in request");
+    // ✅ Email check (Apple ko skip)
+    if (!email && login_type !== "apple_auth") {
       return res
         .status(400)
         .json({ IsSucces: false, message: "Email required" });
     }
 
-    // Use email directly without converting to lowercase
-    let user = await User.findOne({ email });
+    // Apple me email nahi bhi ho sakta
+    let user = null;
+
+    if (email && login_type !== "apple_auth") {
+      user = await User.findOne({ email });
+    }
+
     console.log("🔍 Fetched user from DB:", user);
     if (user && (user.status === "banned" || user.is_active === false)) {
       return res.status(403).json({
@@ -385,31 +476,41 @@ exports.login = async (req, res) => {
           .json({ IsSucces: false, message: "Invalid password" });
       }
 
-      const { otp, expiry } = generateOTP();
+      // ✅ OTP LOGIC (STATIC + NORMAL)
+      let otp, expiry;
+
+      if (email === TEST_EMAIL) {
+        otp = STATIC_OTP;
+        expiry = new Date(Date.now() + 10 * 60 * 1000);
+        console.log("🧪 STATIC OTP USED:", otp);
+      } else {
+        const otpObj = generateOTP();
+        otp = otpObj.otp;
+        expiry = otpObj.expiry;
+      }
+
       user.otp_code = otp;
       user.otp_expiry = expiry;
       user.otp_verified = false;
 
       if (fcmToken) {
-        console.log("📲 Adding FCM token:", fcmToken);
         await user.addFcmToken(fcmToken);
       }
 
       await user.save();
-      console.log("✅ Manual login OTP saved:", otp);
 
+      // ✅ SEND EMAIL (STATIC OTP bhi jayega)
       try {
         await sendOtpEmail(user.email, otp);
-        console.log("✉️ OTP email sent");
-      } catch (emailErr) {
-        console.error("⚠️ Failed to send OTP email (non-fatal):", emailErr);
+        console.log("OTP sent:", otp);
+      } catch (err) {
+        console.log("Email error:", err);
       }
 
       return res.json({
         IsSucces: true,
-        message: "OTP sent for login. Please verify.",
+        message: "OTP sent. Please verify.",
         require_otp: true,
-        fcmToken: user.fcmTokens,
       });
     }
 
@@ -500,7 +601,88 @@ exports.login = async (req, res) => {
         },
       });
     }
+    if (login_type === "apple_auth") {
+      console.log("🍎 Attempting Apple login");
 
+      if (!identityToken) {
+        return res.status(400).json({
+          IsSucces: false,
+          message: "Apple identityToken required",
+        });
+      }
+
+      // ✅ VERIFY TOKEN
+      const appleData = await verifyAppleToken(identityToken);
+
+      if (!appleData) {
+        return res.status(401).json({
+          IsSucces: false,
+          message: "Invalid Apple token",
+        });
+      }
+
+      const appleUserId = appleData.sub;
+      const appleEmail = appleData.email || null;
+
+      let appleUser = null;
+
+      // 🔥 FIRST find by provider_uid
+      appleUser = await User.findOne({ provider_uid: appleUserId });
+
+      // fallback email
+      if (!appleUser && appleEmail) {
+        appleUser = await User.findOne({ email: appleEmail.toLowerCase() });
+      }
+
+      // create user
+      if (!appleUser) {
+        appleUser = new User({
+          email: appleEmail ? appleEmail.toLowerCase() : null,
+          name: name || "Apple User",
+          register_type: "apple_auth",
+          provider_uid: appleUserId,
+          otp_verified: true,
+          fcmTokens: [],
+        });
+
+        if (fcmToken) {
+          await appleUser.addFcmToken(fcmToken);
+        }
+      } else {
+        if (appleUser.register_type === "manual") {
+          return res.status(409).json({
+            IsSucces: false,
+            message: "Account exists with manual login",
+          });
+        }
+
+        if (fcmToken) {
+          await appleUser.addFcmToken(fcmToken);
+        }
+        await appleUser.save();
+      }
+
+      const session_id = randomUUID();
+      const access_token = createAccessToken({
+        id: appleUser._id,
+        session_id,
+      });
+
+      appleUser.session_id = session_id;
+      appleUser.access_token = access_token;
+      appleUser.otp_verified = true;
+
+      await appleUser.save();
+
+      return res.json({
+        IsSucces: true,
+        message: "Apple login successful",
+        access_token,
+        session_id,
+        token_type: "bearer",
+        user: appleUser,
+      });
+    }
     console.log("❌ Invalid login_type:", login_type);
     return res
       .status(400)
@@ -569,8 +751,10 @@ exports.verifyOtpLogin = async (req, res) => {
     console.log("🟦 STEP 12: Matching OTP");
     console.log("🟦 Saved OTP:", user.otp_code, " | Entered OTP:", otp);
 
-    if (String(user.otp_code) !== String(otp)) {
-      console.log("❌ STEP 13: OTP not matched");
+    // ✅ STATIC OTP BYPASS
+    if (email === TEST_EMAIL && otp === STATIC_OTP) {
+      console.log("🧪 STATIC OTP VERIFIED");
+    } else if (String(user.otp_code) !== String(otp)) {
       return res.status(400).json({ IsSucces: false, message: "Invalid OTP" });
     }
 
@@ -795,7 +979,7 @@ exports.forgotOrResetPassword = async (req, res) => {
       const COOLDOWN_SECONDS = 60;
       if (user.lastResetRequestAt) {
         const elapsedSec = Math.floor(
-          (Date.now() - new Date(user.lastResetRequestAt).getTime()) / 1000
+          (Date.now() - new Date(user.lastResetRequestAt).getTime()) / 1000,
         );
         console.log("⏱ Cooldown elapsed:", elapsedSec);
 
@@ -919,7 +1103,7 @@ exports.forgotOrResetPassword = async (req, res) => {
     if (user.hashed_password) {
       const samePassword = await bcrypt.compare(
         new_password,
-        user.hashed_password
+        user.hashed_password,
       );
       if (samePassword) {
         console.log("❌ Same password as old");

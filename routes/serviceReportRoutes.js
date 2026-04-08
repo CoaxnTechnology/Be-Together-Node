@@ -7,9 +7,9 @@ const {
   approveReport,
   rejectReport,
 } = require("../controller/serviceReport.controller");
-
+const authMiddleware = require("../Middleware/authMiddleware");
 // user
-router.post("/report", reportService);
+router.post("/report", authMiddleware, reportService);
 
 // admin
 router.get("/reports", getReportedServices);

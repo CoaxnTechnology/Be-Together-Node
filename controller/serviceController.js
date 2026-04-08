@@ -393,7 +393,7 @@ exports.getServices = async (req, res) => {
       filterLng,
       keyword = "",
     } = req.body;
-
+    const userId = req.user?.id; // ✅ optional auth se aayega
     // -----------------------------
     // PARSE VALUES
     // -----------------------------
@@ -466,11 +466,41 @@ exports.getServices = async (req, res) => {
     // -----------------------------
     // FETCH DATABASE SERVICES
     // -----------------------------
+    // ==============================
+    // 🔥 BLOCK USER LOGIC (ADD HERE)
+    // ==============================
+
+    let blockedIds = [];
+
+    if (userId) {
+      // 1️⃣ jise maine block kiya
+      const currentUser = await User.findById(userId).select("blockedUsers");
+
+      const myBlocked = currentUser?.blockedUsers || [];
+
+      // 2️⃣ jinhone mujhe block kiya
+      const blockedByOthers = await User.find({
+        blockedUsers: userId,
+      }).select("_id");
+
+      const blockedByOthersIds = blockedByOthers.map((u) => u._id);
+
+      blockedIds = [...new Set([...myBlocked, ...blockedByOthersIds])];
+
+      // ✅ apply in query
+      if (blockedIds.length > 0) {
+        baseMatch.owner = { $nin: blockedIds };
+      }
+    }
+
+    // ==============================
+    // FETCH SERVICES
+    // ==============================
+
     let services = await Service.find(baseMatch)
       .populate("category")
       .populate("owner", "name email profile_image")
       .lean();
-
     // console.log("DB Services Count:", services.length);
 
     let finalServices = services;
@@ -929,10 +959,9 @@ exports.getInterestedUsers = async (req, res) => {
       keyword = "",
       page = 1,
       limit = 10,
-      userId,
       excludeSelf = false,
     } = req.body;
-
+    const userId = req.user?.id; // ✅ optional auth
     const skip = (Number(page) - 1) * Number(limit);
 
     // console.log("\n===== getInterestedUsers called =====");
@@ -980,7 +1009,10 @@ exports.getInterestedUsers = async (req, res) => {
     // -----------------------------------------------------
 
     if (excludeSelf && userId) {
-      query._id = { $ne: userId };
+      query._id = {
+        ...(query._id || {}),
+        $ne: userId,
+      };
     }
     if (keyword.trim() !== "") {
       const kw = keyword.trim();
@@ -1053,7 +1085,31 @@ exports.getInterestedUsers = async (req, res) => {
         },
       };
     }
+    // -----------------------------
+    // STEP 4: 🔥 BLOCK LOGIC
+    // -----------------------------
+    if (userId) {
+      const currentUser = await User.findById(userId).select("blockedUsers");
 
+      if (currentUser) {
+        const myBlocked = currentUser.blockedUsers || [];
+
+        const blockedByOthers = await User.find({
+          blockedUsers: userId,
+        }).select("_id");
+
+        const blockedByOthersIds = blockedByOthers.map((u) => u._id);
+
+        const blockedIds = [...new Set([...myBlocked, ...blockedByOthersIds])];
+
+        if (blockedIds.length > 0) {
+          query._id = {
+            ...(query._id || {}),
+            $nin: blockedIds,
+          };
+        }
+      }
+    }
     //console.log("Final Mongo Query:", JSON.stringify(query, null, 2));
 
     // -----------------------------------------------------

@@ -8,6 +8,8 @@ const {
   editProfile,
   getProfileByEmail,
   getProfileById,
+  blockUser,
+  unblockUser,
 } = require("../controller/profileController");
 
 const router = express.Router();
@@ -43,5 +45,7 @@ router.put(
   editProfile
 );
 router.post("/profile", getProfileById);
+router.post("/block",authMiddleware, blockUser);
+router.post("/unblock", authMiddleware, unblockUser);
 
 module.exports = router;

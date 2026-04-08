@@ -8,12 +8,13 @@ const {
   rejectReport,
 } = require("../controller/serviceReport.controller");
 const authMiddleware = require("../Middleware/authMiddleware");
+const adminMiddleware = require("../Middleware/adminMiddleware");
 // user
 router.post("/report", authMiddleware, reportService);
 
 // admin
-router.get("/reports", getReportedServices);
-router.post("/approve", approveReport);
-router.post("/reject", rejectReport);
+router.get("/reports", adminMiddleware, getReportedServices);
+router.post("/approve", adminMiddleware, approveReport);
+router.post("/reject", adminMiddleware, rejectReport);
 
 module.exports = router;

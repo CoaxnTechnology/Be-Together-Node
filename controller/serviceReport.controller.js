@@ -7,7 +7,8 @@ const Service = require("../model/Service");
 exports.reportService = async (req, res) => {
   try {
     const { serviceId, reason, message } = req.body;
-    const userId = req.user.id;
+
+    const userId = req.user._id; // ✅ FIX
 
     if (!serviceId || !reason) {
       return res.status(400).json({
@@ -16,7 +17,6 @@ exports.reportService = async (req, res) => {
       });
     }
 
-    // ❗ prevent duplicate report
     const existing = await ServiceReport.findOne({
       service: serviceId,
       reportedBy: userId,
@@ -105,7 +105,7 @@ exports.approveReport = async (req, res) => {
     // update reports
     await ServiceReport.updateMany(
       { service: serviceId },
-      { status: "approved" }
+      { status: "approved" },
     );
 
     return res.json({
@@ -122,7 +122,7 @@ exports.rejectReport = async (req, res) => {
 
     await ServiceReport.updateMany(
       { service: serviceId },
-      { status: "rejected" }
+      { status: "rejected" },
     );
 
     return res.json({

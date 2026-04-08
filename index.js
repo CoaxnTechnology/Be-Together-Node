@@ -26,6 +26,7 @@ const promotionSubscription = require("./routes/promotionSubscription.Routes");
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const promotionController = require("./controller/promotionSubscription.controller");
 const promotionPlanAdminRoutes = require("./routes/promotionPlanadminRoutes");
+const serviceReportRoutes = require("./routes/serviceReportRoutes");
 // --- KEEP RAW ONLY FOR GITHUB ---
 app.post(
   "/webhook/github",
@@ -148,6 +149,7 @@ app.use("/api/promotion", promotionSubscription);
 app.use("/api", promotionPlanAdminRoutes);
 // Connect to MongoDB (live Atlas)
 app.use("/api/admin", AdminRoutes);
+app.use("/api/admin/service-report", serviceReportRoutes);
 console.log("Product ID:", process.env.STRIPE_PROMOTION_PRODUCT_ID);
 console.log("apple client ID:", process.env.APPLE_CLIENT_ID);
 const PORT = process.env.PORT || 5000;

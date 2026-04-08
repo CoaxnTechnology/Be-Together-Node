@@ -811,12 +811,14 @@ exports.getInterestedUsers = async (req, res) => {
     const query = {};
     query["lastLocation.coords.coordinates"] = { $ne: [0, 0] };
 
-    if (excludeSelf && userId) {
+    // ✅ ALWAYS exclude self if logged in
+    if (userId) {
       query._id = {
         ...(query._id || {}),
         $ne: userId,
       };
-      console.log("🙅 Excluding self user:", userId);
+
+      console.log("🙅 Self user excluded:", userId);
     }
 
     if (keyword.trim() !== "") {

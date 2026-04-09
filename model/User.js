@@ -66,6 +66,7 @@ const userSchema = new mongoose.Schema(
       default: null,
       index: true,
     },
+    blockedUsers: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     services: [{ type: mongoose.Schema.Types.ObjectId, ref: "Service" }],
     lastResendAt: { type: Date, default: null },
     lastLocation: {

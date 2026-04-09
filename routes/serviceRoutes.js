@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const serviceController = require("../controller/serviceController");
 const auth = require("../Middleware/authMiddleware");
+const {optionalAuth} = require("../Middleware/optionalAuth");
 const checkServiceRestrictionJs = require("../Middleware/checkServiceRestriction");
 const path = require("path");
 //const authMiddleware = require("../Middleware/authMiddleware");
@@ -31,8 +32,8 @@ router.post(
   upload.single("image"),
   serviceController.createService
 );
-router.post("/get", serviceController.getServices);
-router.post("/user/search", serviceController.getInterestedUsers);
+router.post("/get", optionalAuth, serviceController.getServices);
+router.post("/user/search",optionalAuth, serviceController.getInterestedUsers);
 router.get("/getall", serviceController.getAllServices);
 router.put(
   "/update",

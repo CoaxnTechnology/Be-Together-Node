@@ -462,4 +462,82 @@ exports.getProfileById = async (req, res) => {
     });
   }
 };
-//
+// bLock user
+exports.blockUser = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { targetUserId } = req.body;
+
+    if (!targetUserId) {
+      return res.status(400).json({ success: false, message: "targetUserId required" });
+    }
+
+    if (userId === targetUserId) {
+      return res.status(400).json({ success: false, message: "You cannot block yourself" });
+    }
+
+    await User.findByIdAndUpdate(userId, {
+      $addToSet: { blockedUsers: targetUserId },
+    });
+
+    return res.json({
+      success: true,
+      message: "User blocked successfully",
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+exports.unblockUser = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { targetUserId } = req.body;
+
+    await User.findByIdAndUpdate(userId, {
+      $pull: { blockedUsers: targetUserId },
+    });
+
+    res.json({
+      success: true,
+      message: "User unblocked",
+    });
+  } catch (err) {
+    res.status(500).json({ success: false });
+  }
+};
+// ✅ GET BLOCKED USERS LIST
+exports.getBlockedUsers = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    console.log("🔍 Fetch blocked users for:", userId);
+
+    const user = await User.findById(userId)
+      .populate({
+        path: "blockedUsers",
+        select: "name email profile_image bio city age languages interests",
+      });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    console.log("🚫 Blocked Users Count:", user.blockedUsers.length);
+
+    return res.json({
+      success: true,
+      total: user.blockedUsers.length,
+      data: user.blockedUsers,
+    });
+
+  } catch (err) {
+    console.error("❌ getBlockedUsers error:", err);
+    res.status(500).json({
+      success: false,
+      message: err.message,
+    });
+  }
+};

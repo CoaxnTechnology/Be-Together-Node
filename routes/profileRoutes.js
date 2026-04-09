@@ -48,6 +48,6 @@ router.put(
 router.post("/profile", getProfileById);
 router.post("/block",authMiddleware, blockUser);
 router.post("/unblock", authMiddleware, unblockUser);
-router.get("/blocked-users", authMiddleware, getBlockedUsers);
+router.post("/blocked-users", authMiddleware, getBlockedUsers);
 
 module.exports = router;

@@ -505,3 +505,39 @@ exports.unblockUser = async (req, res) => {
     res.status(500).json({ success: false });
   }
 };
+// ✅ GET BLOCKED USERS LIST
+exports.getBlockedUsers = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    console.log("🔍 Fetch blocked users for:", userId);
+
+    const user = await User.findById(userId)
+      .populate({
+        path: "blockedUsers",
+        select: "name email profile_image bio city age languages interests",
+      });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    console.log("🚫 Blocked Users Count:", user.blockedUsers.length);
+
+    return res.json({
+      success: true,
+      total: user.blockedUsers.length,
+      data: user.blockedUsers,
+    });
+
+  } catch (err) {
+    console.error("❌ getBlockedUsers error:", err);
+    res.status(500).json({
+      success: false,
+      message: err.message,
+    });
+  }
+};

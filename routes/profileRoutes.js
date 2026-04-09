@@ -10,6 +10,7 @@ const {
   getProfileById,
   blockUser,
   unblockUser,
+  getBlockedUsers,
 } = require("../controller/profileController");
 
 const router = express.Router();
@@ -47,5 +48,6 @@ router.put(
 router.post("/profile", getProfileById);
 router.post("/block",authMiddleware, blockUser);
 router.post("/unblock", authMiddleware, unblockUser);
+router.get("/blocked-users", authMiddleware, getBlockedUsers);
 
 module.exports = router;

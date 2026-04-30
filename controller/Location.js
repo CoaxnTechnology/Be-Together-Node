@@ -23,43 +23,43 @@ const ALLOWED_PROVIDERS = new Set([
   "mock",
   null,
 ]);
-const EXPIRE_DAYS = 7;
-const CLEANUP_COOLDOWN_MS = 1000 * 60 * 60; // 1 hour
+// const EXPIRE_DAYS = 7;
+// const CLEANUP_COOLDOWN_MS = 1000 * 60 * 60; // 1 hour
 
 if (!global.__lastLocationCleanupAt) global.__lastLocationCleanupAt = 0;
 
 // 🔄 Reset stale locations
-async function expireStaleLocationsIfNeeded() {
-  try {
-    const now = Date.now();
-    if (now - global.__lastLocationCleanupAt < CLEANUP_COOLDOWN_MS) return;
-    global.__lastLocationCleanupAt = now;
+// async function expireStaleLocationsIfNeeded() {
+//   try {
+//     const now = Date.now();
+//     if (now - global.__lastLocationCleanupAt < CLEANUP_COOLDOWN_MS) return;
+//     global.__lastLocationCleanupAt = now;
 
-    const cutoff = new Date(Date.now() - EXPIRE_DAYS * 24 * 60 * 60 * 1000);
-    const update = {
-      $set: {
-        "lastLocation.coords.coordinates": [0, 0],
-        "lastLocation.recordedAt": null,
-        "lastLocation.updatedAt": new Date(),
-        location_stale: true,
-        updated_at: new Date(),
-      },
-    };
+//     const cutoff = new Date(Date.now() - EXPIRE_DAYS * 24 * 60 * 60 * 1000);
+//     const update = {
+//       $set: {
+//         "lastLocation.coords.coordinates": [0, 0],
+//         "lastLocation.recordedAt": null,
+//         "lastLocation.updatedAt": new Date(),
+//         location_stale: true,
+//         updated_at: new Date(),
+//       },
+//     };
 
-    const res = await User.updateMany(
-      {
-        "lastLocation.recordedAt": { $lt: cutoff },
-        is_fake: { $ne: true }, // 👈 ye add karo
-      },
-      update,
-    );
-    console.info(
-      `🧹 expireStaleLocationsIfNeeded: matched=${res.matchedCount ?? res.n ?? 0}, modified=${res.modifiedCount ?? res.nModified ?? 0}`,
-    );
-  } catch (err) {
-    console.error("❌ expireStaleLocationsIfNeeded error:", err);
-  }
-}
+//     const res = await User.updateMany(
+//       {
+//         "lastLocation.recordedAt": { $lt: cutoff },
+//         is_fake: { $ne: true }, // 👈 ye add karo
+//       },
+//       update,
+//     );
+//     console.info(
+//       `🧹 expireStaleLocationsIfNeeded: matched=${res.matchedCount ?? res.n ?? 0}, modified=${res.modifiedCount ?? res.nModified ?? 0}`,
+//     );
+//   } catch (err) {
+//     console.error("❌ expireStaleLocationsIfNeeded error:", err);
+//   }
+// }
 
 exports.location = async (req, res) => {
   try {
@@ -69,7 +69,7 @@ exports.location = async (req, res) => {
     console.log("➡️ Request Body:", JSON.stringify(req.body, null, 2));
     console.log("🧑‍💻 Authenticated User ID (from token):", req.user?.id);
 
-    await expireStaleLocationsIfNeeded();
+  //  await expireStaleLocationsIfNeeded();
 
     const { userId, latitude, longitude, accuracy, provider, recordedAt } =
       req.body;

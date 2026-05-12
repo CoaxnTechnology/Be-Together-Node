@@ -152,6 +152,7 @@ app.use("/api/admin", AdminRoutes);
 app.use("/api/admin/service-report", serviceReportRoutes);
 console.log("Product ID:", process.env.STRIPE_PROMOTION_PRODUCT_ID);
 console.log("apple client ID:", process.env.APPLE_CLIENT_ID);
+console.log("reset password link:", process.env.FRONTEND_RESET_URL);
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
 module.exports = app;

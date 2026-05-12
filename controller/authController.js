@@ -9,6 +9,9 @@ const { getFullImageUrl } = require("../utils/image");
 const { randomUUID } = require("crypto");
 const crypto = require("crypto");
 const { createResetToken } = require("../utils/token");
+const Wallet = require("../model/Wallet");
+const ReferralVisit = require("../model/ReferralVisit");
+const generateReferralCode = require("../utils/generateReferralCode");
 const cloudinary = require("cloudinary").v2;
 const streamifier = require("streamifier");
 const multer = require("multer"); // for MulterError checks
@@ -45,6 +48,9 @@ exports.register = async (req, res) => {
       provider_uid,
       fcmToken,
       identityToken,
+      // referral
+      deviceId,
+      referralCode,
     } = req.body;
 
     console.log("🔵 STEP 4: Extracted fields:", {
@@ -139,6 +145,10 @@ exports.register = async (req, res) => {
         console.log("🔵 STEP 11: Adding FCM token");
         await existing.addFcmToken(fcmToken);
       }
+      // generate referral code
+      if (!existing.referralCode) {
+        existing.referralCode = generateReferralCode(existing.name || "USER");
+      }
 
       await existing.save();
       console.log("🔵 STEP 12: Google login success");
@@ -150,6 +160,7 @@ exports.register = async (req, res) => {
         session_id,
         token_type: "bearer",
         user: existing,
+        referralCode: existing.referralCode,
       });
     }
     if (existing && register_type === "apple_auth") {
@@ -177,7 +188,10 @@ exports.register = async (req, res) => {
       if (fcmToken) {
         await existing.addFcmToken(fcmToken);
       }
-
+      // generate referral code
+      if (!existing.referralCode) {
+        existing.referralCode = generateReferralCode(existing.name || "USER");
+      }
       await existing.save();
 
       return res.status(200).json({
@@ -187,6 +201,7 @@ exports.register = async (req, res) => {
         session_id,
         token_type: "bearer",
         user: existing,
+        referralCode: existing.referralCode,
       });
     }
     // MANUAL: email exists
@@ -241,6 +256,58 @@ exports.register = async (req, res) => {
       profileImageUrl = `${baseUrl}/uploads/profile_images/${req.file.filename}`;
     }
     console.log("🔵 STEP 20: Profile image URL:", profileImageUrl);
+    // =====================================
+    // GENERATE USER REFERRAL CODE
+    // =====================================
+
+    // =====================================
+    // REFERRAL SYSTEM
+    // =====================================
+
+    let referredBy = null;
+
+    try {
+      // ==========================
+      // 1. MANUAL REFERRAL CODE
+      // ==========================
+
+      if (referralCode) {
+        const referralUser = await User.findOne({
+          referralCode: String(referralCode).trim().toUpperCase(),
+        });
+
+        if (referralUser && referralUser.email !== email) {
+          referredBy = referralUser._id;
+
+          console.log("✅ Manual referral applied");
+        }
+      }
+
+      // ==========================
+      // 2. AUTO REFERRAL
+      // ==========================
+      else if (deviceId) {
+        const visit = await ReferralVisit.findOne({
+          deviceId,
+        }).sort({
+          created_at: -1,
+        });
+
+        if (visit?.referralCode) {
+          const referralUser = await User.findOne({
+            referralCode: visit.referralCode,
+          });
+
+          if (referralUser && referralUser.email !== email) {
+            referredBy = referralUser._id;
+
+            console.log("✅ Auto referral applied");
+          }
+        }
+      }
+    } catch (err) {
+      console.log("Referral skipped:", err.message);
+    }
     // CREATE USER
     console.log("🔵 STEP 24: Creating new user document…");
 
@@ -255,6 +322,7 @@ exports.register = async (req, res) => {
       otp_code: otp,
       otp_expiry: expiry,
       profile_image: profileImageUrl,
+      referredBy: referredBy || null,
       provider_id: provider_id || null,
       provider_uid: provider_uid || null,
       fcmTokens: [],
@@ -267,7 +335,6 @@ exports.register = async (req, res) => {
 
     await newUser.save();
     console.log("🔵 STEP 26: User saved in DB");
-
     // SEND OTP
     if (register_type === "manual") {
       console.log("🔵 STEP 27: Sending OTP email…");
@@ -288,15 +355,29 @@ exports.register = async (req, res) => {
     // GOOGLE AUTH RESPONSE
     if (register_type === "google_auth") {
       console.log("🔵 STEP 30: Google registration → Creating session");
-
+      // generate referral code
+      if (!newUser.referralCode) {
+        newUser.referralCode = generateReferralCode(newUser.name || "USER");
+      }
       const session_id = randomUUID();
       const access_token = createAccessToken({ id: newUser._id, session_id });
 
       newUser.session_id = session_id;
       newUser.access_token = access_token;
-
       await newUser.save();
+
       console.log("🔵 STEP 31: Google auth user saved");
+      // create wallet
+      const existingWallet = await Wallet.findOne({
+        user: newUser._id,
+      });
+
+      if (!existingWallet) {
+        await Wallet.create({
+          user: newUser._id,
+        });
+      }
+      console.log("✅ Wallet created for new user");
 
       return res.status(201).json({
         IsSucces: true,
@@ -305,9 +386,60 @@ exports.register = async (req, res) => {
         session_id,
         token_type: "bearer",
         user: newUser,
+        referralCode: newUser.referralCode,
       });
     }
+    // APPLE AUTH RESPONSE
+    if (register_type === "apple_auth") {
+      console.log("🍎 Apple registration → Creating session");
 
+      // generate referral code
+      if (!newUser.referralCode) {
+        newUser.referralCode = generateReferralCode(newUser.name || "USER");
+      }
+
+      const session_id = randomUUID();
+
+      const access_token = createAccessToken({
+        id: newUser._id,
+        session_id,
+      });
+
+      newUser.session_id = session_id;
+
+      newUser.access_token = access_token;
+
+      await newUser.save();
+
+      console.log("🍎 Apple auth user saved");
+      // create wallet
+      const existingWallet = await Wallet.findOne({
+        user: newUser._id,
+      });
+
+      if (!existingWallet) {
+        await Wallet.create({
+          user: newUser._id,
+        });
+      }
+      console.log("✅ Wallet created for new user");
+
+      return res.status(201).json({
+        IsSucces: true,
+
+        message: "Registered successfully",
+
+        access_token,
+
+        session_id,
+
+        token_type: "bearer",
+
+        user: newUser,
+
+        referralCode: newUser.referralCode,
+      });
+    }
     console.log("❌ STEP 32: Unknown error");
     return res.status(500).json({ IsSucces: false, message: "Server error" });
   } catch (err) {
@@ -763,6 +895,31 @@ exports.verifyOtpLogin = async (req, res) => {
     user.otp_verified = true;
     user.otp_code = null;
     user.otp_expiry = null;
+    // =====================================
+    // GENERATE REFERRAL CODE
+    // AFTER OTP VERIFY
+    // =====================================
+
+    if (!user.referralCode) {
+      user.referralCode = generateReferralCode(user.name || "USER");
+
+      console.log("✅ Referral code generated:", user.referralCode);
+    }
+    // =====================================
+    // CREATE WALLET
+    // =====================================
+
+    const existingWallet = await Wallet.findOne({
+      user: user._id,
+    });
+
+    if (!existingWallet) {
+      await Wallet.create({
+        user: user._id,
+      });
+
+      console.log("✅ Wallet created");
+    }
 
     console.log("🟦 STEP 15: Generating session + tokens");
     const session_id = randomUUID();
@@ -789,6 +946,7 @@ exports.verifyOtpLogin = async (req, res) => {
         profile_image: getFullImageUrl(user.profile_image),
         register_type: user.register_type,
         otp_verified: user.otp_verified,
+        referralCode: user.referralCode,
       },
     });
   } catch (err) {

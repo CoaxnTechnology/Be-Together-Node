@@ -722,6 +722,7 @@ exports.login = async (req, res) => {
         token_type: "bearer",
         user: {
           id: user._id,
+          referralCode: user.referralCode,
           name: user.name,
           email: user.email,
           mobile: user.mobile,
@@ -812,7 +813,11 @@ exports.login = async (req, res) => {
         access_token,
         session_id,
         token_type: "bearer",
-        user: appleUser,
+        user: {
+          ...appleUser.toObject(),
+
+          referralCode: appleUser.referralCode,
+        },
       });
     }
     console.log("❌ Invalid login_type:", login_type);

@@ -664,9 +664,12 @@ exports.login = async (req, res) => {
           provider_uid: provider_uid || null,
           otp_verified: true,
           profile_image: userProfileImage,
+
           fcmTokens: [],
           is_google_auth: true,
         });
+        // generate referral code
+        user.referralCode = generateReferralCode(userName || "USER");
 
         if (fcmToken) {
           console.log("📲 Adding FCM token to new user:", fcmToken);
@@ -713,7 +716,15 @@ exports.login = async (req, res) => {
 
       await user.save();
       console.log("🔑 Google login session & access token saved");
+      const existingWallet = await Wallet.findOne({
+        user: user._id,
+      });
 
+      if (!existingWallet) {
+        await Wallet.create({
+          user: user._id,
+        });
+      }
       return res.json({
         IsSucces: true,
         message: "Login successful",
@@ -777,6 +788,8 @@ exports.login = async (req, res) => {
           otp_verified: true,
           fcmTokens: [],
         });
+        // generate referral code
+        appleUser.referralCode = generateReferralCode(name || "USER");
 
         if (fcmToken) {
           await appleUser.addFcmToken(fcmToken);
@@ -806,6 +819,15 @@ exports.login = async (req, res) => {
       appleUser.otp_verified = true;
 
       await appleUser.save();
+      const existingWallet = await Wallet.findOne({
+        user: appleUser._id,
+      });
+
+      if (!existingWallet) {
+        await Wallet.create({
+          user: appleUser._id,
+        });
+      }
 
       return res.json({
         IsSucces: true,

@@ -79,6 +79,27 @@ const userSchema = new mongoose.Schema(
       recordedAt: { type: Date, default: null },
       updatedAt: { type: Date, default: Date.now },
     },
+    referralCode: {
+      type: String,
+      unique: true,
+      sparse: true,
+    },
+
+    referredBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+
+    totalReferralUsers: {
+      type: Number,
+      default: 0,
+    },
+
+    totalReferralEarned: {
+      type: Number,
+      default: 0,
+    },
     stripeCustomerId: { type: String, default: null },
     stripeAccountId: { type: String, default: null },
     performancePoints: { type: Number, default: 0 },

@@ -20,7 +20,9 @@ const Payment = require("../model/Payment");
 const Booking = require("../model/Booking");
 const CommissionSetting = require("../model/CommissionSetting");
 const updateProviderPerformance = require("../utils/providerPerformance");
+const Wallet = require("../model/Wallet");
 
+const WalletHistory = require("../model/WalletHistory");
 // -----------------------------
 // 1️⃣ Create Stripe Checkout Session (Booking not yet confirmed)
 // -----------------------------
@@ -112,6 +114,80 @@ exports.bookService = async (req, res) => {
         location_name: location_name || null,
         ...(bookingLocation && { location: bookingLocation }),
       });
+      // =====================================
+// REFERRAL BOOKING BONUS
+// =====================================
+
+if (customer.referredBy) {
+
+  const totalBookings =
+    await Booking.countDocuments({
+
+      customer: customer._id,
+
+      status: {
+        $in: [
+          "booked",
+          "started",
+          "completed",
+        ],
+      },
+
+    });
+
+  // first booking only
+  if (totalBookings === 1) {
+
+    const referralOwner =
+      await User.findById(
+        customer.referredBy
+      );
+
+    if (referralOwner) {
+
+      const wallet =
+        await Wallet.findOne({
+          user: referralOwner._id,
+        });
+
+      wallet.points += 50;
+
+      wallet.totalEarned += 50;
+
+      await wallet.save();
+
+      await WalletHistory.create({
+
+        user:
+          referralOwner._id,
+
+        points: 50,
+
+        type:
+          "referral_booking_bonus",
+
+        referralUser:
+          customer._id,
+
+        service:
+          service._id,
+
+        note:
+          "First booking referral bonus",
+
+      });
+
+      referralOwner.totalReferralEarned += 50;
+
+      referralOwner.totalReferralUsers += 1;
+
+      await referralOwner.save();
+
+    }
+
+  }
+
+}
       // ⭐ Send Email
       console.log("📧 Calling sendServiceBookedEmail…");
       // Send customer email
@@ -411,7 +487,10 @@ exports.startService = async (req, res) => {
       otp,
     });
 
-    return res.json({ isSuccess: true, message: "OTP generated & sent to customer email"}); // otp for testing
+    return res.json({
+      isSuccess: true,
+      message: "OTP generated & sent to customer email",
+    }); // otp for testing
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

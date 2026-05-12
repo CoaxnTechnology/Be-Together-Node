@@ -16,6 +16,9 @@ const Booking = require("../model/Booking");
 const { sendServiceDeleteApprovedEmail } = require("../utils/email");
 const Payment = require("../model/Payment");
 const { notifyOnServiceDeleteApproved } = require("./notificationController");
+const Wallet = require("../model/Wallet");
+
+const WalletHistory = require("../model/WalletHistory");
 // Helper to parse JSON safely
 function tryParse(val) {
   if (val === undefined || val === null) return val;
@@ -290,7 +293,50 @@ exports.createService = async (req, res) => {
     // ===============================
     const createdService = new Service(servicePayload);
     await createdService.save();
+    // =====================================
+    // REFERRAL SERVICE BONUS
+    // =====================================
 
+    if (user.referredBy) {
+      const totalServices = await Service.countDocuments({
+        owner: user._id,
+      });
+
+      // first service only
+      if (totalServices === 1) {
+        const referralOwner = await User.findById(user.referredBy);
+
+        if (referralOwner) {
+          const wallet = await Wallet.findOne({
+            user: referralOwner._id,
+          });
+
+          wallet.points += 30;
+
+          wallet.totalEarned += 30;
+
+          await wallet.save();
+
+          await WalletHistory.create({
+            user: referralOwner._id,
+
+            points: 30,
+
+            type: "referral_service_bonus",
+
+            referralUser: user._id,
+
+            service: createdService._id,
+
+            note: "Referral service create bonus",
+          });
+
+          referralOwner.totalReferralEarned += 30;
+
+          await referralOwner.save();
+        }
+      }
+    }
     user.services.push(createdService._id);
     await user.save();
 

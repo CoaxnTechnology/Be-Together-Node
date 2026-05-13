@@ -677,7 +677,15 @@ exports.login = async (req, res) => {
         }
       } else {
         console.log("🔄 Existing user found:", user._id);
+        // generate referral code for old users
+        if (!user.referralCode) {
+          user.referralCode = generateReferralCode(user.name || "USER");
 
+          console.log(
+            "✅ Referral code generated for old Google user:",
+            user.referralCode,
+          );
+        }
         if (user.register_type === "manual") {
           console.log(
             "❌ Conflict: existing manual registration prevents Google login",
@@ -795,6 +803,18 @@ exports.login = async (req, res) => {
           await appleUser.addFcmToken(fcmToken);
         }
       } else {
+        // generate referral code for old users
+        if (!appleUser.referralCode) {
+          appleUser.referralCode = generateReferralCode(
+            appleUser.name || "USER",
+          );
+
+          console.log(
+            "✅ Referral code generated for old Apple user:",
+            appleUser.referralCode,
+          );
+        }
+
         if (appleUser.register_type === "manual") {
           return res.status(409).json({
             IsSucces: false,

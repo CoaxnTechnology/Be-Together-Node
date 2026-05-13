@@ -14,6 +14,7 @@ const ReferralVisit = require("../model/ReferralVisit");
 const generateReferralCode = require("../utils/generateReferralCode");
 const cloudinary = require("cloudinary").v2;
 const streamifier = require("streamifier");
+const ReferralHistory = require("../model/ReferralHistory");
 const multer = require("multer"); // for MulterError checks
 const TEST_EMAIL = "mansuria.hannan09@gmail.com";
 const STATIC_OTP = "1234";
@@ -28,6 +29,57 @@ const verifyAppleToken = async (identityToken) => {
   } catch (err) {
     console.log("❌ Apple token verify failed:", err);
     return null;
+  }
+};
+// =====================================
+// PROCESS REFERRAL REWARD
+// =====================================
+
+const processReferralReward = async (user) => {
+  try {
+    if (user.referredBy && !user.referralRewardProcessed) {
+      // find referrer
+      const referrer = await User.findById(user.referredBy);
+
+      if (!referrer) {
+        return;
+      }
+
+      // increment referral count
+      await User.findByIdAndUpdate(
+        user.referredBy,
+
+        {
+          $inc: {
+            totalReferralUsers: 1,
+          },
+        },
+      );
+
+      // create referral history
+      await ReferralHistory.create({
+        referrer: user.referredBy,
+
+        referredUser: user._id,
+
+        referralCode: referrer.referralCode,
+
+        rewardType: "signup",
+
+        rewardAmount: 0,
+
+        status: "completed",
+      });
+
+      // prevent duplicate
+      user.referralRewardProcessed = true;
+
+      await user.save();
+
+      console.log("✅ Referral reward processed");
+    }
+  } catch (err) {
+    console.log("❌ Referral process error:", err.message);
   }
 };
 // ---------------- REGISTER ----------------
@@ -147,12 +199,26 @@ exports.register = async (req, res) => {
       }
       // generate referral code
       if (!existing.referralCode) {
-        existing.referralCode = generateReferralCode(existing.name || "USER");
+        existing.referralCode =  await generateReferralCode(existing.name || "USER");
       }
 
       await existing.save();
       console.log("🔵 STEP 12: Google login success");
+      // create wallet
+      const existingWallet = await Wallet.findOne({
+        user: existing._id,
+      });
 
+      if (!existingWallet) {
+        await Wallet.create({
+          user: existing._id,
+        });
+
+        console.log("✅ Wallet created");
+      }
+
+      // process referral
+      await processReferralReward(existing);
       return res.status(200).json({
         IsSucces: true,
         message: "Login (existing google account).",
@@ -190,9 +256,24 @@ exports.register = async (req, res) => {
       }
       // generate referral code
       if (!existing.referralCode) {
-        existing.referralCode = generateReferralCode(existing.name || "USER");
+        existing.referralCode =  await generateReferralCode(existing.name || "USER");
       }
       await existing.save();
+      // create wallet
+      const existingWallet = await Wallet.findOne({
+        user: existing._id,
+      });
+
+      if (!existingWallet) {
+        await Wallet.create({
+          user: existing._id,
+        });
+
+        console.log("✅ Wallet created");
+      }
+
+      // process referral
+      await processReferralReward(existing);
 
       return res.status(200).json({
         IsSucces: true,
@@ -357,7 +438,7 @@ exports.register = async (req, res) => {
       console.log("🔵 STEP 30: Google registration → Creating session");
       // generate referral code
       if (!newUser.referralCode) {
-        newUser.referralCode = generateReferralCode(newUser.name || "USER");
+        newUser.referralCode = await generateReferralCode(newUser.name || "USER");
       }
       const session_id = randomUUID();
       const access_token = createAccessToken({ id: newUser._id, session_id });
@@ -378,7 +459,7 @@ exports.register = async (req, res) => {
         });
       }
       console.log("✅ Wallet created for new user");
-
+      await processReferralReward(newUser);
       return res.status(201).json({
         IsSucces: true,
         message: "Registered successfully",
@@ -395,7 +476,7 @@ exports.register = async (req, res) => {
 
       // generate referral code
       if (!newUser.referralCode) {
-        newUser.referralCode = generateReferralCode(newUser.name || "USER");
+        newUser.referralCode = await generateReferralCode(newUser.name || "USER");
       }
 
       const session_id = randomUUID();
@@ -423,6 +504,7 @@ exports.register = async (req, res) => {
         });
       }
       console.log("✅ Wallet created for new user");
+      await processReferralReward(newUser);
 
       return res.status(201).json({
         IsSucces: true,
@@ -669,7 +751,7 @@ exports.login = async (req, res) => {
           is_google_auth: true,
         });
         // generate referral code
-        user.referralCode = generateReferralCode(userName || "USER");
+        user.referralCode = await generateReferralCode(userName || "USER");
 
         if (fcmToken) {
           console.log("📲 Adding FCM token to new user:", fcmToken);
@@ -679,7 +761,7 @@ exports.login = async (req, res) => {
         console.log("🔄 Existing user found:", user._id);
         // generate referral code for old users
         if (!user.referralCode) {
-          user.referralCode = generateReferralCode(user.name || "USER");
+          user.referralCode = await generateReferralCode(user.name || "USER");
 
           console.log(
             "✅ Referral code generated for old Google user:",
@@ -733,6 +815,7 @@ exports.login = async (req, res) => {
           user: user._id,
         });
       }
+      await processReferralReward(user);
       return res.json({
         IsSucces: true,
         message: "Login successful",
@@ -797,7 +880,7 @@ exports.login = async (req, res) => {
           fcmTokens: [],
         });
         // generate referral code
-        appleUser.referralCode = generateReferralCode(name || "USER");
+        appleUser.referralCode = await generateReferralCode(name || "USER");
 
         if (fcmToken) {
           await appleUser.addFcmToken(fcmToken);
@@ -805,7 +888,7 @@ exports.login = async (req, res) => {
       } else {
         // generate referral code for old users
         if (!appleUser.referralCode) {
-          appleUser.referralCode = generateReferralCode(
+          appleUser.referralCode = await generateReferralCode(
             appleUser.name || "USER",
           );
 
@@ -839,6 +922,8 @@ exports.login = async (req, res) => {
       appleUser.otp_verified = true;
 
       await appleUser.save();
+      // latest user
+
       const existingWallet = await Wallet.findOne({
         user: appleUser._id,
       });
@@ -848,6 +933,8 @@ exports.login = async (req, res) => {
           user: appleUser._id,
         });
       }
+      // process referral
+      await processReferralReward(appleUser);
 
       return res.json({
         IsSucces: true,
@@ -948,7 +1035,7 @@ exports.verifyOtpLogin = async (req, res) => {
     // =====================================
 
     if (!user.referralCode) {
-      user.referralCode = generateReferralCode(user.name || "USER");
+      user.referralCode = await generateReferralCode(user.name || "USER");
 
       console.log("✅ Referral code generated:", user.referralCode);
     }
@@ -967,7 +1054,7 @@ exports.verifyOtpLogin = async (req, res) => {
 
       console.log("✅ Wallet created");
     }
-
+    await processReferralReward(user);
     console.log("🟦 STEP 15: Generating session + tokens");
     const session_id = randomUUID();
     const access_token = createAccessToken({ id: user._id, session_id });

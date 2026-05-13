@@ -100,6 +100,10 @@ const userSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    referralRewardProcessed: {
+      type: Boolean,
+      default: false,
+    },
     stripeCustomerId: { type: String, default: null },
     stripeAccountId: { type: String, default: null },
     performancePoints: { type: Number, default: 0 },
@@ -143,5 +147,8 @@ userSchema.methods.addFcmToken = async function (token) {
 };
 // ✅ Add geospatial index here
 userSchema.index({ "lastLocation.coords": "2dsphere" });
-
+// referral lookup index
+userSchema.index({
+  referredBy: 1,
+});
 module.exports = mongoose.model("User", userSchema);

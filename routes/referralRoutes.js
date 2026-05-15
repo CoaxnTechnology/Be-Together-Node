@@ -1,22 +1,11 @@
-const express =
-require("express");
+const express = require("express");
 
-const router =
-express.Router();
+const router = express.Router();
 
-const {
-  getReferralDashboard,
-} = require(
-"../controller/referralController"
-);
+const { getReferralDashboard } = require("../controller/referralController");
 
-const auth =
-require("../middleware/auth");
+const auth = require("../Middleware/authMiddleware");
 
-router.get(
-"/dashboard",
-auth,
-getReferralDashboard
-);
+router.get("/dashboard", auth, getReferralDashboard);
 
 module.exports = router;

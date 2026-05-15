@@ -1,14 +1,22 @@
-const express = require("express");
+const express =
+require("express");
 
-const router = express.Router();
+const router =
+express.Router();
 
 const {
-  openReferralLink,
-} = require("../controller/referralController");
+  getReferralDashboard,
+} = require(
+"../controller/referralController"
+);
+
+const auth =
+require("../middleware/auth");
 
 router.get(
-  "/r/:code",
-  openReferralLink
+"/dashboard",
+auth,
+getReferralDashboard
 );
 
 module.exports = router;

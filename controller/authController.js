@@ -10,7 +10,6 @@ const { randomUUID } = require("crypto");
 const crypto = require("crypto");
 const { createResetToken } = require("../utils/token");
 const Wallet = require("../model/Wallet");
-const ReferralVisit = require("../model/ReferralVisit");
 const generateReferralCode = require("../utils/generateReferralCode");
 const cloudinary = require("cloudinary").v2;
 const streamifier = require("streamifier");
@@ -367,25 +366,25 @@ exports.register = async (req, res) => {
       // ==========================
       // 2. AUTO REFERRAL
       // ==========================
-      else if (deviceId) {
-        const visit = await ReferralVisit.findOne({
-          deviceId,
-        }).sort({
-          created_at: -1,
-        });
+      // else if (deviceId) {
+      //   const visit = await ReferralVisit.findOne({
+      //     deviceId,
+      //   }).sort({
+      //     created_at: -1,
+      //   });
 
-        if (visit?.referralCode) {
-          const referralUser = await User.findOne({
-            referralCode: visit.referralCode,
-          });
+      //   if (visit?.referralCode) {
+      //     const referralUser = await User.findOne({
+      //       referralCode: visit.referralCode,
+      //     });
 
-          if (referralUser && referralUser.email !== email) {
-            referredBy = referralUser._id;
+      //     if (referralUser && referralUser.email !== email) {
+      //       referredBy = referralUser._id;
 
-            console.log("✅ Auto referral applied");
-          }
-        }
-      }
+      //       console.log("✅ Auto referral applied");
+      //     }
+      //   }
+      // }
     } catch (err) {
       console.log("Referral skipped:", err.message);
     }

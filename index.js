@@ -29,6 +29,8 @@ const promotionPlanAdminRoutes = require("./routes/promotionPlanadminRoutes");
 const serviceReportRoutes = require("./routes/serviceReportRoutes");
 const referralRoutes = require("./routes/referralRoutes");
 const walletRoutes = require("./routes/walletRoutes");
+const adminWalletConfigRoutes = require("./routes/adminWalletConfigRoutes");
+
 // --- KEEP RAW ONLY FOR GITHUB ---
 app.post(
   "/webhook/github",
@@ -154,6 +156,7 @@ app.use("/api/admin", AdminRoutes);
 app.use("/api/admin/service-report", serviceReportRoutes);
 app.use("/api/referral", referralRoutes);
 app.use("/api/wallet", walletRoutes);
+app.use("/api/admin", adminWalletConfigRoutes);
 console.log("Product ID:", process.env.STRIPE_PROMOTION_PRODUCT_ID);
 console.log("apple client ID:", process.env.APPLE_CLIENT_ID);
 console.log("reset password link:", process.env.FRONTEND_RESET_URL);

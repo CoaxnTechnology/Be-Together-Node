@@ -3,4 +3,4 @@ node_modules/
 
 # uploads (local files)
 uploads/
-service-account.json
+firebase/service-account.json

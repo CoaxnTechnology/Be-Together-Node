@@ -1,45 +1,30 @@
-const User =
-require("../model/User");
+const User = require("../model/User");
 
-const Wallet =
-require("../model/Wallet");
+const Wallet = require("../model/Wallet");
 
-const WalletHistory =
-require("../model/WalletHistory");
+const WalletHistory = require("../model/WalletHistory");
 
-exports.getReferralDashboard =
-async (req, res) => {
-
+exports.getReferralDashboard = async (req, res) => {
   try {
-
-    const userId =
-      req.user.id;
+    const userId = req.user.id;
 
     // ========================
     // WALLET
     // ========================
 
-    const wallet =
-      await Wallet.findOne({
-
-        user: userId,
-
-      });
+    const wallet = await Wallet.findOne({
+      user: userId,
+    });
 
     // ========================
     // REFERRED USERS
     // ========================
 
-    const referredUsers =
-      await User.find({
+    const referredUsers = await User.find({
+      referredBy: userId,
+    })
 
-        referredBy: userId,
-
-      })
-
-      .select(
-        "name email profile_image created_at"
-      )
+      .select("name email profile_image created_at")
 
       .sort({
         created_at: -1,
@@ -49,90 +34,50 @@ async (req, res) => {
     // REFERRAL STATUS
     // ========================
 
-    const referralUsers =
-      await Promise.all(
+    const referralUsers = await Promise.all(
+      referredUsers.map(async (refUser) => {
+        const history = await WalletHistory.findOne({
+          user: userId,
 
-        referredUsers.map(
-          async (refUser) => {
+          referralUser: refUser._id,
 
-            const history =
-              await WalletHistory.find({
+          type: "referral_inviter_bonus",
+        });
 
-                user: userId,
+        return {
+          user: {
+            id: refUser._id,
 
-                referralUser:
-                  refUser._id,
+            name: refUser.name,
 
-              });
+            email: refUser.email,
 
-            let bookingBonus = 0;
+            profile_image: refUser.profile_image,
 
-            let serviceBonus = 0;
+            joinedAt: refUser.created_at,
+          },
 
-            history.forEach((h) => {
+          earnedPoints: history?.points || 0,
 
-              if (
-                h.type ===
-                "referral_booking_bonus"
-              ) {
+          status: history?.points > 0 ? "rewarded" : "pending",
 
-                bookingBonus +=
-                  h.points;
-
-              }
-
-              if (
-                h.type ===
-                "referral_service_bonus"
-              ) {
-
-                serviceBonus +=
-                  h.points;
-
-              }
-
-            });
-
-            return {
-
-              user: refUser,
-
-              bookingBonus,
-
-              serviceBonus,
-
-              totalBonus:
-                bookingBonus +
-                serviceBonus,
-
-              hasCompletedBooking:
-                bookingBonus > 0,
-
-              hasCreatedService:
-                serviceBonus > 0,
-
-            };
-
-          }
-        )
-
-      );
+          message:
+            history?.points > 0
+              ? `${refUser.name} joined using your referral and you earned ${history.points} coins`
+              : `${refUser.name} joined but reward pending`,
+        };
+      }),
+    );
 
     // ========================
     // WALLET HISTORY
     // ========================
 
-    const walletHistory =
-      await WalletHistory.find({
+    const walletHistory = await WalletHistory.find({
+      user: userId,
+    })
 
-        user: userId,
-
-      })
-
-      .populate(
-        "referralUser",
-        "name email profile_image"
-      )
+      .populate("referralUser", "name email profile_image")
 
       .sort({
         created_at: -1,
@@ -142,70 +87,44 @@ async (req, res) => {
     // STATS
     // ========================
 
-    const totalReferrals =
-      referredUsers.length;
+    const totalReferrals = referredUsers.length;
 
-    const completedReferrals =
-      referralUsers.filter(
+    const completedReferrals = referralUsers.filter(
+      (r) => r.earnedPoints > 0,
+    ).length;
 
-        (r) =>
-          r.totalBonus > 0
-
-      ).length;
-
-    const pendingReferrals =
-      referralUsers.filter(
-
-        (r) =>
-          r.totalBonus === 0
-
-      ).length;
+    const pendingReferrals = referralUsers.filter(
+      (r) => r.earnedPoints === 0,
+    ).length;
 
     return res.json({
-
       IsSucces: true,
 
       stats: {
-
         totalReferrals,
 
         completedReferrals,
 
         pendingReferrals,
-
       },
 
       wallet: {
+        points: wallet?.points || 0,
 
-        points:
-          wallet?.points || 0,
+        totalEarned: wallet?.totalEarned || 0,
 
-        totalEarned:
-          wallet?.totalEarned || 0,
-
-        totalSpent:
-          wallet?.totalSpent || 0,
-
+        totalSpent: wallet?.totalSpent || 0,
       },
 
-      referrals:
-        referralUsers,
+      referrals: referralUsers,
 
       walletHistory,
-
     });
-
   } catch (err) {
-
     return res.status(500).json({
-
       IsSucces: false,
 
-      message:
-        err.message,
-
+      message: err.message,
     });
-
   }
-
 };

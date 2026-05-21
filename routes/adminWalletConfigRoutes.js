@@ -8,7 +8,7 @@ const {
   updateWalletConfig,
   deleteWalletConfig,
 } = require("../controller/adminWalletConfigController");
-const auth=require("../middleware/adminAuth");
+const auth = require("../Middleware/adminAuth");
 // ADD
 router.post("/wallet-config", auth, createWalletConfig);
 

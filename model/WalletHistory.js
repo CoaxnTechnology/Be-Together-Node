@@ -27,10 +27,12 @@ const walletHistorySchema = new mongoose.Schema({
     type: String,
 
     enum: [
-      "referral_booking_bonus",
+      // referral reward
+      "referral_inviter_bonus",
 
-      "referral_service_bonus",
+      "referral_invited_bonus",
 
+      // wallet usage
       "wallet_spent",
 
       "wallet_refund",

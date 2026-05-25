@@ -7,7 +7,7 @@ const {
   getDeletedUserById,
   deleteAccount,
 } = require("../controller/deleteaccountcontroller");
-
+const auth = require("../Middleware/authMiddleware");
 // deleted users list
 router.get("/deleted-users", getDeletedUsers);
 
@@ -15,6 +15,6 @@ router.get("/deleted-users", getDeletedUsers);
 router.get("/deleted-users/:backupId", getDeletedUserById);
 
 // DELETE ACCOUNT
-router.delete("/delete-account", deleteAccount);
+router.delete("/delete-account", auth, deleteAccount);
 
 module.exports = router;

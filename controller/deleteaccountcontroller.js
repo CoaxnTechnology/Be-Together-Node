@@ -10,7 +10,7 @@ const Wallet = require("../model/Wallet");
 
 const WalletHistory = require("../model/WalletHistory");
 
-const Review = require("../model/Review");
+const Review = require("../model/review");
 
 const ReferralTracking = require("../model/ReferralTracking");
 

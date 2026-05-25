@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const serviceSnapshotSchema = new mongoose.Schema(
   {
     serviceId: mongoose.Schema.Types.ObjectId,

@@ -1,17 +1,13 @@
-const mongoose =
-require("mongoose");
+const mongoose = require("mongoose");
 
-const referralTrackingSchema =
-new mongoose.Schema({
-
+const referralTrackingSchema = new mongoose.Schema({
   referralCode: {
     type: String,
     required: true,
   },
 
   referralOwner: {
-    type:
-      mongoose.Schema.Types.ObjectId,
+    type: mongoose.Schema.Types.ObjectId,
 
     ref: "User",
 
@@ -19,8 +15,7 @@ new mongoose.Schema({
   },
 
   joinedUser: {
-    type:
-      mongoose.Schema.Types.ObjectId,
+    type: mongoose.Schema.Types.ObjectId,
 
     ref: "User",
 
@@ -76,11 +71,6 @@ new mongoose.Schema({
     type: Date,
     default: Date.now,
   },
-
 });
 
-module.exports =
-mongoose.model(
-  "ReferralTracking",
-  referralTrackingSchema
-);
+module.exports = mongoose.model("ReferralTracking", referralTrackingSchema);

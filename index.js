@@ -119,6 +119,9 @@ connectDB();
 app.get("/api/terms", (req, res) => {
   res.sendFile(path.join(__dirname, "templates", "terms_and_conditions.html"));
 });
+app.get("/api/privacy", (req, res) => {
+  res.sendFile(path.join(__dirname, "templates", "privacy_policy.html"));
+});
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 app.use(express.static(path.join(__dirname, "public")));
 

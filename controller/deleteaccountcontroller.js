@@ -42,43 +42,27 @@ exports.deleteAccount = async (req, res) => {
     // ===========================
     const activeService = await Service.findOne({
       owner: userId,
-
       $or: [
-        {
-          deleteRequestStatus: null,
-        },
-        {
-          deleteRequestStatus: "rejected",
-        },
-        {
-          deleteRequestStatus: "pending",
-        },
+        { deleteRequestStatus: null },
+        { deleteRequestStatus: "rejected" },
+        { deleteRequestStatus: "pending" },
       ],
     });
 
     if (activeService) {
       return res.status(400).json({
         success: false,
-
         type: "ACTIVE_SERVICE",
-
         message:
           "Please delete or deactivate your active services before deleting account",
       });
     }
+
     // ===========================
     // CHECK ACTIVE BOOKINGS
     // ===========================
     const activeBooking = await Booking.findOne({
-      $or: [
-        {
-          customer: userId,
-        },
-        {
-          provider: userId,
-        },
-      ],
-
+      $or: [{ customer: userId }, { provider: userId }],
       status: {
         $in: ["pending_payment", "booked", "started"],
       },
@@ -87,18 +71,11 @@ exports.deleteAccount = async (req, res) => {
     if (activeBooking) {
       return res.status(400).json({
         success: false,
-
         type: "ACTIVE_BOOKING",
-
         message:
           "Please complete or cancel active bookings before deleting your account",
       });
     }
-
-    // ===========================
-    // TODO:
-    // ACTIVE SUBSCRIPTION CHECK
-    // ===========================
 
     // ===========================
     // FETCH USER SERVICES
@@ -114,14 +91,7 @@ exports.deleteAccount = async (req, res) => {
     // FETCH BOOKINGS
     // ===========================
     const bookings = await Booking.find({
-      $or: [
-        {
-          customer: userId,
-        },
-        {
-          provider: userId,
-        },
-      ],
+      $or: [{ customer: userId }, { provider: userId }],
     })
       .populate("customer", "name email mobile")
       .populate("provider", "name email mobile")
@@ -133,14 +103,7 @@ exports.deleteAccount = async (req, res) => {
     // FETCH PAYMENTS
     // ===========================
     const payments = await Payment.find({
-      $or: [
-        {
-          user: userId,
-        },
-        {
-          provider: userId,
-        },
-      ],
+      $or: [{ user: userId }, { provider: userId }],
     })
       .populate("user", "name email mobile")
       .populate("provider", "name email mobile")
@@ -149,45 +112,27 @@ exports.deleteAccount = async (req, res) => {
 
     console.log({
       services: services.length,
-
       bookings: bookings.length,
-
       payments: payments.length,
     });
+
     // ===========================
-    // SAVE BACKUP IN DB
+    // SAVE BACKUP
     // ===========================
     const backup = await AccountDeleteBackup.create({
       deletedUserId: userId,
 
-      // ===================
-      // USER DETAILS
-      // ===================
       userDetails: user,
 
-      // ===================
-      // SERVICES
-      // ===================
       services,
 
-      // ===================
-      // BOOKINGS
-      // ===================
       bookings,
 
-      // ===================
-      // PAYMENTS
-      // ===================
       payments,
 
-      // ===================
-      // SUMMARY
-      // ===================
       summary: {
         totalServices: services.length,
-
         totalBookings: bookings.length,
-
         totalPayments: payments.length,
       },
 
@@ -197,21 +142,57 @@ exports.deleteAccount = async (req, res) => {
     console.log("Backup saved:", backup._id);
 
     // ===========================
-    // TEST RESPONSE
-    // BEFORE DELETE
+    // DELETE USER RELATED DATA
+    // ===========================
+    await Promise.all([
+      Wallet.deleteOne({ user: userId }),
+
+      WalletHistory.deleteMany({
+        user: userId,
+      }),
+
+      Review.deleteMany({
+        $or: [{ user: userId }, { provider: userId }],
+      }),
+
+      ReferralTracking.deleteMany({
+        $or: [{ referrer: userId }, { referredUser: userId }],
+      }),
+
+      ReferralHistory.deleteMany({
+        $or: [{ user: userId }, { receiver: userId }],
+      }),
+
+      Payment.deleteMany({
+        $or: [{ user: userId }, { provider: userId }],
+      }),
+
+      Booking.deleteMany({
+        $or: [{ customer: userId }, { provider: userId }],
+      }),
+
+      Service.deleteMany({
+        owner: userId,
+      }),
+    ]);
+
+    // ===========================
+    // DELETE USER
+    // ===========================
+    await User.findByIdAndDelete(userId);
+
+    // ===========================
+    // RESPONSE
     // ===========================
     return res.status(200).json({
       success: true,
-
-      message: "Backup saved successfully",
+      message: "Account deleted successfully",
 
       backupId: backup._id,
 
       counts: {
         services: services.length,
-
         bookings: bookings.length,
-
         payments: payments.length,
       },
     });
@@ -220,7 +201,6 @@ exports.deleteAccount = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-
       message: error.message,
     });
   }

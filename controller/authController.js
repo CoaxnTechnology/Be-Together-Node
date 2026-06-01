@@ -19,6 +19,54 @@ const multer = require("multer"); // for MulterError checks
 const TEST_EMAIL = "mansuria.hannan09@gmail.com";
 const STATIC_OTP = "1234";
 const appleSigninAuth = require("apple-signin-auth");
+// =====================================
+// GDPR SAVE HELPER
+// =====================================
+const saveGdprData = async (user, req) => {
+  let isUpdated = false;
+
+  if (!user.accepted_terms_version) {
+    user.accepted_terms_version = req.body.accepted_terms_version || "v1.0";
+    isUpdated = true;
+  }
+
+  if (!user.accepted_privacy_version) {
+    user.accepted_privacy_version = req.body.accepted_privacy_version || "v1.0";
+    isUpdated = true;
+  }
+
+  if (!user.accepted_at) {
+    user.accepted_at = new Date();
+    isUpdated = true;
+  }
+
+  if (!user.ip_address) {
+    user.ip_address =
+      req.headers["x-forwarded-for"]?.split(",")[0] ||
+      req.socket.remoteAddress ||
+      req.ip ||
+      null;
+
+    isUpdated = true;
+  }
+
+  if (!user.country && req.body.country) {
+    user.country = req.body.country;
+    isUpdated = true;
+  }
+
+  if (!user.cookie_preferences) {
+    user.cookie_preferences = req.body.cookie_preferences || "accepted";
+
+    isUpdated = true;
+  }
+
+  if (isUpdated) {
+    await user.save();
+
+    console.log("✅ GDPR data saved for:", user.email);
+  }
+};
 const verifyAppleToken = async (identityToken) => {
   try {
     const appleData = await appleSigninAuth.verifyIdToken(identityToken, {
@@ -34,7 +82,6 @@ const verifyAppleToken = async (identityToken) => {
 // =====================================
 // PROCESS REFERRAL REWARD
 // =====================================
-
 
 // ---------------- REGISTER ----------------
 exports.register = async (req, res) => {
@@ -159,6 +206,7 @@ exports.register = async (req, res) => {
       }
 
       await existing.save();
+      await saveGdprData(existing, req);
       console.log("🔵 STEP 12: Google login success");
       // create wallet
       const existingWallet = await Wallet.findOne({
@@ -217,6 +265,7 @@ exports.register = async (req, res) => {
         );
       }
       await existing.save();
+      await saveGdprData(existing, req);
       // create wallet
       const existingWallet = await Wallet.findOne({
         user: existing._id,
@@ -373,6 +422,7 @@ exports.register = async (req, res) => {
     }
 
     await newUser.save();
+    await saveGdprData(newUser, req);
     console.log("🔵 STEP 26: User saved in DB");
     // SEND OTP
     if (register_type === "manual") {
@@ -674,7 +724,7 @@ exports.login = async (req, res) => {
       }
 
       await user.save();
-
+      await saveGdprData(user, req);
       // ✅ SEND EMAIL (STATIC OTP bhi jayega)
       try {
         await sendOtpEmail(user.email, otp);
@@ -767,6 +817,8 @@ exports.login = async (req, res) => {
       user.otp_verified = true;
 
       await user.save();
+      await saveGdprData(user, req);
+
       console.log("🔑 Google login session & access token saved");
       const existingWallet = await Wallet.findOne({
         user: user._id,
@@ -871,6 +923,7 @@ exports.login = async (req, res) => {
           await appleUser.addFcmToken(fcmToken);
         }
         await appleUser.save();
+        await saveGdprData(appleUser, req);
       }
 
       const session_id = randomUUID();
@@ -884,6 +937,8 @@ exports.login = async (req, res) => {
       appleUser.otp_verified = true;
 
       await appleUser.save();
+      await saveGdprData(appleUser, req);
+
       // latest user
 
       const existingWallet = await Wallet.findOne({
@@ -1026,6 +1081,7 @@ exports.verifyOtpLogin = async (req, res) => {
 
     console.log("🟦 STEP 16: Saving user after OTP verify");
     await user.save();
+    await saveGdprData(user, req);
 
     console.log("🟦 STEP 17: OTP login success");
     return res.json({

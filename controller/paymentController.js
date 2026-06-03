@@ -73,6 +73,12 @@ exports.bookService = async (req, res) => {
         message: "Missing required data",
       });
     }
+    if (String(userId) === String(providerId)) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "You cannot book your own service",
+      });
+    }
 
     if (!phone) {
       logPaymentFlow("bookService:missingPhone", { userId, serviceId });
@@ -364,8 +370,9 @@ exports.bookService = async (req, res) => {
         walletCoinsUsed = Math.min(wallet.points, walletCoinsUsed);
 
         // convert coin to currency amount
-        walletAmountUsed = Math.min(walletCoinsUsed * coinValue, amount);
+        walletAmountUsed = walletCoinsUsed * coinValue;
 
+        walletAmountUsed = Math.min(walletAmountUsed, amount);
         customerPayable = amount - walletAmountUsed;
 
         if (customerPayable < 0) {

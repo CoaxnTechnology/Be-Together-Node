@@ -101,6 +101,12 @@ exports.bookService = async (req, res) => {
       providerFound: Boolean(provider),
       serviceFound: Boolean(serviceDetails),
     });
+    if (String(serviceDetails.user) === String(userId)) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "You cannot book your own service",
+      });
+    }
 
     if (!customer || !provider || !serviceDetails) {
       logPaymentFlow("bookService:dataNotFound", {

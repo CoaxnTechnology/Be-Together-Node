@@ -21,13 +21,27 @@ const Booking = require("../model/Booking");
 const CommissionSetting = require("../model/CommissionSetting");
 const updateProviderPerformance = require("../utils/providerPerformance");
 const Wallet = require("../model/Wallet");
-
 const WalletHistory = require("../model/WalletHistory");
+const AdminWalletConfig = require("../model/AdminWalletConfig");
+
+const logPaymentFlow = (step, data = {}) => {
+  console.log(`[paymentController] ${step}`, data);
+};
+
+const logPaymentError = (step, err) => {
+  console.error(`[paymentController] ${step}`, {
+    message: err?.message,
+    stack: err?.stack,
+  });
+};
 // -----------------------------
 // 1️⃣ Create Stripe Checkout Session (Booking not yet confirmed)
 // -----------------------------
 exports.bookService = async (req, res) => {
   try {
+    logPaymentFlow("bookService:start", {
+      body: req.body,
+    });
     const {
       userId,
       providerId,
@@ -36,11 +50,24 @@ exports.bookService = async (req, res) => {
       location_name, // OPTIONAL
       latitude, // OPTIONAL
       longitude,
+      useWallet = false,
     } = req.body;
     // =========================
     // BASIC VALIDATION
     // =========================
+    logPaymentFlow("bookService:validateRequiredFields", {
+      userId,
+      providerId,
+      serviceId,
+      hasPhone: Boolean(phone),
+      useWallet,
+    });
     if (!userId || !providerId || !serviceId) {
+      logPaymentFlow("bookService:missingRequiredData", {
+        userId,
+        providerId,
+        serviceId,
+      });
       return res.status(400).json({
         isSuccess: false,
         message: "Missing required data",
@@ -48,27 +75,56 @@ exports.bookService = async (req, res) => {
     }
 
     if (!phone) {
+      logPaymentFlow("bookService:missingPhone", { userId, serviceId });
       return res.status(400).json({
         isSuccess: false,
         message: "Phone number is required",
       });
     }
     // Data
+    logPaymentFlow("bookService:fetchingData", {
+      userId,
+      providerId,
+      serviceId,
+    });
     const customer = await User.findById(userId);
     const provider = await User.findById(providerId);
     const serviceDetails = await Service.findById(serviceId);
+    logPaymentFlow("bookService:dataFetched", {
+      customerFound: Boolean(customer),
+      providerFound: Boolean(provider),
+      serviceFound: Boolean(serviceDetails),
+    });
+
+    if (!customer || !provider || !serviceDetails) {
+      logPaymentFlow("bookService:dataNotFound", {
+        customerFound: Boolean(customer),
+        providerFound: Boolean(provider),
+        serviceFound: Boolean(serviceDetails),
+      });
+      return res.status(404).json({ message: "Data not found" });
+    }
+
     // ⭐ Always use service currency (NOT provider)
     const currency = serviceDetails.currency?.toLowerCase() || "eur";
     console.log("Booking currency:", currency);
-
-    if (!customer || !provider || !serviceDetails)
-      return res.status(404).json({ message: "Data not found" });
+    logPaymentFlow("bookService:serviceCurrency", { currency });
     // =========================
     // SAVE PHONE IN USER PROFILE (ONLY IF EMPTY)
     // =========================
     if (!customer.mobile) {
+      logPaymentFlow("bookService:savingCustomerPhone", {
+        customerId: customer._id,
+      });
       customer.mobile = phone;
       await customer.save();
+      logPaymentFlow("bookService:customerPhoneSaved", {
+        customerId: customer._id,
+      });
+    } else {
+      logPaymentFlow("bookService:customerPhoneAlreadyExists", {
+        customerId: customer._id,
+      });
     }
 
     // =========================
@@ -81,8 +137,17 @@ exports.bookService = async (req, res) => {
         coordinates: [Number(longitude), Number(latitude)],
       };
     }
+    logPaymentFlow("bookService:bookingLocationPrepared", {
+      hasLocation: Boolean(bookingLocation),
+      location_name: location_name || null,
+      bookingLocation,
+    });
 
     const amount = serviceDetails.isFree ? 0 : serviceDetails.price;
+    logPaymentFlow("bookService:amountCalculated", {
+      isFree: serviceDetails.isFree,
+      amount,
+    });
     // Commission
     // =============================================
     // 🚫 BLOCK DOUBLE PAYMENT (Check pending payment)
@@ -93,8 +158,15 @@ exports.bookService = async (req, res) => {
       service: serviceId,
       status: { $in: ["pending", "held"] },
     });
+    logPaymentFlow("bookService:existingPaymentChecked", {
+      existingPaymentId: existingPayment?._id,
+      existingStatus: existingPayment?.status,
+    });
 
     if (existingPayment) {
+      logPaymentFlow("bookService:blockingDuplicatePayment", {
+        paymentId: existingPayment._id,
+      });
       return res.status(400).json({
         isSuccess: false,
         message: "Payment already in progress. Please do not pay again.",
@@ -103,6 +175,11 @@ exports.bookService = async (req, res) => {
     }
 
     if (serviceDetails.isFree) {
+      logPaymentFlow("bookService:freeServiceBranch", {
+        userId,
+        providerId,
+        serviceId,
+      });
       const booking = await Booking.create({
         customer: userId,
         provider: providerId,
@@ -114,80 +191,79 @@ exports.bookService = async (req, res) => {
         location_name: location_name || null,
         ...(bookingLocation && { location: bookingLocation }),
       });
+      logPaymentFlow("bookService:freeBookingCreated", {
+        bookingId: booking._id,
+      });
       // =====================================
-// REFERRAL BOOKING BONUS
-// =====================================
+      // REFERRAL BOOKING BONUS
+      // =====================================
 
-if (customer.referredBy) {
+      if (customer.referredBy) {
+        logPaymentFlow("bookService:referralDetected", {
+          customerId: customer._id,
+          referredBy: customer.referredBy,
+        });
+        const totalBookings = await Booking.countDocuments({
+          customer: customer._id,
 
-  const totalBookings =
-    await Booking.countDocuments({
-
-      customer: customer._id,
-
-      status: {
-        $in: [
-          "booked",
-          "started",
-          "completed",
-        ],
-      },
-
-    });
-
-  // first booking only
-  if (totalBookings === 1) {
-
-    const referralOwner =
-      await User.findById(
-        customer.referredBy
-      );
-
-    if (referralOwner) {
-
-      const wallet =
-        await Wallet.findOne({
-          user: referralOwner._id,
+          status: {
+            $in: ["booked", "started", "completed"],
+          },
+        });
+        logPaymentFlow("bookService:referralTotalBookings", {
+          customerId: customer._id,
+          totalBookings,
         });
 
-      wallet.points += 50;
+        // first booking only
+        if (totalBookings === 1) {
+          const referralOwner = await User.findById(customer.referredBy);
+          logPaymentFlow("bookService:referralOwnerFetched", {
+            referralOwnerId: referralOwner?._id,
+          });
 
-      wallet.totalEarned += 50;
+          if (referralOwner) {
+            const wallet = await Wallet.findOne({
+              user: referralOwner._id,
+            });
+            logPaymentFlow("bookService:referralWalletFetched", {
+              referralOwnerId: referralOwner._id,
+              walletFound: Boolean(wallet),
+            });
 
-      await wallet.save();
+            wallet.points += 50;
 
-      await WalletHistory.create({
+            wallet.totalEarned += 50;
 
-        user:
-          referralOwner._id,
+            await wallet.save();
 
-        points: 50,
+            await WalletHistory.create({
+              user: referralOwner._id,
 
-        type:
-          "referral_booking_bonus",
+              points: 50,
 
-        referralUser:
-          customer._id,
+              type: "referral_booking_bonus",
 
-        service:
-          service._id,
+              referralUser: customer._id,
 
-        note:
-          "First booking referral bonus",
+              service: serviceDetails._id,
 
-      });
+              note: "First booking referral bonus",
+            });
 
-      referralOwner.totalReferralEarned += 50;
+            referralOwner.totalReferralEarned += 50;
 
-      referralOwner.totalReferralUsers += 1;
+            referralOwner.totalReferralUsers += 1;
 
-      await referralOwner.save();
-
-    }
-
-  }
-
-}
+            await referralOwner.save();
+            logPaymentFlow("bookService:referralBonusApplied", {
+              referralOwnerId: referralOwner._id,
+              referralUserId: customer._id,
+              points: 50,
+            });
+          }
+        }
+      }
       // ⭐ Send Email
       console.log("📧 Calling sendServiceBookedEmail…");
       // Send customer email
@@ -224,18 +300,109 @@ if (customer.referredBy) {
       });
     }
 
-    if (!provider.stripeAccountId)
+    if (!provider.stripeAccountId) {
+      logPaymentFlow("bookService:providerStripeMissing", {
+        providerId,
+      });
       return res
         .status(400)
         .json({ message: "Provider stripe account missing" });
+    }
     const commissionSetting = await CommissionSetting.findOne();
     const commissionPercent = commissionSetting?.percentage || 20;
     const commission = Math.round((amount * commissionPercent) / 100);
     const providerAmount = amount - commission;
+    logPaymentFlow("bookService:commissionCalculated", {
+      commissionPercent,
+      commission,
+      providerAmount,
+    });
+    // =======================
+    // WALLET REDEMPTION
+    // =======================
 
+    let walletCoinsUsed = 0;
+
+    let walletAmountUsed = 0;
+
+    let customerPayable = amount;
+
+    let platformContribution = 0;
+
+    if (useWallet && !serviceDetails.isFree) {
+      logPaymentFlow("bookService:walletBranchStart", { userId, amount });
+      const config = await AdminWalletConfig.findOne();
+
+      const wallet = await Wallet.findOne({
+        user: userId,
+      });
+      logPaymentFlow("bookService:walletDataFetched", {
+        configFound: Boolean(config),
+        walletFound: Boolean(wallet),
+        walletPoints: wallet?.points || 0,
+      });
+
+      if (config && wallet && wallet.points > 0) {
+        const redeemPercent = Number(config.maxWalletUsagePercent) || 0;
+
+        const coinValue = Number(config.coinToCurrencyValue) || 1;
+        logPaymentFlow("bookService:walletConfig", {
+          redeemPercent,
+          coinValue,
+        });
+
+        // ==========================
+        // SERVICE AMOUNT % => COINS
+        // Example:
+        // 100 service
+        // 20% => 20 coins
+        // ==========================
+
+        walletCoinsUsed = Math.floor((amount * redeemPercent) / 100);
+
+        // safety
+        walletCoinsUsed = Math.min(wallet.points, walletCoinsUsed);
+
+        // convert coin to currency amount
+        walletAmountUsed = Math.min(walletCoinsUsed * coinValue, amount);
+
+        customerPayable = amount - walletAmountUsed;
+
+        if (customerPayable < 0) {
+          customerPayable = 0;
+        }
+
+        platformContribution = providerAmount - customerPayable;
+
+        if (platformContribution < 0) {
+          platformContribution = 0;
+        }
+        logPaymentFlow("bookService:walletCalculated", {
+          walletCoinsUsed,
+          walletAmountUsed,
+          customerPayable,
+          platformContribution,
+        });
+      } else {
+        logPaymentFlow("bookService:walletSkippedNoConfigOrPoints", {
+          configFound: Boolean(config),
+          walletFound: Boolean(wallet),
+          walletPoints: wallet?.points || 0,
+        });
+      }
+    } else {
+      logPaymentFlow("bookService:walletNotRequested", {
+        useWallet,
+        isFree: serviceDetails.isFree,
+      });
+    }
     // Stripe customer
     let customerStripeId = customer.stripeCustomerId;
     if (!customerStripeId) {
+      logPaymentFlow("bookService:creatingStripeCustomer", {
+        customerId: customer._id,
+        email: customer.email,
+      });
       const newCustomer = await stripe.customers.create({
         email: customer.email,
         name: customer.name,
@@ -243,9 +410,25 @@ if (customer.referredBy) {
       customerStripeId = newCustomer.id;
       customer.stripeCustomerId = customerStripeId;
       await customer.save();
+      logPaymentFlow("bookService:stripeCustomerCreated", {
+        customerId: customer._id,
+        customerStripeId,
+      });
+    } else {
+      logPaymentFlow("bookService:usingExistingStripeCustomer", {
+        customerId: customer._id,
+        customerStripeId,
+      });
     }
 
     // Stripe Checkout
+    logPaymentFlow("bookService:creatingCheckoutSession", {
+      customerStripeId,
+      currency,
+      customerPayable,
+      providerId,
+      serviceId,
+    });
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
       customer: customerStripeId,
@@ -258,23 +441,38 @@ if (customer.referredBy) {
               name: serviceDetails.title,
               description: serviceDetails.description || "No description",
             },
-            unit_amount: Math.round(amount * 100),
+            unit_amount: Math.round(customerPayable * 100),
           },
           quantity: 1,
         },
       ],
       payment_intent_data: {
         capture_method: "manual",
-        application_fee_amount: commission * 100,
-        transfer_data: { destination: provider.stripeAccountId },
-        metadata: { userId, providerId, serviceId },
+
+        metadata: {
+          userId,
+          providerId,
+          serviceId,
+        },
       },
-      metadata: { userId, providerId, serviceId },
       success_url: `https://yourflutterapp.com/payment-success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `https://yourflutterapp.com/payment-cancel`,
     });
+    logPaymentFlow("bookService:checkoutSessionCreated", {
+      sessionId: session.id,
+      paymentIntentId: session.payment_intent,
+    });
 
     // Save only payment
+    logPaymentFlow("bookService:creatingPaymentRecord", {
+      checkoutSessionId: session.id,
+      customerPayable,
+      originalAmount: amount,
+      walletCoinsUsed,
+      walletAmountUsed,
+      appCommission: commission,
+      providerAmount,
+    });
     const payment = await Payment.create({
       user: userId,
       provider: providerId,
@@ -282,7 +480,19 @@ if (customer.referredBy) {
       checkoutSessionId: session.id,
       customerStripeId,
       providerStripeId: provider.stripeAccountId,
-      amount,
+      amount: customerPayable,
+      currency,
+      originalAmount: amount,
+
+      walletCoinsUsed,
+
+      walletAmountUsed,
+
+      customerPaidAmount: customerPayable,
+
+      platformContribution,
+
+      usedWallet: walletCoinsUsed > 0,
       appCommission: commission,
       providerAmount,
       paymentIntentId: session.payment_intent,
@@ -292,14 +502,22 @@ if (customer.referredBy) {
       location_name: location_name || null,
       ...(bookingLocation && { location: bookingLocation }),
     });
+    logPaymentFlow("bookService:paymentRecordCreated", {
+      paymentId: payment._id,
+      status: payment.status,
+    });
 
+    logPaymentFlow("bookService:successResponse", {
+      paymentId: payment._id,
+      sessionId: session.id,
+    });
     res.json({
       isSuccess: true,
       redirectUrl: session.url,
       paymentId: payment._id,
     });
   } catch (err) {
-    console.log(err);
+    logPaymentError("bookService:error", err);
     res.status(500).json({ message: err.message });
   }
 };
@@ -310,18 +528,26 @@ exports.updateBookingStatus = async (req, res) => {
   try {
     console.log("▶️ updateBookingStatus called");
     console.log("📥 Body:", req.body);
+    logPaymentFlow("updateBookingStatus:start", { body: req.body });
 
     const { sessionId } = req.body;
 
     if (!sessionId) {
       console.log("❌ sessionId missing");
+      logPaymentFlow("updateBookingStatus:missingSessionId");
       return res.status(400).json({ message: "sessionId is required" });
     }
 
     console.log("🔎 Fetching Stripe Session…");
+    logPaymentFlow("updateBookingStatus:fetchingStripeSession", { sessionId });
     const session = await stripe.checkout.sessions.retrieve(sessionId);
 
     console.log("🧾 Stripe Session Found:", session.id);
+    logPaymentFlow("updateBookingStatus:stripeSessionFetched", {
+      sessionId: session.id,
+      paymentIntentId: session.payment_intent,
+      paymentStatus: session.payment_status,
+    });
 
     console.log("🔎 Fetching PaymentIntent…");
     const paymentIntent = await stripe.paymentIntents.retrieve(
@@ -329,9 +555,17 @@ exports.updateBookingStatus = async (req, res) => {
     );
 
     console.log("💳 PaymentIntent Status:", paymentIntent.status);
+    logPaymentFlow("updateBookingStatus:paymentIntentFetched", {
+      paymentIntentId: paymentIntent.id,
+      status: paymentIntent.status,
+      metadata: paymentIntent.metadata,
+    });
 
     if (paymentIntent.status !== "requires_capture") {
       console.log("❌ Payment NOT in requires_capture state.");
+      logPaymentFlow("updateBookingStatus:paymentNotRequiresCapture", {
+        status: paymentIntent.status,
+      });
       return res.status(400).json({ message: "Payment not completed" });
     }
 
@@ -340,9 +574,15 @@ exports.updateBookingStatus = async (req, res) => {
     // =============================================
     const payment = await Payment.findOne({ checkoutSessionId: sessionId });
     console.log("💰 Payment Found:", payment?._id);
+    logPaymentFlow("updateBookingStatus:paymentFetchedFromDb", {
+      paymentId: payment?._id,
+      paymentStatus: payment?.status,
+      bookingId: payment?.bookingId,
+    });
 
     if (!payment) {
       console.log("❌ Payment not found in DB");
+      logPaymentFlow("updateBookingStatus:paymentNotFound", { sessionId });
       return res.status(404).json({ message: "Payment not found" });
     }
 
@@ -351,6 +591,10 @@ exports.updateBookingStatus = async (req, res) => {
     // =============================================
     if (payment.status === "held") {
       console.log("⚠️ Booking already exists:", payment.bookingId);
+      logPaymentFlow("updateBookingStatus:bookingAlreadyCreated", {
+        paymentId: payment._id,
+        bookingId: payment.bookingId,
+      });
       return res.json({
         isSuccess: true,
         message: "Booking already created earlier",
@@ -361,10 +605,22 @@ exports.updateBookingStatus = async (req, res) => {
     // =============================================
     // 📌 Metadata
     // =============================================
-    const { userId, providerId, serviceId } = session.metadata;
+    const { userId, providerId, serviceId } = paymentIntent.metadata;
     console.log("🔐 Metadata:", session.metadata);
+    logPaymentFlow("updateBookingStatus:metadataRead", {
+      userId,
+      providerId,
+      serviceId,
+      sessionMetadata: session.metadata,
+      paymentIntentMetadata: paymentIntent.metadata,
+    });
 
     console.log("🔎 Fetching Customer, Provider, Service…");
+    logPaymentFlow("updateBookingStatus:fetchingRelatedData", {
+      userId,
+      providerId,
+      serviceId,
+    });
 
     const customer = await User.findById(userId);
     const provider = await User.findById(providerId);
@@ -373,8 +629,18 @@ exports.updateBookingStatus = async (req, res) => {
     console.log("👤 Customer:", customer ? "FOUND" : "NOT FOUND");
     console.log("🧑‍🔧 Provider:", provider ? "FOUND" : "NOT FOUND");
     console.log("🛠 Service:", service ? "FOUND" : "NOT FOUND");
+    logPaymentFlow("updateBookingStatus:relatedDataFetched", {
+      customerFound: Boolean(customer),
+      providerFound: Boolean(provider),
+      serviceFound: Boolean(service),
+    });
 
     if (!customer || !provider || !service) {
+      logPaymentFlow("updateBookingStatus:relatedDataMissing", {
+        customerFound: Boolean(customer),
+        providerFound: Boolean(provider),
+        serviceFound: Boolean(service),
+      });
       return res.status(404).json({
         message: "Service / Provider / Customer not found",
       });
@@ -384,11 +650,19 @@ exports.updateBookingStatus = async (req, res) => {
     // 📝 Create Booking
     // =============================================
     console.log("📝 Creating booking…");
+    logPaymentFlow("updateBookingStatus:creatingBooking", {
+      userId,
+      providerId,
+      serviceId,
+      paymentId: payment._id,
+      amount: payment.originalAmount,
+      currency: payment.currency,
+    });
     const booking = await Booking.create({
       customer: userId,
       provider: providerId,
       service: serviceId,
-      amount: payment.amount,
+      amount: payment.originalAmount,
       currency: payment.currency,
       paymentId: payment._id,
       status: "booked",
@@ -399,6 +673,9 @@ exports.updateBookingStatus = async (req, res) => {
     });
 
     console.log("✅ Booking Created:", booking._id);
+    logPaymentFlow("updateBookingStatus:bookingCreated", {
+      bookingId: booking._id,
+    });
 
     // =============================================
     // 💾 Update Payment
@@ -409,6 +686,11 @@ exports.updateBookingStatus = async (req, res) => {
     await payment.save();
 
     console.log("💾 Payment updated");
+    logPaymentFlow("updateBookingStatus:paymentUpdated", {
+      paymentId: payment._id,
+      status: payment.status,
+      bookingId: payment.bookingId,
+    });
 
     // =============================================
     // 📧 Send Emails
@@ -435,6 +717,9 @@ exports.updateBookingStatus = async (req, res) => {
     // 🔔 Send Notification
     // =============================================
     console.log("🔔 Calling sendBookingNotification…");
+    logPaymentFlow("updateBookingStatus:sendingBookingNotification", {
+      bookingId: booking._id,
+    });
 
     sendBookingNotification(customer, provider, service, booking).catch((err) =>
       console.log("❌ Notification error:", err),
@@ -443,6 +728,10 @@ exports.updateBookingStatus = async (req, res) => {
     // =============================================
     // ✅ RESPONSE
     // =============================================
+    logPaymentFlow("updateBookingStatus:successResponse", {
+      bookingId: booking._id,
+      paymentId: payment._id,
+    });
     res.json({
       isSuccess: true,
       message: "Booking created after payment success",
@@ -450,6 +739,7 @@ exports.updateBookingStatus = async (req, res) => {
     });
   } catch (err) {
     console.log("❌ updateBookingStatus ERROR:", err);
+    logPaymentError("updateBookingStatus:error", err);
     res.status(500).json({ message: err.message });
   }
 };
@@ -459,25 +749,54 @@ exports.updateBookingStatus = async (req, res) => {
 // ------------------------------
 exports.startService = async (req, res) => {
   try {
+    logPaymentFlow("startService:start", { body: req.body });
     const { bookingId } = req.body;
+    logPaymentFlow("startService:fetchingBooking", { bookingId });
     const booking = await Booking.findById(bookingId)
       .populate("customer")
       .populate("provider")
       .populate("service");
 
-    if (!booking) return res.status(404).json({ message: "Booking not found" });
+    logPaymentFlow("startService:bookingFetched", {
+      bookingId: booking?._id,
+      status: booking?.status,
+      customerFound: Boolean(booking?.customer),
+      providerFound: Boolean(booking?.provider),
+      serviceFound: Boolean(booking?.service),
+    });
+
+    if (!booking) {
+      logPaymentFlow("startService:bookingNotFound", { bookingId });
+      return res.status(404).json({ message: "Booking not found" });
+    }
 
     const { customer, provider, service } = booking;
-    if (!customer || !customer.email)
+    if (!customer || !customer.email) {
+      logPaymentFlow("startService:customerEmailMissing", {
+        bookingId,
+        customerId: customer?._id,
+      });
       return res.status(400).json({ message: "Customer email missing" });
+    }
 
     // Generate OTP
+    logPaymentFlow("startService:generatingOtp", { bookingId });
     const { otp, expiry } = generateOTP();
     booking.otp = otp;
     booking.otpExpiry = expiry;
     await booking.save();
+    logPaymentFlow("startService:otpSaved", {
+      bookingId,
+      otpExpiry: expiry,
+    });
 
     // Send OTP email
+    logPaymentFlow("startService:sendingOtpEmail", {
+      bookingId,
+      customerEmail: customer.email,
+      providerId: provider?._id,
+      serviceId: service?._id,
+    });
     await sendServiceOtpEmail(customer.email, {
       customerName: customer.name,
       providerName: provider.name,
@@ -486,12 +805,15 @@ exports.startService = async (req, res) => {
       amount: booking.amount,
       otp,
     });
+    logPaymentFlow("startService:otpEmailSent", { bookingId });
 
+    logPaymentFlow("startService:successResponse", { bookingId });
     return res.json({
       isSuccess: true,
       message: "OTP generated & sent to customer email",
     }); // otp for testing
   } catch (err) {
+    logPaymentError("startService:error", err);
     res.status(500).json({ message: err.message });
   }
 };
@@ -501,37 +823,70 @@ exports.startService = async (req, res) => {
 // ------------------------------
 exports.verifyServiceOtp = async (req, res) => {
   try {
+    logPaymentFlow("verifyServiceOtp:start", { body: req.body });
     const { bookingId, otp } = req.body;
 
+    logPaymentFlow("verifyServiceOtp:fetchingBooking", { bookingId });
     const booking = await Booking.findById(bookingId)
       .populate("customer")
       .populate("provider")
       .populate("service");
 
-    if (!booking) return res.status(404).json({ message: "Booking not found" });
+    logPaymentFlow("verifyServiceOtp:bookingFetched", {
+      bookingId: booking?._id,
+      status: booking?.status,
+      otpExpiry: booking?.otpExpiry,
+    });
 
-    if (booking.otpExpiry < new Date())
+    if (!booking) {
+      logPaymentFlow("verifyServiceOtp:bookingNotFound", { bookingId });
+      return res.status(404).json({ message: "Booking not found" });
+    }
+
+    if (booking.otpExpiry < new Date()) {
+      logPaymentFlow("verifyServiceOtp:otpExpired", {
+        bookingId,
+        otpExpiry: booking.otpExpiry,
+        now: new Date(),
+      });
       return res.status(400).json({ message: "OTP expired" });
+    }
 
-    if (booking.otp != otp)
+    if (booking.otp != otp) {
+      logPaymentFlow("verifyServiceOtp:invalidOtp", {
+        bookingId,
+        receivedOtp: otp,
+      });
       return res.status(400).json({ message: "Invalid OTP" });
+    }
 
+    logPaymentFlow("verifyServiceOtp:otpValidUpdatingStatus", { bookingId });
     booking.status = "started";
     await booking.save();
+    logPaymentFlow("verifyServiceOtp:statusUpdated", {
+      bookingId,
+      status: booking.status,
+    });
 
     // 🎯 Only notify customer
+    logPaymentFlow("verifyServiceOtp:sendingStartedNotification", {
+      bookingId,
+    });
     await sendServiceStartedNotification(
       booking.customer,
       booking.provider,
       booking.service,
       booking,
     );
+    logPaymentFlow("verifyServiceOtp:startedNotificationSent", { bookingId });
 
+    logPaymentFlow("verifyServiceOtp:successResponse", { bookingId });
     return res.json({
       isSuccess: true,
       message: "OTP verified & service started",
     });
   } catch (err) {
+    logPaymentError("verifyServiceOtp:error", err);
     res.status(500).json({ message: err.message });
   }
 };
@@ -541,14 +896,29 @@ exports.verifyServiceOtp = async (req, res) => {
 // ------------------------------
 exports.completeService = async (req, res) => {
   try {
+    logPaymentFlow("completeService:start", { body: req.body });
     const { bookingId } = req.body;
 
+    logPaymentFlow("completeService:fetchingBooking", { bookingId });
     const booking = await Booking.findById(bookingId)
       .populate("service")
       .populate("customer")
       .populate("provider");
 
-    if (!booking) return res.status(404).json({ message: "Booking not found" });
+    logPaymentFlow("completeService:bookingFetched", {
+      bookingId: booking?._id,
+      status: booking?.status,
+      amount: booking?.amount,
+      paymentId: booking?.paymentId,
+      serviceFound: Boolean(booking?.service),
+      customerFound: Boolean(booking?.customer),
+      providerFound: Boolean(booking?.provider),
+    });
+
+    if (!booking) {
+      logPaymentFlow("completeService:bookingNotFound", { bookingId });
+      return res.status(404).json({ message: "Booking not found" });
+    }
 
     console.log("📌 Booking loaded:", booking);
 
@@ -558,24 +928,51 @@ exports.completeService = async (req, res) => {
 
     // Free service check first
     if (booking.amount === 0 || booking.service.isFree) {
+      logPaymentFlow("completeService:freeServiceBranch", {
+        bookingId,
+        amount: booking.amount,
+        isFree: booking.service.isFree,
+      });
       booking.status = "completed";
       await booking.save();
+      logPaymentFlow("completeService:freeBookingCompleted", {
+        bookingId,
+        status: booking.status,
+      });
       // 🟢 Performance update → Completed service = +1
       console.log("📊 Updating provider performance (free service)...");
+      logPaymentFlow("completeService:updatingFreeProviderPerformance", {
+        providerId: provider._id,
+      });
       await updateProviderPerformance(provider._id, 1, 0);
+      logPaymentFlow("completeService:freeProviderPerformanceUpdated", {
+        providerId: provider._id,
+      });
 
       console.log("✅ Free service completed:", booking._id);
       // 1️⃣ Send Email (Customer Only)
+      logPaymentFlow("completeService:sendingFreeCompletionEmail", {
+        bookingId,
+        customerId: customer?._id,
+      });
       await sendServiceCompletedEmail(customer, provider, service, booking);
+      logPaymentFlow("completeService:freeCompletionEmailSent", { bookingId });
 
       // ⬇ Send notification for free service
+      logPaymentFlow("completeService:sendingFreeCompletionNotification", {
+        bookingId,
+      });
       await sendServiceCompletedNotification(
         customer,
         provider,
         service,
         booking,
       );
+      logPaymentFlow("completeService:freeCompletionNotificationSent", {
+        bookingId,
+      });
 
+      logPaymentFlow("completeService:freeSuccessResponse", { bookingId });
       return res.json({
         isSuccess: true,
         message: "Free service completed successfully",
@@ -584,6 +981,10 @@ exports.completeService = async (req, res) => {
 
     // OTP verification for paid services
     if (booking.status !== "started") {
+      logPaymentFlow("completeService:paidServiceNotStarted", {
+        bookingId,
+        status: booking.status,
+      });
       return res.status(400).json({
         isSuccess: false,
         message: "Please start the service first by verifying OTP.",
@@ -591,42 +992,169 @@ exports.completeService = async (req, res) => {
     }
 
     // Paid service → capture payment
+    logPaymentFlow("completeService:fetchingPayment", {
+      bookingId,
+      paymentId: booking.paymentId,
+    });
     const payment = await Payment.findById(booking.paymentId);
-    if (!payment) return res.status(404).json({ message: "Payment not found" });
+    logPaymentFlow("completeService:paymentFetched", {
+      paymentId: payment?._id,
+      status: payment?.status,
+      paymentIntentId: payment?.paymentIntentId,
+      providerAmount: payment?.providerAmount,
+      usedWallet: payment?.usedWallet,
+    });
+    if (!payment) {
+      logPaymentFlow("completeService:paymentNotFound", {
+        bookingId,
+        paymentId: booking.paymentId,
+      });
+      return res.status(404).json({ message: "Payment not found" });
+    }
 
     console.log("💰 Payment found:", payment._id);
 
+    logPaymentFlow("completeService:capturingPaymentIntent", {
+      paymentIntentId: payment.paymentIntentId,
+    });
     await stripe.paymentIntents.capture(payment.paymentIntentId);
+    logPaymentFlow("completeService:paymentIntentCaptured", {
+      paymentIntentId: payment.paymentIntentId,
+    });
+    // ========================
+    // AUTO PROVIDER PAYOUT
+    // ========================
 
+    logPaymentFlow("completeService:creatingProviderTransfer", {
+      amount: payment.providerAmount,
+      currency: payment.currency,
+      destination: provider.stripeAccountId,
+      bookingId: booking._id,
+    });
+    await stripe.transfers.create({
+      amount: Math.round(payment.providerAmount * 100),
+
+      currency: payment.currency,
+
+      destination: provider.stripeAccountId,
+
+      transfer_group: booking._id.toString(),
+    });
+    logPaymentFlow("completeService:providerTransferCreated", {
+      bookingId: booking._id,
+    });
+
+    // ========================
+    // WALLET DEDUCTION
+    // ========================
+
+    if (payment.usedWallet && payment.walletCoinsUsed > 0) {
+      logPaymentFlow("completeService:walletDeductionStart", {
+        customerId: booking.customer._id,
+        walletCoinsUsed: payment.walletCoinsUsed,
+      });
+      const wallet = await Wallet.findOne({
+        user: booking.customer._id,
+      });
+      logPaymentFlow("completeService:walletFetched", {
+        walletFound: Boolean(wallet),
+        currentPoints: wallet?.points || 0,
+      });
+
+      if (wallet) {
+        wallet.points = Math.max(0, wallet.points - payment.walletCoinsUsed);
+
+        wallet.totalSpent += payment.walletCoinsUsed;
+
+        await wallet.save();
+        logPaymentFlow("completeService:walletSaved", {
+          walletId: wallet._id,
+          points: wallet.points,
+          totalSpent: wallet.totalSpent,
+        });
+
+        await WalletHistory.create({
+          user: booking.customer._id,
+
+          points: -payment.walletCoinsUsed,
+
+          transactionType: "debit",
+
+          type: "wallet_spent",
+
+          service: booking.service._id,
+
+          note: "Wallet used during booking",
+        });
+        logPaymentFlow("completeService:walletHistoryCreated", {
+          customerId: booking.customer._id,
+          points: -payment.walletCoinsUsed,
+        });
+      }
+    } else {
+      logPaymentFlow("completeService:walletDeductionSkipped", {
+        usedWallet: payment.usedWallet,
+        walletCoinsUsed: payment.walletCoinsUsed,
+      });
+    }
+
+    logPaymentFlow("completeService:updatingBookingAndPayment", {
+      bookingId,
+      paymentId: payment._id,
+    });
     booking.status = "completed";
     await booking.save();
 
     payment.status = "completed";
     payment.completedAt = new Date();
     await payment.save();
+    logPaymentFlow("completeService:bookingAndPaymentUpdated", {
+      bookingStatus: booking.status,
+      paymentStatus: payment.status,
+      completedAt: payment.completedAt,
+    });
 
     console.log("✅ Paid service completed & payment captured:", booking._id);
     // 🟢 Performance update → Paid service completed = +1
     console.log("📊 Updating provider performance (paid service)...");
+    logPaymentFlow("completeService:updatingPaidProviderPerformance", {
+      providerId: provider._id,
+    });
     await updateProviderPerformance(provider._id, 1, 0);
+    logPaymentFlow("completeService:paidProviderPerformanceUpdated", {
+      providerId: provider._id,
+    });
 
     // ⬇ Send Email (only to customer)
+    logPaymentFlow("completeService:sendingPaidCompletionEmail", {
+      bookingId,
+      customerId: customer?._id,
+    });
     await sendServiceCompletedEmail(customer, provider, service, booking);
+    logPaymentFlow("completeService:paidCompletionEmailSent", { bookingId });
 
     // ⬇ Send Notification (customer + provider)
+    logPaymentFlow("completeService:sendingPaidCompletionNotification", {
+      bookingId,
+    });
     await sendServiceCompletedNotification(
       customer,
       provider,
       service,
       booking,
     );
+    logPaymentFlow("completeService:paidCompletionNotificationSent", {
+      bookingId,
+    });
 
+    logPaymentFlow("completeService:paidSuccessResponse", { bookingId });
     return res.json({
       isSuccess: true,
       message: "Service completed & payment captured",
     });
   } catch (err) {
     console.log("❌ completeService ERROR:", err);
+    logPaymentError("completeService:error", err);
     res.status(500).json({ message: err.message });
   }
 };
@@ -634,13 +1162,16 @@ exports.completeService = async (req, res) => {
 // GET USER BOOKINGS (Customer & Provider)
 exports.getUserBookings = async (req, res) => {
   try {
+    logPaymentFlow("getUserBookings:start", { body: req.body });
     const { userId } = req.body; // ⭐ Body se userId
 
     if (!userId) {
+      logPaymentFlow("getUserBookings:missingUserId");
       return res.status(400).json({ message: "userId is required" });
     }
 
     // Customer bookings
+    logPaymentFlow("getUserBookings:fetchingCustomerBookings", { userId });
     const customerBookings = await Booking.find({ customer: userId })
       .populate({
         path: "service",
@@ -651,7 +1182,12 @@ exports.getUserBookings = async (req, res) => {
       })
       .populate("provider", "name email profile_image")
       .sort({ createdAt: -1 });
+    logPaymentFlow("getUserBookings:customerBookingsFetched", {
+      userId,
+      count: customerBookings.length,
+    });
     // Provider bookings
+    logPaymentFlow("getUserBookings:fetchingProviderBookings", { userId });
     const providerBookings = await Booking.find({ provider: userId })
       .populate({
         path: "service",
@@ -662,8 +1198,16 @@ exports.getUserBookings = async (req, res) => {
       })
       .populate("customer", "name email profile_image")
       .sort({ createdAt: -1 });
+    logPaymentFlow("getUserBookings:providerBookingsFetched", {
+      userId,
+      count: providerBookings.length,
+    });
 
     const bookings = [];
+    logPaymentFlow("getUserBookings:buildingResponseList", {
+      customerCount: customerBookings.length,
+      providerCount: providerBookings.length,
+    });
 
     customerBookings.forEach((b) => {
       bookings.push({
@@ -709,9 +1253,14 @@ exports.getUserBookings = async (req, res) => {
     });
 
     bookings.sort((a, b) => b.createdAt - a.createdAt);
+    logPaymentFlow("getUserBookings:successResponse", {
+      userId,
+      totalCount: bookings.length,
+    });
 
     return res.json({ isSuccess: true, bookings });
   } catch (err) {
+    logPaymentError("getUserBookings:error", err);
     return res.status(500).json({ message: err.message });
   }
 };
@@ -725,29 +1274,50 @@ exports.getUserBookings = async (req, res) => {
 exports.refundBooking = async (req, res) => {
   console.log("🚀 [API] refundBooking Called");
   console.log("📥 Request Body:", req.body);
+  logPaymentFlow("refundBooking:start", { body: req.body });
 
   try {
     const { bookingId, cancelledBy, reason } = req.body;
+    logPaymentFlow("refundBooking:requestParsed", {
+      bookingId,
+      cancelledBy,
+      hasReason: Boolean(reason),
+    });
 
     // ---------------------------------------------------------
     // 1️⃣ FETCH BOOKING
     // ---------------------------------------------------------
     console.log("🔍 Fetching Booking…");
+    logPaymentFlow("refundBooking:fetchingBooking", { bookingId });
     const booking = await Booking.findById(bookingId)
       .populate("customer")
       .populate("provider")
       .populate("service");
 
     console.log("📦 Booking Found:", booking?._id);
+    logPaymentFlow("refundBooking:bookingFetched", {
+      bookingId: booking?._id,
+      status: booking?.status,
+      amount: booking?.amount,
+      paymentId: booking?.paymentId,
+      customerFound: Boolean(booking?.customer),
+      providerFound: Boolean(booking?.provider),
+      serviceFound: Boolean(booking?.service),
+    });
 
     if (!booking) {
       console.log("❌ Booking Not Found");
+      logPaymentFlow("refundBooking:bookingNotFound", { bookingId });
       return res.status(404).json({ message: "Booking not found" });
     }
 
     console.log("📌 Booking Status:", booking.status);
 
     if (booking.status === "completed") {
+      logPaymentFlow("refundBooking:blockedCompletedBooking", {
+        bookingId,
+        status: booking.status,
+      });
       return res.status(400).json({
         isSuccess: false,
         message: "Service already completed. Cancellation not allowed.",
@@ -755,6 +1325,10 @@ exports.refundBooking = async (req, res) => {
     }
 
     if (booking.status === "started") {
+      logPaymentFlow("refundBooking:blockedStartedBooking", {
+        bookingId,
+        status: booking.status,
+      });
       return res.status(400).json({
         isSuccess: false,
         message: "Service already started. Cancellation not allowed.",
@@ -762,6 +1336,10 @@ exports.refundBooking = async (req, res) => {
     }
 
     if (booking.status !== "booked") {
+      logPaymentFlow("refundBooking:blockedNonBookedStatus", {
+        bookingId,
+        status: booking.status,
+      });
       return res.status(400).json({
         isSuccess: false,
         message: "Only booked services can be cancelled.",
@@ -773,6 +1351,10 @@ exports.refundBooking = async (req, res) => {
     // ==========================================================
     if (booking.amount === 0) {
       console.log("❗ Free service cancellation detected");
+      logPaymentFlow("refundBooking:freeCancellationBranch", {
+        bookingId,
+        cancelledBy,
+      });
 
       booking.status = "cancelled";
       booking.cancelledBy = cancelledBy || "customer";
@@ -783,10 +1365,21 @@ exports.refundBooking = async (req, res) => {
       booking.refundAmount = 0;
 
       await booking.save();
+      logPaymentFlow("refundBooking:freeBookingUpdated", {
+        bookingId,
+        status: booking.status,
+        cancelledBy: booking.cancelledBy,
+      });
       // ⭐ PERFORMANCE: Provider cancelled free service → 1 failed
       if (cancelledBy === "provider") {
         console.log("📉 Updating provider performance (free cancel)…");
+        logPaymentFlow("refundBooking:updatingFreeCancelPerformance", {
+          providerId: booking.provider._id,
+        });
         await updateProviderPerformance(booking.provider._id, 0, 1);
+        logPaymentFlow("refundBooking:freeCancelPerformanceUpdated", {
+          providerId: booking.provider._id,
+        });
       }
       console.log("📧 Sending cancel email for FREE service...");
       console.log("📧 Sending Cancel Email…");
@@ -806,9 +1399,11 @@ exports.refundBooking = async (req, res) => {
 
         console.log("✅ [EMAIL] Email function executed");
         console.log("📧 Email Response:", emailResponse);
+        logPaymentFlow("refundBooking:freeCancelEmailSent", { bookingId });
       } catch (emailErr) {
         console.error("❌ [EMAIL ERROR] Failed to send cancel email");
         console.error(emailErr);
+        logPaymentError("refundBooking:freeCancelEmailError", emailErr);
       }
 
       // 🔔 SEND NOTIFICATION
@@ -822,9 +1417,17 @@ exports.refundBooking = async (req, res) => {
           reason || "",
         );
         console.log("✅ Free service cancel notification sent");
+        logPaymentFlow("refundBooking:freeCancelNotificationSent", {
+          bookingId,
+        });
       } catch (err) {
         console.error("❌ Free service notification failed", err);
+        logPaymentError("refundBooking:freeCancelNotificationError", err);
       }
+      logPaymentFlow("refundBooking:freeSuccessResponse", {
+        bookingId,
+        cancelledBy: booking.cancelledBy,
+      });
       return res.json({
         isSuccess: true,
         message: "Free service cancelled successfully",
@@ -837,23 +1440,41 @@ exports.refundBooking = async (req, res) => {
     // 2️⃣ FETCH PAYMENT
     // ---------------------------------------------------------
     console.log("💳 Fetching Payment…");
+    logPaymentFlow("refundBooking:fetchingPayment", {
+      paymentId: booking.paymentId,
+      bookingId,
+    });
     let payment = await Payment.findById(booking.paymentId);
     if (!payment) payment = await Payment.findOne({ bookingId });
 
     console.log("💳 Payment Found:", payment?._id);
+    logPaymentFlow("refundBooking:paymentFetched", {
+      paymentId: payment?._id,
+      status: payment?.status,
+      paymentIntentId: payment?.paymentIntentId,
+      amount: payment?.amount,
+    });
 
     if (!payment) {
       console.log("❌ Payment Not Found");
+      logPaymentFlow("refundBooking:paymentNotFound", { bookingId });
       return res.status(404).json({ message: "Payment not found" });
     }
 
     console.log("➡ Retrieving PaymentIntent…");
+    logPaymentFlow("refundBooking:fetchingPaymentIntent", {
+      paymentIntentId: payment.paymentIntentId,
+    });
 
     const paymentIntent = await stripe.paymentIntents.retrieve(
       payment.paymentIntentId,
     );
 
     console.log("✔ PaymentIntent Status:", paymentIntent.status);
+    logPaymentFlow("refundBooking:paymentIntentFetched", {
+      paymentIntentId: paymentIntent.id,
+      status: paymentIntent.status,
+    });
 
     // ---------------------------------------------------------
     // 3️⃣ CANCELLATION FEE LOGIC
@@ -869,6 +1490,11 @@ exports.refundBooking = async (req, res) => {
       const setting = await CancellationSetting.findOne();
       cancellationPercent = setting?.enabled ? setting.percentage : 0;
       console.log("📊 Cancellation %:", cancellationPercent);
+      logPaymentFlow("refundBooking:cancellationSettingFetched", {
+        settingFound: Boolean(setting),
+        enabled: setting?.enabled,
+        cancellationPercent,
+      });
     }
 
     const totalAmount = payment.amount;
@@ -880,20 +1506,36 @@ exports.refundBooking = async (req, res) => {
     console.log("💰 Total Amount:", totalAmount);
     console.log("💰 Cancellation Fee:", cancellationFee);
     console.log("💰 Refundable Amount:", refundAmount);
+    logPaymentFlow("refundBooking:refundAmountsCalculated", {
+      totalAmount,
+      cancellationPercent,
+      cancellationFee,
+      refundAmount,
+    });
 
     // ---------------------------------------------------------
     // 4️⃣ HANDLE CAPTURE CASE
     // ---------------------------------------------------------
     if (paymentIntent.status === "requires_capture") {
       console.log("⚠️ Payment requires capture → capturing now…");
+      logPaymentFlow("refundBooking:capturingBeforeRefund", {
+        paymentIntentId: payment.paymentIntentId,
+      });
       await stripe.paymentIntents.capture(payment.paymentIntentId);
       console.log("✔ Payment Captured Successfully");
+      logPaymentFlow("refundBooking:captureBeforeRefundSuccess", {
+        paymentIntentId: payment.paymentIntentId,
+      });
     }
 
     // ---------------------------------------------------------
     // 5️⃣ STRIPE REFUND
     // ---------------------------------------------------------
     console.log("🔁 Creating Refund…");
+    logPaymentFlow("refundBooking:creatingStripeRefund", {
+      paymentIntentId: payment.paymentIntentId,
+      refundAmount,
+    });
 
     const refund = await stripe.refunds.create({
       payment_intent: payment.paymentIntentId,
@@ -902,6 +1544,10 @@ exports.refundBooking = async (req, res) => {
     });
 
     console.log("🔁 Stripe Refund ID:", refund.id);
+    logPaymentFlow("refundBooking:stripeRefundCreated", {
+      refundId: refund.id,
+      status: refund.status,
+    });
 
     // ---------------------------------------------------------
     // 6️⃣ UPDATE DB — BOOKING + PAYMENT
@@ -919,6 +1565,12 @@ exports.refundBooking = async (req, res) => {
 
     await booking.save();
     console.log("✔ Booking Updated");
+    logPaymentFlow("refundBooking:bookingUpdated", {
+      bookingId,
+      status: booking.status,
+      cancellationFee: booking.cancellationFee,
+      refundAmount: booking.refundAmount,
+    });
 
     // ✅ UPDATE PAYMENT
     payment.status = "refunded";
@@ -928,6 +1580,12 @@ exports.refundBooking = async (req, res) => {
 
     await payment.save();
     console.log("✔ Payment Updated");
+    logPaymentFlow("refundBooking:paymentUpdated", {
+      paymentId: payment._id,
+      status: payment.status,
+      refundedAmount: payment.refundedAmount,
+      cancellationFee: payment.cancellationFee,
+    });
 
     // ---------------------------------------------------------
     // ⭐ 7️⃣ PERFORMANCE UPDATE (Provider Cancel → BAD)
@@ -936,9 +1594,15 @@ exports.refundBooking = async (req, res) => {
       console.log("❗ Provider canceled → Performance DOWN");
 
       // failedCount = 1
+      logPaymentFlow("refundBooking:updatingProviderCancelPerformance", {
+        providerId: booking.provider._id,
+      });
       await updateProviderPerformance(booking.provider._id, 0, 1);
 
       console.log("📉 Provider performance updated after cancellation");
+      logPaymentFlow("refundBooking:providerCancelPerformanceUpdated", {
+        providerId: booking.provider._id,
+      });
     }
 
     // ---------------------------------------------------------
@@ -961,9 +1625,11 @@ exports.refundBooking = async (req, res) => {
 
       console.log("✅ [EMAIL] Email function executed");
       console.log("📧 Email Response:", emailResponse);
+      logPaymentFlow("refundBooking:paidCancelEmailSent", { bookingId });
     } catch (emailErr) {
       console.error("❌ [EMAIL ERROR] Failed to send cancel email");
       console.error(emailErr);
+      logPaymentError("refundBooking:paidCancelEmailError", emailErr);
     }
 
     // ---------------------------------------------------------
@@ -980,6 +1646,12 @@ exports.refundBooking = async (req, res) => {
     );
 
     console.log("🎉 refundBooking Completed Successfully");
+    logPaymentFlow("refundBooking:successResponse", {
+      bookingId,
+      refundAmount,
+      cancellationFee,
+      refundId: refund.id,
+    });
 
     return res.json({
       isSuccess: true,
@@ -992,7 +1664,134 @@ exports.refundBooking = async (req, res) => {
     });
   } catch (err) {
     console.error("❌ refundBooking Error:", err.message);
+    logPaymentError("refundBooking:error", err);
     return res.status(500).json({ message: err.message });
   }
 };
 //new code add
+exports.bookingPreview = async (req, res) => {
+  try {
+    logPaymentFlow("bookingPreview:start", { body: req.body });
+    const { userId, serviceId, useWallet = false } = req.body;
+
+    logPaymentFlow("bookingPreview:fetchingService", { serviceId });
+    const service = await Service.findById(serviceId);
+    logPaymentFlow("bookingPreview:serviceFetched", {
+      serviceFound: Boolean(service),
+      serviceId: service?._id,
+      price: service?.price,
+      currency: service?.currency,
+    });
+
+    if (!service) {
+      logPaymentFlow("bookingPreview:serviceNotFound", { serviceId });
+      return res.status(404).json({
+        isSuccess: false,
+        message: "Service not found",
+      });
+    }
+
+    logPaymentFlow("bookingPreview:fetchingWallet", { userId });
+    const wallet = await Wallet.findOne({
+      user: userId,
+    });
+    logPaymentFlow("bookingPreview:walletFetched", {
+      walletFound: Boolean(wallet),
+      walletBalance: wallet?.points || 0,
+    });
+
+    logPaymentFlow("bookingPreview:fetchingWalletConfig");
+    const config = await AdminWalletConfig.findOne();
+    logPaymentFlow("bookingPreview:walletConfigFetched", {
+      configFound: Boolean(config),
+      coinToCurrencyValue: config?.coinToCurrencyValue,
+      maxWalletUsagePercent: config?.maxWalletUsagePercent,
+      currency: config?.currency,
+    });
+
+    const amount = Number(service.price || 0);
+
+    const coinValue = Number(config?.coinToCurrencyValue) || 1;
+
+    const redeemPercent = Number(config?.maxWalletUsagePercent) || 0;
+
+    const maxRedeemableCoins = Math.floor((amount * redeemPercent) / 100);
+
+    const walletBalance = wallet?.points || 0;
+
+    let coinsUsed = 0;
+
+    let walletDiscount = 0;
+
+    let finalPayable = amount;
+    logPaymentFlow("bookingPreview:baseValuesCalculated", {
+      amount,
+      coinValue,
+      redeemPercent,
+      maxRedeemableCoins,
+      walletBalance,
+      useWallet,
+    });
+
+    if (useWallet) {
+      logPaymentFlow("bookingPreview:walletCalculationStart", {
+        walletBalance,
+        maxRedeemableCoins,
+        amount,
+      });
+      coinsUsed = Math.min(walletBalance, maxRedeemableCoins);
+
+      walletDiscount = coinsUsed * coinValue;
+
+      walletDiscount = Math.min(walletDiscount, amount);
+
+      finalPayable = amount - walletDiscount;
+      logPaymentFlow("bookingPreview:walletCalculationDone", {
+        coinsUsed,
+        walletDiscount,
+        finalPayable,
+      });
+    } else {
+      logPaymentFlow("bookingPreview:walletNotUsed", {
+        finalPayable,
+      });
+    }
+
+    logPaymentFlow("bookingPreview:successResponse", {
+      serviceAmount: amount,
+      walletBalance,
+      maxRedeemableCoins,
+      coinsUsed,
+      walletDiscount,
+      finalPayable,
+      useWallet,
+    });
+    return res.json({
+      isSuccess: true,
+
+      serviceAmount: amount,
+
+      currency: config?.currency || service.currency || "EUR",
+
+      walletBalance,
+
+      maxRedeemableCoins,
+
+      coinValue,
+
+      coinsUsed,
+
+      walletDiscount,
+
+      finalPayable,
+
+      useWallet,
+    });
+  } catch (err) {
+    logPaymentError("bookingPreview:error", err);
+    return res.status(500).json({
+      isSuccess: false,
+      message: err.message,
+    });
+  }
+};

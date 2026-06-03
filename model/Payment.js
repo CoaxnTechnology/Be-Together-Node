@@ -36,6 +36,35 @@ const paymentSchema = new mongoose.Schema(
 
     appCommission: { type: Number, default: 0 },
     providerAmount: { type: Number, default: 0 },
+    walletCoinsUsed: {
+      type: Number,
+      default: 0,
+    },
+
+    walletAmountUsed: {
+      type: Number,
+      default: 0,
+    },
+
+    customerPaidAmount: {
+      type: Number,
+      default: 0,
+    },
+
+    platformContribution: {
+      type: Number,
+      default: 0,
+    },
+
+    originalAmount: {
+      type: Number,
+      default: 0,
+    },
+
+    usedWallet: {
+      type: Boolean,
+      default: false,
+    },
     currency: { type: String, default: null },
 
     status: {

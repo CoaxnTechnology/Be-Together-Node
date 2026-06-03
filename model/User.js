@@ -62,15 +62,15 @@ const userSchema = new mongoose.Schema(
       default: null,
     },
     // GDPR Compliance
-    accepted_terms_version: {
-      type: String,
-      default: null,
-    },
+    termsAccepted: {
+  type: Boolean,
+  default: false,
+},
 
-    accepted_privacy_version: {
-      type: String,
-      default: null,
-    },
+privacyAccepted: {
+  type: Boolean,
+  default: false,
+},
 
     accepted_at: {
       type: Date,

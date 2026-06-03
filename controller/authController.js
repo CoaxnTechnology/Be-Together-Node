@@ -25,13 +25,13 @@ const appleSigninAuth = require("apple-signin-auth");
 const saveGdprData = async (user, req) => {
   let isUpdated = false;
 
-  if (!user.accepted_terms_version) {
-    user.accepted_terms_version = req.body.accepted_terms_version || "v1.0";
+  if (typeof req.body.termsAccepted === "boolean") {
+    user.termsAccepted = req.body.termsAccepted;
     isUpdated = true;
   }
 
-  if (!user.accepted_privacy_version) {
-    user.accepted_privacy_version = req.body.accepted_privacy_version || "v1.0";
+  if (typeof req.body.privacyAccepted === "boolean") {
+    user.privacyAccepted = req.body.privacyAccepted;
     isUpdated = true;
   }
 

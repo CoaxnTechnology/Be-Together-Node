@@ -333,6 +333,8 @@ exports.bookService = async (req, res) => {
     // WALLET REDEMPTION
     // =======================
 
+    let wallet = null;
+
     let walletCoinsUsed = 0;
 
     let walletAmountUsed = 0;
@@ -345,7 +347,7 @@ exports.bookService = async (req, res) => {
       logPaymentFlow("bookService:walletBranchStart", { userId, amount });
       const config = await AdminWalletConfig.findOne();
 
-      const wallet = await Wallet.findOne({
+      wallet = await Wallet.findOne({
         user: userId,
       });
       logPaymentFlow("bookService:walletDataFetched", {
@@ -373,8 +375,11 @@ exports.bookService = async (req, res) => {
         walletCoinsUsed = Math.floor((amount * redeemPercent) / 100);
 
         // safety
-        walletCoinsUsed = Math.min(wallet.points, walletCoinsUsed);
-
+        const availableCoins = Math.max(
+          0,
+          wallet.points - (wallet.reservedPoints || 0),
+        );
+        walletCoinsUsed = Math.min(availableCoins, walletCoinsUsed);
         // convert coin to currency amount
         walletAmountUsed = walletCoinsUsed * coinValue;
 
@@ -515,6 +520,12 @@ exports.bookService = async (req, res) => {
       location_name: location_name || null,
       ...(bookingLocation && { location: bookingLocation }),
     });
+
+    if (walletCoinsUsed > 0) {
+      wallet.reservedPoints = (wallet.reservedPoints || 0) + walletCoinsUsed;
+
+      await wallet.save();
+    }
     logPaymentFlow("bookService:paymentRecordCreated", {
       paymentId: payment._id,
       status: payment.status,
@@ -1075,8 +1086,12 @@ exports.completeService = async (req, res) => {
       });
 
       if (wallet) {
-        wallet.points = Math.max(0, wallet.points - payment.walletCoinsUsed);
+        wallet.reservedPoints = Math.max(
+          0,
+          wallet.reservedPoints - payment.walletCoinsUsed,
+        );
 
+        wallet.points = Math.max(0, wallet.points - payment.walletCoinsUsed);
         wallet.totalSpent += payment.walletCoinsUsed;
 
         await wallet.save();
@@ -1584,7 +1599,29 @@ exports.refundBooking = async (req, res) => {
       cancellationFee: booking.cancellationFee,
       refundAmount: booking.refundAmount,
     });
+    if (payment.usedWallet && payment.walletCoinsUsed > 0) {
+      const wallet = await Wallet.findOne({
+        user: booking.customer._id,
+      });
 
+      if (wallet) {
+        wallet.reservedPoints = Math.max(
+          0,
+          wallet.reservedPoints - payment.walletCoinsUsed,
+        );
+
+        await wallet.save();
+
+        await WalletHistory.create({
+          user: booking.customer._id,
+          points: payment.walletCoinsUsed,
+          transactionType: "credit",
+          type: "wallet_refund",
+          service: booking.service._id,
+          note: "Wallet coins released after cancellation",
+        });
+      }
+    }
     // ✅ UPDATE PAYMENT
     payment.status = "refunded";
     payment.refundedAmount = refundAmount;
@@ -1732,6 +1769,10 @@ exports.bookingPreview = async (req, res) => {
 
     const walletBalance = wallet?.points || 0;
 
+    const reservedCoins = wallet?.reservedPoints || 0;
+
+    const availableCoins = Math.max(0, walletBalance - reservedCoins);
+
     let coinsUsed = 0;
 
     let walletDiscount = 0;
@@ -1752,7 +1793,7 @@ exports.bookingPreview = async (req, res) => {
         maxRedeemableCoins,
         amount,
       });
-      coinsUsed = Math.min(walletBalance, maxRedeemableCoins);
+      coinsUsed = Math.min(availableCoins, maxRedeemableCoins);
 
       walletDiscount = coinsUsed * coinValue;
 
@@ -1769,6 +1810,14 @@ exports.bookingPreview = async (req, res) => {
         finalPayable,
       });
     }
+    const remainingCoins = Math.max(0, availableCoins - coinsUsed);
+    const isOwnService = String(service.user) === String(userId);
+
+    const canRedeem =
+      availableCoins > 0 && maxRedeemableCoins > 0 && !isOwnService;
+    const walletEligibleCoins = Math.min(availableCoins, maxRedeemableCoins);
+    const eligibleDiscountPercent =
+      amount > 0 ? Number(((walletDiscount / amount) * 100).toFixed(2)) : 0;
 
     logPaymentFlow("bookingPreview:successResponse", {
       serviceAmount: amount,
@@ -1779,6 +1828,7 @@ exports.bookingPreview = async (req, res) => {
       finalPayable,
       useWallet,
     });
+
     return res.json({
       isSuccess: true,
 
@@ -1788,17 +1838,32 @@ exports.bookingPreview = async (req, res) => {
 
       walletBalance,
 
-      maxRedeemableCoins,
+      reservedCoins,
+
+      availableCoins,
+
+      remainingCoins,
 
       coinValue,
+
+      redeemPercent,
+
+      maxRedeemableCoins,
 
       coinsUsed,
 
       walletDiscount,
 
+      eligibleDiscountPercent,
+
       finalPayable,
 
+      canRedeem,
+
+      isOwnService,
+
       useWallet,
+      walletEligibleCoins,
     });
   } catch (err) {
     logPaymentError("bookingPreview:error", err);

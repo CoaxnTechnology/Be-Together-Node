@@ -108,7 +108,10 @@ app.use(express.json());
 
 app.use(
   cors({
-    origin: "*", // Allow all origins (not recommended for production)
+    origin: [
+      "https://uat.admin.betogetherapp.com",
+      "https://uat.betogetherapp.com",
+    ], // Allow all origins (not recommended for production)
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
     credentials: true,
   }),

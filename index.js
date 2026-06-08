@@ -31,7 +31,7 @@ const serviceReportRoutes = require("./routes/serviceReportRoutes");
 const referralRoutes = require("./routes/referralRoutes");
 const walletRoutes = require("./routes/walletRoutes");
 const adminWalletConfigRoutes = require("./routes/adminWalletConfigRoutes");
-
+const ambassadorRoutes = require("./routes/ambassadorRoutes");
 // --- KEEP RAW ONLY FOR GITHUB ---
 app.post(
   "/webhook/github",
@@ -137,6 +137,7 @@ app.use("/api/onbording", userTags);
 app.use("/api/user", locationRoutes);
 app.use("/api", ReviewRoutes);
 app.use("/api/admin/profile", require("./routes/adminProfileroutes"));
+app.use("/api/ambassador", ambassadorRoutes);
 //app.use("/api/notifications", notificationRoutes);
 //----------------------Admin API ROutes
 

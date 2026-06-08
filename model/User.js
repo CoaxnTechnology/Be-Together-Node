@@ -63,14 +63,14 @@ const userSchema = new mongoose.Schema(
     },
     // GDPR Compliance
     termsAccepted: {
-  type: Boolean,
-  default: false,
-},
+      type: Boolean,
+      default: false,
+    },
 
-privacyAccepted: {
-  type: Boolean,
-  default: false,
-},
+    privacyAccepted: {
+      type: Boolean,
+      default: false,
+    },
 
     accepted_at: {
       type: Date,
@@ -103,6 +103,33 @@ privacyAccepted: {
       provider: { type: String, default: null },
       recordedAt: { type: Date, default: null },
       updatedAt: { type: Date, default: Date.now },
+    },
+    isAmbassador: {
+      type: Boolean,
+      default: false,
+    },
+
+    ambassadorStatus: {
+      type: String,
+      enum: ["pending", "approved", "rejected", "disabled"],
+      default: null,
+    },
+
+    ambassadorApprovedAt: {
+      type: Date,
+      default: null,
+    },
+
+    ambassadorApprovedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Admin",
+      default: null,
+    },
+
+    ambassadorCode: {
+      type: String,
+      unique: true,
+      sparse: true,
     },
     referralCode: {
       type: String,

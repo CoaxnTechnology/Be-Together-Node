@@ -43,5 +43,4 @@ router.post("/verify-otp-login", verifyOtpLogin);
 router.post("/resend-otp", resendOtp);
 router.post("/forgot-password", authController.forgotOrResetPassword);
 router.post("/logout",authController.logout)
-router.post("/change-first-password", authController.changeFirstPassword)
 module.exports = router;

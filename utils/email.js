@@ -498,7 +498,9 @@ async function sendServiceForceDeletedEmail(
     console.log("📧 ===============================");
   }
 }
-async function sendCredentialsEmail(to, email, password) {
+async function sendCredentialsEmail(to, email, token) {
+  const FRONTEND_RESET_URL = process.env.FRONTEND_RESET_URL;
+
   const templatePath = path.join(
     __dirname,
     "../templates/ambassador_credentials.html",
@@ -506,10 +508,13 @@ async function sendCredentialsEmail(to, email, password) {
 
   let html = fs.readFileSync(templatePath, "utf-8");
 
+  const resetLink =
+    `${FRONTEND_RESET_URL}` +
+    `?email=${encodeURIComponent(email)}` +
+    `&token=${encodeURIComponent(token)}`;
+
   html = html.replace("{{email}}", email);
-
-  html = html.replace("{{password}}", password);
-
+  html = html.replace("{{reset_link}}", resetLink);
   html = html.replace("{{date}}", new Date().toLocaleDateString());
 
   await sendEmail({

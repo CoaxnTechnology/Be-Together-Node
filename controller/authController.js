@@ -682,6 +682,15 @@ exports.login = async (req, res) => {
           .status(404)
           .json({ IsSucces: false, message: "User not found" });
       }
+      if (user.registeredByAmbassador && !user.hashed_password) {
+        return res.status(400).json({
+          IsSucces: false,
+          requirePasswordSetup: true,
+          userId: user._id,
+          message:
+            "Please setup your password using the link sent to your email",
+        });
+      }
 
       if (!user.hashed_password || !password) {
         console.log("❌ Password missing for manual login");
@@ -703,18 +712,6 @@ exports.login = async (req, res) => {
           .json({ IsSucces: false, message: "Invalid password" });
       }
 
-      // =========================
-      // AMBASSADOR USER CHECK
-      // =========================
-
-      if (user.registeredByAmbassador && user.mustResetPassword) {
-        return res.json({
-          IsSucces: true,
-          requirePasswordReset: true,
-          userId: user._id,
-          message: "Please reset your password first",
-        });
-      }
       // =====================================
       // AMBASSADOR USER AGREEMENT SAVE
       // =====================================
@@ -784,6 +781,13 @@ exports.login = async (req, res) => {
     // -------------------- GOOGLE LOGIN --------------------
     if (login_type === "google_auth") {
       console.log("🌐 Attempting Google login");
+      if (user && user.registeredByAmbassador) {
+        return res.status(403).json({
+          IsSucces: false,
+          message:
+            "This account was created by an Ambassador. Please login using email and password.",
+        });
+      }
 
       const userName = name?.trim() || "No Name";
       const userProfileImage = profile_image?.trim() || null;
@@ -923,7 +927,13 @@ exports.login = async (req, res) => {
       if (!appleUser && appleEmail) {
         appleUser = await User.findOne({ email: appleEmail.toLowerCase() });
       }
-
+      if (appleUser && appleUser.registeredByAmbassador) {
+        return res.status(403).json({
+          IsSucces: false,
+          message:
+            "This account was created by an Ambassador. Please login using email and password.",
+        });
+      }
       // create user
       if (!appleUser) {
         appleUser = new User({
@@ -1467,6 +1477,7 @@ exports.forgotOrResetPassword = async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(String(new_password), 10);
     user.hashed_password = hashedPassword;
+    user.passwordChangedByUser = true;
 
     user.reset_password_token = null;
     user.reset_password_expiry = null;
@@ -1523,110 +1534,5 @@ exports.logout = async (req, res) => {
   } catch (err) {
     console.error("❌ Logout Error:", err);
     return res.status(500).json({ IsSucces: false, message: "Server error" });
-  }
-};
-exports.changeFirstPassword = async (req, res) => {
-  try {
-    const { userId, oldPassword, newPassword } = req.body;
-
-    if (!userId || !oldPassword || !newPassword) {
-      return res.status(400).json({
-        isSuccess: false,
-        message: "userId, oldPassword and newPassword are required",
-      });
-    }
-
-    const user = await User.findById(userId);
-
-    if (!user) {
-      return res.status(404).json({
-        isSuccess: false,
-        message: "User not found",
-      });
-    }
-
-    // Only Ambassador-created users
-    if (!user.registeredByAmbassador) {
-      return res.status(403).json({
-        isSuccess: false,
-        message: "Invalid request",
-      });
-    }
-
-    if (!user.mustResetPassword) {
-      return res.status(400).json({
-        isSuccess: false,
-        message: "Password already changed",
-      });
-    }
-
-    const match = await bcrypt.compare(oldPassword, user.hashed_password);
-
-    if (!match) {
-      return res.status(400).json({
-        isSuccess: false,
-        message: "Invalid temporary password",
-      });
-    }
-
-    // Minimum length
-    if (newPassword.length < 8) {
-      return res.status(400).json({
-        isSuccess: false,
-        message: "Password must be at least 8 characters",
-      });
-    }
-
-    // Password strength
-    const passwordRegex =
-      /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&]).{8,}$/;
-
-    if (!passwordRegex.test(newPassword)) {
-      return res.status(400).json({
-        isSuccess: false,
-        message:
-          "Password must contain uppercase, lowercase, number and special character",
-      });
-    }
-
-    // New password cannot be same as temporary password
-    const samePassword = await bcrypt.compare(
-      newPassword,
-      user.hashed_password,
-    );
-
-    if (samePassword) {
-      return res.status(400).json({
-        isSuccess: false,
-        message: "New password cannot be same as temporary password",
-      });
-    }
-
-    // Update password
-    user.hashed_password = await bcrypt.hash(newPassword, 10);
-
-    user.mustResetPassword = false;
-
-    user.lastPasswordResetAt = new Date();
-
-    user.passwordChangedByUser = true;
-
-    user.failedLoginAttempts = 0;
-    user.ambassadorUserAgreementAccepted = false;
-
-    await user.save();
-
-    return res.json({
-      isSuccess: true,
-      message: "Password updated successfully",
-      requireLoginAgain: true,
-    });
-  } catch (err) {
-    console.error("changeFirstPassword error:", err);
-
-    return res.status(500).json({
-      isSuccess: false,
-      message: err.message,
-    });
   }
 };

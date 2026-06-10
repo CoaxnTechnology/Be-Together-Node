@@ -2,6 +2,7 @@ const User = require("../model/User");
 const AmbassadorApplication = require("../model/AmbassadorApplication");
 const bcrypt = require("bcryptjs");
 const fs = require("fs");
+const crypto = require("crypto");
 const path = require("path");
 const { sendOtpEmail, sendCredentialsEmail } = require("../utils/email");
 function generateTempPassword(length = 8) {
@@ -559,7 +560,7 @@ exports.verifyUserOtpByAmbassador = async (req, res) => {
       });
     }
 
-    // Already activated
+    // Already verified
     if (user.otp_verified && user.is_active) {
       return res.status(400).json({
         isSuccess: false,
@@ -583,18 +584,21 @@ exports.verifyUserOtpByAmbassador = async (req, res) => {
       });
     }
 
-    const tempPassword = generateTempPassword();
+    // Generate reset password token
+    const resetToken = crypto.randomBytes(32).toString("hex");
 
-    const hashedPassword = await bcrypt.hash(tempPassword, 10);
+    const hashedToken = crypto
+      .createHash("sha256")
+      .update(resetToken)
+      .digest("hex");
 
+    // Activate user
     user.otp_verified = true;
 
     user.otp_code = null;
     user.otp_expiry = null;
 
-    user.hashed_password = hashedPassword;
-
-    // Force manual login
+    // Force manual login only
     user.register_type = "manual";
     user.login_type = "manual";
     user.is_google_auth = false;
@@ -602,15 +606,24 @@ exports.verifyUserOtpByAmbassador = async (req, res) => {
     user.is_active = true;
     user.status = "active";
 
-    user.mustResetPassword = true;
+    // Password not created yet
+    user.hashed_password = null;
+    user.passwordChangedByUser = false;
+
+    // Reset password setup flow
+    user.reset_password_token = hashedToken;
+    user.reset_password_expiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+    user.passwordChangedByUser = false;
 
     await user.save();
 
-    await sendCredentialsEmail(user.email, user.email, tempPassword);
+    // Send welcome email with reset link
+    await sendCredentialsEmail(user.email, user.email, resetToken);
 
     return res.status(200).json({
       isSuccess: true,
-      message: "OTP verified successfully. Login credentials sent to email.",
+      message: "OTP verified successfully. Password setup link sent to email.",
       user: {
         _id: user._id,
         name: user.name,
@@ -623,7 +636,7 @@ exports.verifyUserOtpByAmbassador = async (req, res) => {
 
     return res.status(500).json({
       isSuccess: false,
-      message: "Internal server error",
+      message: err.message,
     });
   }
 };

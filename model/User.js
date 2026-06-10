@@ -145,12 +145,6 @@ const userSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
-
-    mustResetPassword: {
-      type: Boolean,
-      default: false,
-    },
-
     ambassadorReviewDueAt: {
       type: Date,
       default: null,

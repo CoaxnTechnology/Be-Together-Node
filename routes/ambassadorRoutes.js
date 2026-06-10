@@ -2,9 +2,9 @@ const express = require("express");
 
 const router = express.Router();
 
-const auth = require("../middleware/authMiddleware");
+const auth = require("../Middleware/authMiddleware");
 
-const adminAuth = require("../middleware/adminAuth");
+const adminAuth = require("../Middleware/adminAuth");
 
 const {
   applyForAmbassador,
@@ -15,6 +15,8 @@ const {
   getAllApplications,
   getAllAmbassadors,
   removeAmbassador,
+  createUserByAmbassador,
+  verifyUserOtpByAmbassador,
 } = require("../controller/ambassadorController");
 // USER
 
@@ -46,5 +48,8 @@ router.get("/admin/ambassadors", adminAuth, getAllAmbassadors);
 // =====================================
 
 router.post("/remove-ambassador/:userId", adminAuth, removeAmbassador);
+router.post("/create-user", auth, createUserByAmbassador);
+
+router.post("/verify-user-otp", auth, verifyUserOtpByAmbassador);
 
 module.exports = router;

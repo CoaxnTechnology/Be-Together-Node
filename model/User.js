@@ -125,7 +125,36 @@ const userSchema = new mongoose.Schema(
       ref: "Admin",
       default: null,
     },
+    registeredByAmbassador: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
 
+    registeredByAmbassadorAt: {
+      type: Date,
+      default: null,
+    },
+
+    ambassadorAgreementAccepted: {
+      type: Boolean,
+      default: false,
+    },
+
+    ambassadorAgreementAcceptedAt: {
+      type: Date,
+      default: null,
+    },
+
+    mustResetPassword: {
+      type: Boolean,
+      default: false,
+    },
+
+    ambassadorReviewDueAt: {
+      type: Date,
+      default: null,
+    },
     ambassadorCode: {
       type: String,
       unique: true,
@@ -140,6 +169,15 @@ const userSchema = new mongoose.Schema(
     referredBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
+      default: null,
+    },
+    ambassadorUserAgreementAccepted: {
+      type: Boolean,
+      default: false,
+    },
+
+    ambassadorUserAgreementAcceptedAt: {
+      type: Date,
       default: null,
     },
 
@@ -170,6 +208,15 @@ const userSchema = new mongoose.Schema(
     created_at: { type: Date, default: Date.now },
     updated_at: { type: Date, default: Date.now },
     last_login: { type: Date, default: null },
+    failedLoginAttempts: {
+      type: Number,
+      default: 0,
+    },
+
+    passwordChangedByUser: {
+      type: Boolean,
+      default: false,
+    },
   },
   {
     toJSON: {

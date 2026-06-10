@@ -648,6 +648,7 @@ exports.login = async (req, res) => {
       name,
       profile_image,
       identityToken,
+      ambassadorUserAgreementAccepted,
     } = body;
     // ✅ Email check (Apple ko skip)
     if (!email && login_type !== "apple_auth") {
@@ -700,6 +701,46 @@ exports.login = async (req, res) => {
         return res
           .status(401)
           .json({ IsSucces: false, message: "Invalid password" });
+      }
+
+      // =========================
+      // AMBASSADOR USER CHECK
+      // =========================
+
+      if (user.registeredByAmbassador && user.mustResetPassword) {
+        return res.json({
+          IsSucces: true,
+          requirePasswordReset: true,
+          userId: user._id,
+          message: "Please reset your password first",
+        });
+      }
+      // =====================================
+      // AMBASSADOR USER AGREEMENT SAVE
+      // =====================================
+
+      if (
+        user.registeredByAmbassador &&
+        ambassadorUserAgreementAccepted === true &&
+        !user.ambassadorUserAgreementAccepted
+      ) {
+        user.ambassadorUserAgreementAccepted = true;
+        user.ambassadorUserAgreementAcceptedAt = new Date();
+
+        await saveGdprData(user, req);
+
+        await user.save();
+      }
+      if (
+        user.registeredByAmbassador &&
+        !user.ambassadorUserAgreementAccepted
+      ) {
+        return res.json({
+          IsSucces: true,
+          requireAgreement: true,
+          userId: user._id,
+          message: "Please accept Ambassador User Agreement",
+        });
       }
 
       // ✅ OTP LOGIC (STATIC + NORMAL)
@@ -1482,5 +1523,110 @@ exports.logout = async (req, res) => {
   } catch (err) {
     console.error("❌ Logout Error:", err);
     return res.status(500).json({ IsSucces: false, message: "Server error" });
+  }
+};
+exports.changeFirstPassword = async (req, res) => {
+  try {
+    const { userId, oldPassword, newPassword } = req.body;
+
+    if (!userId || !oldPassword || !newPassword) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "userId, oldPassword and newPassword are required",
+      });
+    }
+
+    const user = await User.findById(userId);
+
+    if (!user) {
+      return res.status(404).json({
+        isSuccess: false,
+        message: "User not found",
+      });
+    }
+
+    // Only Ambassador-created users
+    if (!user.registeredByAmbassador) {
+      return res.status(403).json({
+        isSuccess: false,
+        message: "Invalid request",
+      });
+    }
+
+    if (!user.mustResetPassword) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Password already changed",
+      });
+    }
+
+    const match = await bcrypt.compare(oldPassword, user.hashed_password);
+
+    if (!match) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Invalid temporary password",
+      });
+    }
+
+    // Minimum length
+    if (newPassword.length < 8) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Password must be at least 8 characters",
+      });
+    }
+
+    // Password strength
+    const passwordRegex =
+      /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&]).{8,}$/;
+
+    if (!passwordRegex.test(newPassword)) {
+      return res.status(400).json({
+        isSuccess: false,
+        message:
+          "Password must contain uppercase, lowercase, number and special character",
+      });
+    }
+
+    // New password cannot be same as temporary password
+    const samePassword = await bcrypt.compare(
+      newPassword,
+      user.hashed_password,
+    );
+
+    if (samePassword) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "New password cannot be same as temporary password",
+      });
+    }
+
+    // Update password
+    user.hashed_password = await bcrypt.hash(newPassword, 10);
+
+    user.mustResetPassword = false;
+
+    user.lastPasswordResetAt = new Date();
+
+    user.passwordChangedByUser = true;
+
+    user.failedLoginAttempts = 0;
+    user.ambassadorUserAgreementAccepted = false;
+
+    await user.save();
+
+    return res.json({
+      isSuccess: true,
+      message: "Password updated successfully",
+      requireLoginAgain: true,
+    });
+  } catch (err) {
+    console.error("changeFirstPassword error:", err);
+
+    return res.status(500).json({
+      isSuccess: false,
+      message: err.message,
+    });
   }
 };

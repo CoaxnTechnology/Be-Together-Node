@@ -5,6 +5,9 @@ const fs = require("fs");
 const crypto = require("crypto");
 const path = require("path");
 const { sendOtpEmail, sendCredentialsEmail } = require("../utils/email");
+const {
+  sendAmbassadorApprovedNotification,
+} = require("./notificationController");
 function generateTempPassword(length = 8) {
   const chars =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -254,6 +257,7 @@ exports.makeAmbassador = async (req, res) => {
     }
 
     await user.save();
+    await sendAmbassadorApprovedNotification(user);
 
     return res.json({
       isSuccess: true,

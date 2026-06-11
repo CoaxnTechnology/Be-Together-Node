@@ -827,6 +827,33 @@ async function notifyOnServicePromoted(service) {
     console.error("❌ Error in notifyOnServicePromoted:", err.message);
   }
 }
+async function sendAmbassadorApprovedNotification(user) {
+  try {
+    if (!user.fcmToken?.length) {
+      console.log("⚠️ User has no FCM token");
+      return;
+    }
+
+    await admin.messaging().sendEachForMulticast({
+      tokens: user.fcmToken,
+      notification: {
+        title: "🎉 Ambassador Approved",
+        body: "Congratulations! You have been approved as an Ambassador.",
+      },
+      data: {
+        type: "ambassador_approved",
+        isAmbassador: "true",
+        ambassadorStatus: "approved",
+        userId: user._id.toString(),
+      },
+    });
+
+    console.log("✅ Ambassador approval notification sent");
+  } catch (err) {
+    console.error("❌ Ambassador notification error:", err.message);
+  }
+}
+
 // async function notifyServiceOwnerOnSubscription({ buyerId, serviceId }) {
 //   try {
 //     const buyer = await User.findById(buyerId);
@@ -880,5 +907,7 @@ module.exports.notifyOnServiceDeleteApproved = notifyOnServiceDeleteApproved;
 module.exports.sendServiceForceDeletedNotification =
   sendServiceForceDeletedNotification;
 module.exports.notifyOnServicePromoted = notifyOnServicePromoted;
+module.exports.sendAmbassadorApprovedNotification =
+  sendAmbassadorApprovedNotification;
 //module.exports.notifyServiceOwnerOnSubscription = notifyServiceOwnerOnSubscription;
 //notificaton addd

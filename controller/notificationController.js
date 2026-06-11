@@ -853,7 +853,32 @@ async function sendAmbassadorApprovedNotification(user) {
     console.error("❌ Ambassador notification error:", err.message);
   }
 }
+async function sendAmbassadorRemovedNotification(user) {
+  try {
+    if (!user?.fcmToken?.length) {
+      console.log("⚠️ User has no FCM tokens");
+      return;
+    }
 
+    await admin.messaging().sendEachForMulticast({
+      tokens: user.fcmToken,
+      notification: {
+        title: "⚠️ Ambassador Access Removed",
+        body: "Your Ambassador access has been removed by admin.",
+      },
+      data: {
+        type: "ambassador_removed",
+        isAmbassador: "false",
+        ambassadorStatus: "disabled",
+        userId: user._id.toString(),
+      },
+    });
+
+    console.log(`✅ Ambassador removal notification sent to ${user.name}`);
+  } catch (err) {
+    console.error("❌ sendAmbassadorRemovedNotification:", err.message);
+  }
+}
 // async function notifyServiceOwnerOnSubscription({ buyerId, serviceId }) {
 //   try {
 //     const buyer = await User.findById(buyerId);
@@ -909,5 +934,7 @@ module.exports.sendServiceForceDeletedNotification =
 module.exports.notifyOnServicePromoted = notifyOnServicePromoted;
 module.exports.sendAmbassadorApprovedNotification =
   sendAmbassadorApprovedNotification;
+module.exports.sendAmbassadorRemovedNotification =
+  sendAmbassadorRemovedNotification;
 //module.exports.notifyServiceOwnerOnSubscription = notifyServiceOwnerOnSubscription;
 //notificaton addd

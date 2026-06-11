@@ -7,6 +7,7 @@ const path = require("path");
 const { sendOtpEmail, sendCredentialsEmail } = require("../utils/email");
 const {
   sendAmbassadorApprovedNotification,
+  sendAmbassadorRemovedNotification,
 } = require("./notificationController");
 function generateTempPassword(length = 8) {
   const chars =
@@ -367,7 +368,7 @@ exports.removeAmbassador = async (req, res) => {
     user.ambassadorApprovedBy = null;
     user.ambassadorReviewDueAt = null;
     await user.save();
-
+    await sendAmbassadorRemovedNotification(user);
     return res.json({
       isSuccess: true,
       message: "Ambassador removed successfully",

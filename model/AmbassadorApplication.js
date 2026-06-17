@@ -8,24 +8,56 @@ const ambassadorApplicationSchema = new mongoose.Schema(
       required: true,
     },
 
+    // Required Fields
+    name: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    email: {
+      type: String,
+      required: true,
+      trim: true,
+      lowercase: true,
+    },
+
+    phoneNumber: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
     city: {
       type: String,
       required: true,
+      trim: true,
     },
 
-    country: {
+    // Optional Fields
+    profession: {
       type: String,
-      required: true,
+      default: null,
     },
 
-    motivation: {
+    targetAudience: {
       type: String,
-      required: true,
+      default: null,
     },
 
-    experience: {
+    whyBecomeAmbassador: {
       type: String,
-      default: "",
+      default: null,
+    },
+
+    howPromoteBetogether: {
+      type: String,
+      default: null,
+    },
+
+    socialMediaUrls: {
+      type: [String],
+      default: [],
     },
 
     acceptedAgreement: {
@@ -35,7 +67,7 @@ const ambassadorApplicationSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ["pending", "approved", "rejected","canceld"],
+      enum: ["pending", "approved", "rejected", "canceld"],
       default: "pending",
     },
 

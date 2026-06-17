@@ -23,7 +23,10 @@ const updateProviderPerformance = require("../utils/providerPerformance");
 const Wallet = require("../model/Wallet");
 const WalletHistory = require("../model/WalletHistory");
 const AdminWalletConfig = require("../model/AdminWalletConfig");
-
+const AmbassadorWallet = require("../model/AmbassadorWallet");
+const AmbassadorCommissionSetting = require("../model/AmbassadorCommissionSetting");
+const AmbassadorWalletHistory = require("../model/AmbassadorWalletHistory");
+const processAmbassadorCommission=  require("../services/ambassadorCommissionService");
 const logPaymentFlow = (step, data = {}) => {
   console.log(`[paymentController] ${step}`, data);
 };
@@ -1136,12 +1139,31 @@ exports.completeService = async (req, res) => {
     payment.status = "completed";
     payment.completedAt = new Date();
     await payment.save();
+    // =====================================
+    // AMBASSADOR COMMISSION
+    // =====================================
+
+    try {
+      await processAmbassadorCommission({
+        booking,
+        payment,
+        customer,
+        provider,
+        service,
+      });
+
+      console.log("✅ Ambassador commission processed");
+    } catch (commissionError) {
+      console.error("❌ Ambassador commission failed", commissionError);
+
+      // Optional log
+      logPaymentError("ambassadorCommission:error", commissionError);
+    }
     logPaymentFlow("completeService:bookingAndPaymentUpdated", {
       bookingStatus: booking.status,
       paymentStatus: payment.status,
       completedAt: payment.completedAt,
     });
-
     console.log("✅ Paid service completed & payment captured:", booking._id);
     // 🟢 Performance update → Paid service completed = +1
     console.log("📊 Updating provider performance (paid service)...");

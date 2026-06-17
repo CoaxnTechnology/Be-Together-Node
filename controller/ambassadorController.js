@@ -1,14 +1,20 @@
 const User = require("../model/User");
 const AmbassadorApplication = require("../model/AmbassadorApplication");
+const Service = require("../model/Service");
+const Booking = require("../model/Booking");
 const bcrypt = require("bcryptjs");
+const Territory = require("../model/Territory");
 const fs = require("fs");
 const crypto = require("crypto");
 const path = require("path");
+const AmbassadorWallet = require("../model/AmbassadorWallet");
 const { sendOtpEmail, sendCredentialsEmail } = require("../utils/email");
 const {
   sendAmbassadorApprovedNotification,
   sendAmbassadorRemovedNotification,
 } = require("./notificationController");
+const AmbassadorWalletHistory = require("../model/AmbassadorWalletHistory");
+const Territory = require("../model/Territory");
 function generateTempPassword(length = 8) {
   const chars =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -29,9 +35,39 @@ exports.applyForAmbassador = async (req, res) => {
   try {
     const userId = req.user.id;
 
-    const { city, country, motivation, experience, acceptedAgreement } =
-      req.body;
+    const {
+      name,
+      email,
+      phoneNumber,
+      city,
+      profession,
+      targetAudience,
+      whyBecomeAmbassador,
+      howPromoteBetogether,
+      socialMediaUrls = [],
+      acceptedAgreement,
+    } = req.body;
 
+    // ==========================
+    // Required Fields Validation
+    // ==========================
+    if (!name || !email || !phoneNumber || !city) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Name, email, phone number and city are required",
+      });
+    }
+
+    if (!acceptedAgreement) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "You must accept the Ambassador Agreement before applying",
+      });
+    }
+
+    // ==========================
+    // User Check
+    // ==========================
     const user = await User.findById(userId);
 
     if (!user) {
@@ -41,6 +77,7 @@ exports.applyForAmbassador = async (req, res) => {
       });
     }
 
+    // Already Ambassador
     if (user.isAmbassador) {
       return res.status(400).json({
         isSuccess: false,
@@ -48,6 +85,9 @@ exports.applyForAmbassador = async (req, res) => {
       });
     }
 
+    // ==========================
+    // Pending Application Check
+    // ==========================
     const existingApplication = await AmbassadorApplication.findOne({
       user: userId,
       status: "pending",
@@ -56,28 +96,43 @@ exports.applyForAmbassador = async (req, res) => {
     if (existingApplication) {
       return res.status(400).json({
         isSuccess: false,
-        message: "Application already submitted",
+        message: "You already have a pending ambassador application",
       });
     }
 
-    if (!acceptedAgreement) {
-      return res.status(400).json({
-        isSuccess: false,
-        message: "You must accept the Ambassador Agreement",
-      });
-    }
+    // ==========================
+    // Save Agreement Acceptance
+    // ==========================
     user.ambassadorAgreementAccepted = true;
     user.ambassadorAgreementAcceptedAt = new Date();
 
     await user.save();
 
+    // ==========================
+    // Create Application
+    // ==========================
     const application = await AmbassadorApplication.create({
       user: userId,
-      city,
-      country,
-      motivation,
-      experience,
-      acceptedAgreement,
+
+      // Required
+      name: name.trim(),
+      email: email.trim().toLowerCase(),
+      phoneNumber: phoneNumber.trim(),
+      city: city.trim(),
+
+      // Optional
+      profession: profession || null,
+      targetAudience: targetAudience || null,
+
+      whyBecomeAmbassador: whyBecomeAmbassador || null,
+
+      howPromoteBetogether: howPromoteBetogether || null,
+
+      socialMediaUrls: Array.isArray(socialMediaUrls) ? socialMediaUrls : [],
+
+      acceptedAgreement: true,
+
+      status: "pending",
     });
 
     return res.status(201).json({
@@ -86,6 +141,8 @@ exports.applyForAmbassador = async (req, res) => {
       application,
     });
   } catch (err) {
+    console.error("applyForAmbassador Error:", err);
+
     return res.status(500).json({
       isSuccess: false,
       message: err.message,
@@ -127,6 +184,8 @@ exports.approveApplication = async (req, res) => {
   try {
     const { applicationId } = req.params;
 
+    const { ambassadorType, territoryId, parentAmbassadorId, commissionRate } =
+      req.body;
     const application = await AmbassadorApplication.findById(applicationId);
 
     if (!application) {
@@ -135,7 +194,12 @@ exports.approveApplication = async (req, res) => {
         message: "Application not found",
       });
     }
-
+    if (application.status !== "pending") {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Application already processed",
+      });
+    }
     const user = await User.findById(application.user);
 
     if (!user) {
@@ -144,12 +208,41 @@ exports.approveApplication = async (req, res) => {
         message: "User not found",
       });
     }
+
     if (user.isAmbassador) {
       return res.status(400).json({
         isSuccess: false,
         message: "User is already ambassador",
       });
     }
+
+    if (!["standard", "exclusive"].includes(ambassadorType)) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "ambassadorType must be standard or exclusive",
+      });
+    }
+    if (
+      commissionRate === undefined ||
+      commissionRate === null ||
+      isNaN(commissionRate)
+    ) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "commissionRate is required",
+      });
+    }
+
+    if (Number(commissionRate) < 0 || Number(commissionRate) > 12) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "commissionRate must be between 0 and 12",
+      });
+    }
+
+    // =====================================
+    // COMMON AMBASSADOR SETTINGS
+    // =====================================
 
     user.isAmbassador = true;
 
@@ -158,15 +251,112 @@ exports.approveApplication = async (req, res) => {
     user.ambassadorApprovedAt = new Date();
 
     user.ambassadorApprovedBy = req.admin.id;
+
     user.ambassadorReviewDueAt = new Date(
       Date.now() + 180 * 24 * 60 * 60 * 1000,
     );
+
+    user.ambassadorType = ambassadorType;
+
+    user.commissionRate = Number(commissionRate);
+
+    user.completedPaidServices = 0;
 
     if (!user.ambassadorCode) {
       user.ambassadorCode = `AMB${Date.now()}`;
     }
 
+    // =====================================
+    // STANDARD AMBASSADOR
+    // =====================================
+
+    if (ambassadorType === "standard") {
+      user.territory = null;
+      if (parentAmbassadorId) {
+        const parent = await User.findById(parentAmbassadorId);
+
+        if (!parent) {
+          return res.status(404).json({
+            isSuccess: false,
+            message: "Parent ambassador not found",
+          });
+        }
+
+        if (!parent.isAmbassador || parent.ambassadorStatus !== "approved") {
+          return res.status(400).json({
+            isSuccess: false,
+            message: "Parent ambassador is not active",
+          });
+        }
+        if (parent.ambassadorType !== "exclusive") {
+          return res.status(400).json({
+            isSuccess: false,
+            message: "Parent ambassador must be an exclusive ambassador",
+          });
+        }
+        user.parentAmbassador = parent._id;
+      }
+    }
+
+    // =====================================
+    // EXCLUSIVE AMBASSADOR
+    // =====================================
+
+    if (ambassadorType === "exclusive") {
+      user.parentAmbassador = null;
+      if (!territoryId) {
+        return res.status(400).json({
+          isSuccess: false,
+          message: "territoryId is required for exclusive ambassador",
+        });
+      }
+
+      const territory = await Territory.findById(territoryId);
+
+      if (!territory) {
+        return res.status(404).json({
+          isSuccess: false,
+          message: "Territory not found",
+        });
+      }
+
+      if (territory.exclusiveAmbassador) {
+        return res.status(400).json({
+          isSuccess: false,
+          message: "Territory already assigned to another ambassador",
+        });
+      }
+
+      territory.exclusiveAmbassador = user._id;
+
+      territory.assignedAt = new Date();
+
+      territory.reviewDueAt = new Date(Date.now() + 180 * 24 * 60 * 60 * 1000);
+
+      await territory.save();
+
+      user.territory = territory._id;
+    }
+
     await user.save();
+
+    // =====================================
+    // CREATE WALLET
+    // =====================================
+
+    const existingWallet = await AmbassadorWallet.findOne({
+      ambassador: user._id,
+    });
+
+    if (!existingWallet) {
+      await AmbassadorWallet.create({
+        ambassador: user._id,
+      });
+    }
+
+    // =====================================
+    // UPDATE APPLICATION
+    // =====================================
 
     application.status = "approved";
 
@@ -176,9 +366,24 @@ exports.approveApplication = async (req, res) => {
 
     await application.save();
 
+    // =====================================
+    // NOTIFICATION
+    // =====================================
+
+    await sendAmbassadorApprovedNotification(user);
+
     return res.json({
       isSuccess: true,
       message: "Ambassador approved successfully",
+      user: {
+        _id: user._id,
+        name: user.name,
+        ambassadorType: user.ambassadorType,
+        commissionRate: user.commissionRate,
+        ambassadorCode: user.ambassadorCode,
+        territory: user.territory,
+        parentAmbassador: user.parentAmbassador,
+      },
     });
   } catch (err) {
     return res.status(500).json({
@@ -195,7 +400,6 @@ exports.approveApplication = async (req, res) => {
 exports.rejectApplication = async (req, res) => {
   try {
     const { applicationId } = req.params;
-
     const { reason } = req.body;
 
     const application = await AmbassadorApplication.findById(applicationId);
@@ -204,6 +408,13 @@ exports.rejectApplication = async (req, res) => {
       return res.status(404).json({
         isSuccess: false,
         message: "Application not found",
+      });
+    }
+
+    if (application.status !== "pending") {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Application already processed",
       });
     }
 
@@ -217,6 +428,12 @@ exports.rejectApplication = async (req, res) => {
 
     await application.save();
 
+    // Reset ambassador agreement acceptance
+    await User.findByIdAndUpdate(application.user, {
+      ambassadorAgreementAccepted: false,
+      ambassadorAgreementAcceptedAt: null,
+    });
+
     return res.json({
       isSuccess: true,
       message: "Application rejected successfully",
@@ -228,7 +445,6 @@ exports.rejectApplication = async (req, res) => {
     });
   }
 };
-
 // =====================================
 // ADMIN DIRECT MAKE AMBASSADOR
 // =====================================
@@ -237,6 +453,8 @@ exports.makeAmbassador = async (req, res) => {
   try {
     const { userId } = req.params;
 
+    const { ambassadorType, territoryId, parentAmbassadorId, commissionRate } =
+      req.body;
     const user = await User.findById(userId);
 
     if (!user) {
@@ -245,19 +463,154 @@ exports.makeAmbassador = async (req, res) => {
         message: "User not found",
       });
     }
+    if (user.isAmbassador) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "User is already ambassador",
+      });
+    }
+    if (
+      !ambassadorType ||
+      !["standard", "exclusive"].includes(ambassadorType)
+    ) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "ambassadorType must be standard or exclusive",
+      });
+    }
+    if (
+      commissionRate === undefined ||
+      commissionRate === null ||
+      isNaN(commissionRate)
+    ) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "commissionRate is required",
+      });
+    }
+
+    if (Number(commissionRate) < 0 || Number(commissionRate) > 12) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "commissionRate must be between 0 and 12",
+      });
+    }
+
+    // =====================================
+    // BASIC AMBASSADOR DATA
+    // =====================================
 
     user.isAmbassador = true;
+
     user.ambassadorStatus = "approved";
+
     user.ambassadorApprovedAt = new Date();
+
     user.ambassadorApprovedBy = req.admin.id;
+
     user.ambassadorReviewDueAt = new Date(
       Date.now() + 180 * 24 * 60 * 60 * 1000,
     );
+
+    user.ambassadorType = ambassadorType;
+
+    user.commissionRate = Number(commissionRate);
+
+    user.completedPaidServices = 0;
+
     if (!user.ambassadorCode) {
       user.ambassadorCode = `AMB${Date.now()}`;
     }
 
+    // =====================================
+    // STANDARD AMBASSADOR
+    // =====================================
+
+    if (ambassadorType === "standard") {
+      user.territory = null;
+      if (parentAmbassadorId) {
+        const parent = await User.findById(parentAmbassadorId);
+
+        if (!parent || !parent.isAmbassador) {
+          return res.status(400).json({
+            isSuccess: false,
+            message: "Parent ambassador not found",
+          });
+        }
+        if (parent.ambassadorType !== "exclusive") {
+          return res.status(400).json({
+            isSuccess: false,
+            message: "Parent ambassador must be an exclusive ambassador",
+          });
+        }
+        user.parentAmbassador = parentAmbassadorId;
+      }
+    }
+
+    // =====================================
+    // EXCLUSIVE AMBASSADOR
+    // =====================================
+
+    if (ambassadorType === "exclusive") {
+      user.parentAmbassador = null;
+      if (!territoryId) {
+        return res.status(400).json({
+          isSuccess: false,
+          message: "territoryId is required for exclusive ambassador",
+        });
+      }
+
+      const territory = await Territory.findById(territoryId);
+
+      if (!territory) {
+        return res.status(404).json({
+          isSuccess: false,
+          message: "Territory not found",
+        });
+      }
+
+      // territory already assigned?
+      if (
+        territory.exclusiveAmbassador &&
+        territory.exclusiveAmbassador.toString() !== user._id.toString()
+      ) {
+        return res.status(400).json({
+          isSuccess: false,
+          message: "Territory already assigned to another ambassador",
+        });
+      }
+
+      territory.exclusiveAmbassador = user._id;
+
+      territory.assignedAt = new Date();
+
+      territory.reviewDueAt = new Date(Date.now() + 180 * 24 * 60 * 60 * 1000);
+
+      await territory.save();
+
+      user.territory = territory._id;
+    }
+
     await user.save();
+
+    // =====================================
+    // CREATE WALLET
+    // =====================================
+
+    const existingWallet = await AmbassadorWallet.findOne({
+      ambassador: user._id,
+    });
+
+    if (!existingWallet) {
+      await AmbassadorWallet.create({
+        ambassador: user._id,
+      });
+    }
+
+    // =====================================
+    // NOTIFICATION
+    // =====================================
+
     await sendAmbassadorApprovedNotification(user);
 
     return res.json({
@@ -265,10 +618,19 @@ exports.makeAmbassador = async (req, res) => {
       message: "User promoted to Ambassador successfully",
       user: {
         _id: user._id,
-        isAmbassador: user.isAmbassador,
-        ambassadorStatus: user.ambassadorStatus,
+        name: user.name,
+
+        ambassadorType: user.ambassadorType,
+
+        commissionRate: user.commissionRate,
+
         ambassadorCode: user.ambassadorCode,
-        ambassadorApprovedAt: user.ambassadorApprovedAt,
+
+        ambassadorStatus: user.ambassadorStatus,
+
+        territory: user.territory,
+
+        parentAmbassador: user.parentAmbassador,
       },
     });
   } catch (err) {
@@ -315,19 +677,26 @@ exports.getAllAmbassadors = async (req, res) => {
     })
       .select(
         `
-          name
-          email
-          mobile
-          profile_image
-          city
-          country
-          ambassadorCode
-          ambassadorStatus
-          ambassadorApprovedAt
-          ambassadorReviewDueAt
-          created_at
-        `,
+  name
+  email
+  mobile
+  profile_image
+  city
+  country
+  ambassadorCode
+  ambassadorStatus
+  ambassadorApprovedAt
+  ambassadorReviewDueAt
+  ambassadorType
+  commissionRate
+  completedPaidServices
+  territory
+  parentAmbassador
+  created_at
+`,
       )
+      .populate("territory", "city country")
+      .populate("parentAmbassador", "name email ambassadorCode")
       .sort({
         ambassadorApprovedAt: -1,
       });
@@ -362,10 +731,33 @@ exports.removeAmbassador = async (req, res) => {
       });
     }
 
+    // Territory cleanup
+    if (user.territory) {
+      await Territory.findByIdAndUpdate(user.territory, {
+        $set: {
+          exclusiveAmbassador: null,
+        },
+      });
+    }
+
     user.isAmbassador = false;
+
     user.ambassadorStatus = "disabled";
+
+    user.ambassadorType = null;
+
+    user.parentAmbassador = null;
+
+    user.territory = null;
+
+    user.commissionRate = 0;
+
+    user.completedPaidServices = 0;
+
     user.ambassadorApprovedAt = null;
+
     user.ambassadorApprovedBy = null;
+
     user.ambassadorReviewDueAt = null;
     await user.save();
     await sendAmbassadorRemovedNotification(user);
@@ -505,8 +897,6 @@ exports.createUserByAmbassador = async (req, res) => {
       otp_expiry: otpExpiry,
       otp_verified: false,
 
-      mustResetPassword: true,
-
       ambassadorUserAgreementAccepted: false,
       termsAccepted: false,
       privacyAccepted: false,
@@ -642,6 +1032,527 @@ exports.verifyUserOtpByAmbassador = async (req, res) => {
     return res.status(500).json({
       isSuccess: false,
       message: err.message,
+    });
+  }
+};
+
+exports.getMyWallet = async (req, res) => {
+  try {
+    const ambassadorId = req.user.id;
+
+    let wallet = await AmbassadorWallet.findOne({
+      ambassador: ambassadorId,
+    });
+
+    if (!wallet) {
+      wallet = await AmbassadorWallet.create({
+        ambassador: ambassadorId,
+      });
+    }
+
+    const history = await AmbassadorWalletHistory.find({
+      ambassador: ambassadorId,
+    })
+      .populate("service", "title")
+      .sort({ createdAt: -1 })
+      .limit(20);
+
+    return res.status(200).json({
+      isSuccess: true,
+
+      wallet: {
+        balance: wallet.balance,
+        totalEarned: wallet.totalEarned,
+        totalWithdrawn: wallet.totalWithdrawn,
+      },
+
+      history,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      isSuccess: false,
+      message: err.message,
+    });
+  }
+};
+exports.assignParentAmbassador = async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    const { parentAmbassadorId } = req.body;
+
+    const user = await User.findById(userId);
+
+    if (!user) {
+      return res.status(404).json({
+        isSuccess: false,
+        message: "Ambassador not found",
+      });
+    }
+
+    const parent = await User.findById(parentAmbassadorId);
+
+    if (!parent) {
+      return res.status(404).json({
+        isSuccess: false,
+        message: "Parent ambassador not found",
+      });
+    }
+    if (String(user._id) === String(parent._id)) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Ambassador cannot be parent of himself",
+      });
+    }
+    if (user.ambassadorType !== "standard") {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Only standard ambassadors can have parent ambassadors",
+      });
+    }
+    if (!parent.isAmbassador || parent.ambassadorType !== "exclusive") {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Parent must be an exclusive ambassador",
+      });
+    }
+
+    user.parentAmbassador = parent._id;
+
+    await user.save();
+
+    return res.json({
+      isSuccess: true,
+      message: "Parent ambassador assigned successfully",
+    });
+  } catch (err) {
+    return res.status(500).json({
+      isSuccess: false,
+      message: err.message,
+    });
+  }
+};
+exports.dashboard = async (req, res) => {
+  try {
+    const ambassadorId = req.user.id;
+
+    const ambassadorObjectId = new mongoose.Types.ObjectId(ambassadorId);
+
+    const ambassador = await User.findById(ambassadorId).populate("territory");
+    const ambassadorInfo = {
+      id: ambassador._id,
+      name: ambassador.name,
+      email: ambassador.email,
+      profile_image: ambassador.profile_image,
+      ambassadorType: ambassador.ambassadorType,
+      commissionRate: ambassador.commissionRate,
+    };
+
+    if (!ambassador) {
+      return res.status(404).json({
+        isSuccess: false,
+        message: "Ambassador not found",
+      });
+    }
+
+    // =====================================
+    // WALLET
+    // =====================================
+
+    const wallet = await AmbassadorWallet.findOne({
+      ambassador: ambassadorId,
+    });
+
+    const walletData = {
+      balance: wallet?.balance || 0,
+      totalEarned: wallet?.totalEarned || 0,
+      totalWithdrawn: wallet?.totalWithdrawn || 0,
+
+      pendingWithdrawal: 0,
+    };
+
+    // =====================================
+    // REFERRALS
+    // =====================================
+
+    const referredUsers = await User.find({
+      referredBy: ambassadorId,
+    }).select("_id");
+
+    const referredUserIds = referredUsers.map((user) => user._id);
+
+    const totalReferralUsers = referredUserIds.length;
+    const recentReferrals = await User.find({
+      referredBy: ambassadorId,
+    })
+      .select(
+        "name email profile_image city country created_at successfulBookings",
+      )
+      .sort({
+        created_at: -1,
+      })
+      .limit(10);
+
+    // =====================================
+    // SERVICES CREATED BY REFERRALS
+    // =====================================
+
+    const totalServices = await Service.countDocuments({
+      owner: {
+        $in: referredUserIds,
+      },
+    });
+
+    // =====================================
+    // COMPLETED BOOKINGS
+    // =====================================
+
+    const totalCompletedBookings = await Booking.countDocuments({
+      status: "completed",
+
+      $or: [
+        {
+          customer: {
+            $in: referredUserIds,
+          },
+        },
+        {
+          provider: {
+            $in: referredUserIds,
+          },
+        },
+      ],
+    });
+
+    // =====================================
+    // COMMISSION BREAKDOWN
+    // =====================================
+
+    const customerSide = await AmbassadorWalletHistory.aggregate([
+      {
+        $match: {
+          ambassador: ambassadorObjectId,
+          commissionSource: "customer_side",
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          total: {
+            $sum: "$amount",
+          },
+        },
+      },
+    ]);
+
+    const providerSide = await AmbassadorWalletHistory.aggregate([
+      {
+        $match: {
+          ambassador: ambassadorObjectId,
+          commissionSource: "provider_side",
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          total: {
+            $sum: "$amount",
+          },
+        },
+      },
+    ]);
+
+    const territorial = await AmbassadorWalletHistory.aggregate([
+      {
+        $match: {
+          ambassador: ambassadorObjectId,
+          commissionSource: "territorial",
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          total: {
+            $sum: "$amount",
+          },
+        },
+      },
+    ]);
+
+    const customerCommission = customerSide[0]?.total || 0;
+
+    const providerCommission = providerSide[0]?.total || 0;
+
+    const territorialCommission = territorial[0]?.total || 0;
+
+    const totalCommission =
+      customerCommission + providerCommission + territorialCommission;
+    const earningsChart = await AmbassadorWalletHistory.aggregate([
+      {
+        $match: {
+          ambassador: ambassadorObjectId,
+          type: "commission_earned",
+        },
+      },
+      {
+        $group: {
+          _id: {
+            year: {
+              $year: "$createdAt",
+            },
+            month: {
+              $month: "$createdAt",
+            },
+          },
+
+          total: {
+            $sum: "$amount",
+          },
+        },
+      },
+      {
+        $sort: {
+          "_id.year": 1,
+          "_id.month": 1,
+        },
+      },
+    ]);
+    const formattedEarningsChart = earningsChart.map((item) => ({
+      month: `${item._id.month}-${item._id.year}`,
+      total: item.total,
+    }));
+    const recentCommissions = await AmbassadorWalletHistory.find({
+      ambassador: ambassadorId,
+      type: "commission_earned",
+    })
+      .select(
+        "amount commissionSource commissionRate createdAt referredUser service",
+      )
+      .populate("service", "title city price")
+      .populate("referredUser", "name email")
+      .sort({
+        createdAt: -1,
+      })
+      .limit(10);
+    // =====================================
+    // EXCLUSIVE AMBASSADOR DATA
+    // =====================================
+
+    let exclusiveData = null;
+
+    if (ambassador.ambassadorType === "exclusive") {
+      const territory = ambassador.territory;
+
+      if (territory) {
+        const territoryServices = await Service.find({
+          city: territory.city,
+        }).select("_id");
+
+        const territoryServiceIds = territoryServices.map(
+          (service) => service._id,
+        );
+
+        const territoryBookings = await Booking.countDocuments({
+          status: "completed",
+          service: {
+            $in: territoryServiceIds,
+          },
+        });
+
+        const territoryRevenue = await Booking.aggregate([
+          {
+            $match: {
+              status: "completed",
+              service: {
+                $in: territoryServiceIds,
+              },
+            },
+          },
+          {
+            $group: {
+              _id: null,
+              totalRevenue: {
+                $sum: "$amount",
+              },
+            },
+          },
+        ]);
+        const territoryProviders = await Service.distinct("owner", {
+          city: territory.city,
+        });
+
+        const totalProviders = territoryProviders.length;
+
+        const territoryCustomers = await Booking.distinct("customer", {
+          status: "completed",
+          service: {
+            $in: territoryServiceIds,
+          },
+        });
+        // KPI
+        const sixMonthsAgo = new Date();
+
+        sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+
+        const kpiBookings = await Booking.countDocuments({
+          status: "completed",
+
+          createdAt: {
+            $gte: sixMonthsAgo,
+          },
+
+          service: {
+            $in: territoryServiceIds,
+          },
+        });
+
+        const subAmbassadorCount = await User.countDocuments({
+          parentAmbassador: ambassadorId,
+        });
+
+        const subAmbassadorList = await User.find({
+          parentAmbassador: ambassadorId,
+        })
+          .select("name email city country totalReferralEarned")
+          .limit(20);
+
+        exclusiveData = {
+          territory: {
+            id: territory._id,
+            city: territory.city,
+            country: territory.country,
+          },
+
+          stats: {
+            services: territoryServiceIds.length,
+
+            bookings: territoryBookings,
+
+            revenue: territoryRevenue[0]?.totalRevenue || 0,
+
+            providers: totalProviders,
+
+            customers: territoryCustomers.length,
+
+            territorialCommission,
+          },
+
+          kpi: {
+            target: 400,
+
+            completed: kpiBookings,
+            progressPercentage: Number(((kpiBookings / 400) * 100).toFixed(2)),
+            remaining: Math.max(0, 400 - kpiBookings),
+
+            achieved: kpiBookings >= 400,
+          },
+
+          subAmbassadors: {
+            count: subAmbassadorCount,
+            list: subAmbassadorList,
+          },
+        };
+      }
+    }
+
+    return res.json({
+      isSuccess: true,
+
+      dashboard: {
+        ambassador: ambassadorInfo,
+        ambassadorType: ambassador.ambassadorType,
+
+        territory: ambassador?.territory
+          ? {
+              id: ambassador.territory._id,
+              city: ambassador.territory.city,
+            }
+          : null,
+
+        wallet: walletData,
+
+        referrals: {
+          totalUsers: totalReferralUsers,
+
+          recent: recentReferrals,
+        },
+
+        services: {
+          created: totalServices,
+        },
+
+        bookings: {
+          completed: totalCompletedBookings,
+        },
+
+        commission: {
+          total: totalCommission,
+
+          customerSide: customerCommission,
+
+          providerSide: providerCommission,
+
+          territorial: territorialCommission,
+        },
+        earningsChart: formattedEarningsChart,
+
+        recentCommissions,
+        exclusiveData,
+      },
+    });
+  } catch (error) {
+    console.error("Ambassador dashboard error:", error);
+
+    return res.status(500).json({
+      isSuccess: false,
+      message: error.message,
+    });
+  }
+};
+exports.walletHistory = async (req, res) => {
+  try {
+    const ambassadorId = req.user.id;
+
+    const page = Number(req.query.page || 1);
+    const limit = Number(req.query.limit || 20);
+
+    const skip = (page - 1) * limit;
+
+    const total = await AmbassadorWalletHistory.countDocuments({
+      ambassador: ambassadorId,
+    });
+
+    const history = await AmbassadorWalletHistory.find({
+      ambassador: ambassadorId,
+    })
+      .populate("booking", "_id amount status createdAt")
+      .populate("service", "title city")
+      .populate("referredUser", "name email")
+      .populate("territory", "city country")
+      .sort({
+        createdAt: -1,
+      })
+      .skip(skip)
+      .limit(limit);
+
+    return res.json({
+      isSuccess: true,
+
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+
+      history,
+    });
+  } catch (error) {
+    console.error("walletHistory error:", error);
+
+    return res.status(500).json({
+      isSuccess: false,
+      message: error.message,
     });
   }
 };

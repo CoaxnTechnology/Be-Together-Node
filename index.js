@@ -32,6 +32,7 @@ const referralRoutes = require("./routes/referralRoutes");
 const walletRoutes = require("./routes/walletRoutes");
 const adminWalletConfigRoutes = require("./routes/adminWalletConfigRoutes");
 const ambassadorRoutes = require("./routes/ambassadorRoutes");
+const territoryRoutes = require("./routes/territoryRoutes");
 // --- KEEP RAW ONLY FOR GITHUB ---
 app.post(
   "/webhook/github",
@@ -111,6 +112,8 @@ app.use(
     origin: [
       "https://uat.admin.betogetherapp.com",
       "https://uat.betogetherapp.com",
+      "https://admin.betogetherapp.com",
+      "https://betogetherapp.com",
     ], // Allow all origins (not recommended for production)
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
     credentials: true,
@@ -141,6 +144,7 @@ app.use("/api/user", locationRoutes);
 app.use("/api", ReviewRoutes);
 app.use("/api/admin/profile", require("./routes/adminProfileroutes"));
 app.use("/api/ambassador", ambassadorRoutes);
+app.use("/api/admin", territoryRoutes);
 //app.use("/api/notifications", notificationRoutes);
 //----------------------Admin API ROutes
 

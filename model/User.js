@@ -135,7 +135,37 @@ const userSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    // =====================================
+    // AMBASSADOR SYSTEM
+    // =====================================
 
+    ambassadorType: {
+      type: String,
+      enum: ["standard", "exclusive"],
+      default: null,
+    },
+
+    commissionRate: {
+      type: Number,
+      default: 3, // 3% initially
+    },
+
+    completedPaidServices: {
+      type: Number,
+      default: 0,
+    },
+
+    parentAmbassador: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+
+    territory: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Territory",
+      default: null,
+    },
     ambassadorAgreementAccepted: {
       type: Boolean,
       default: false,
@@ -227,6 +257,7 @@ userSchema.pre("save", function (next) {
   this.updated_at = Date.now();
   next();
 });
+
 userSchema.methods.addFcmToken = async function (token) {
   if (!token || typeof token !== "string") return;
 

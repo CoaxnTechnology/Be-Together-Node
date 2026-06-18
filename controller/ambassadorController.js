@@ -672,7 +672,7 @@ exports.getAllApplications = async (req, res) => {
 
     const formattedApplications = applications.map((app) => ({
       _id: app._id,
-
+      city: app.city,
       // Application Details
       status: app.status,
       acceptedAgreement: app.acceptedAgreement,

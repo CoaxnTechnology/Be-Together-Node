@@ -114,6 +114,7 @@ app.use(
       "https://uat.betogetherapp.com",
       "https://admin.betogetherapp.com",
       "https://betogetherapp.com",
+      "http://localhost:8080",
     ], // Allow all origins (not recommended for production)
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
     credentials: true,

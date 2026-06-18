@@ -1940,7 +1940,39 @@ exports.getAmbassadorAnalytics = async (req, res) => {
       commissionRate
       ambassadorCode
     `);
+    // ======================================
+    // REFERRAL STATS
+    // ======================================
 
+    const referredUsers = await User.find({
+      referredBy: ambassadorObjectId,
+    }).select("_id");
+
+    const referredUserIds = referredUsers.map((u) => u._id);
+
+    const totalReferralUsers = referredUserIds.length;
+
+    const totalServices = await Service.countDocuments({
+      owner: {
+        $in: referredUserIds,
+      },
+    });
+
+    const totalBookings = await Booking.countDocuments({
+      status: "completed",
+      $or: [
+        {
+          customer: {
+            $in: referredUserIds,
+          },
+        },
+        {
+          provider: {
+            $in: referredUserIds,
+          },
+        },
+      ],
+    });
     // ==========================
     // WALLET BALANCE FOR EACH
     // ==========================
@@ -1969,9 +2001,7 @@ exports.getAmbassadorAnalytics = async (req, res) => {
     const territorialCommission = territorial[0]?.total || 0;
 
     const totalCommission =
-      customerCommission +
-      providerCommission +
-      territorialCommission;
+      customerCommission + providerCommission + territorialCommission;
 
     return res.status(200).json({
       isSuccess: true,
@@ -1981,7 +2011,9 @@ exports.getAmbassadorAnalytics = async (req, res) => {
         territorialCommission,
         totalCommission,
         earningsChart,
-
+        totalReferralUsers,
+        services: totalServices,
+        bookings: totalBookings,
         subAmbassadors: subAmbassadorsWithWallet,
         subAmbassadorCount: subAmbassadorsWithWallet.length,
       },

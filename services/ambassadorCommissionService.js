@@ -1,7 +1,7 @@
-const User = require("../models/User");
-const Territory = require("../models/Territory");
-const AmbassadorWallet = require("../models/AmbassadorWallet");
-const AmbassadorWalletHistory = require("../models/AmbassadorWalletHistory");
+const User = require("../model/User");
+const Territory = require("../model/Territory");
+const AmbassadorWallet = require("../model/AmbassadorWallet");
+const AmbassadorWalletHistory = require("../model/AmbassadorWalletHistory");
 
 async function creditAmbassador({
   ambassador,

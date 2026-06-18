@@ -14,7 +14,6 @@ const {
   sendAmbassadorRemovedNotification,
 } = require("./notificationController");
 const AmbassadorWalletHistory = require("../model/AmbassadorWalletHistory");
-const Territory = require("../model/Territory");
 function generateTempPassword(length = 8) {
   const chars =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -677,43 +676,127 @@ exports.getAllAmbassadors = async (req, res) => {
     })
       .select(
         `
-  name
-  email
-  mobile
-  profile_image
-  city
-  country
-  ambassadorCode
-  ambassadorStatus
-  ambassadorApprovedAt
-  ambassadorReviewDueAt
-  ambassadorType
-  commissionRate
-  completedPaidServices
-  territory
-  parentAmbassador
-  created_at
-`,
+        name
+        email
+        mobile
+        profile_image
+        city
+        country
+        ambassadorCode
+        ambassadorStatus
+        ambassadorApprovedAt
+        ambassadorReviewDueAt
+        ambassadorType
+        commissionRate
+        completedPaidServices
+        territory
+        parentAmbassador
+        created_at
+      `,
       )
-      .populate("territory", "city country")
-      .populate("parentAmbassador", "name email ambassadorCode")
+      .populate(
+        "territory",
+        `
+          city
+          country
+          active
+          kpiTarget
+        `,
+      )
+      .populate(
+        "parentAmbassador",
+        `
+          name
+          email
+          ambassadorCode
+        `,
+      )
       .sort({
         ambassadorApprovedAt: -1,
       });
 
-    return res.json({
+    const ambassadorIds = ambassadors.map((ambassador) => ambassador._id);
+
+    const wallets = await AmbassadorWallet.find({
+      ambassador: {
+        $in: ambassadorIds,
+      },
+    });
+
+    const walletMap = {};
+
+    wallets.forEach((wallet) => {
+      walletMap[wallet.ambassador.toString()] = wallet;
+    });
+
+    const formattedAmbassadors = await Promise.all(
+      ambassadors.map(async (ambassador) => {
+        const wallet = walletMap[ambassador._id.toString()];
+
+        const subAmbassadorCount = await User.countDocuments({
+          parentAmbassador: ambassador._id,
+        });
+
+        return {
+          _id: ambassador._id,
+
+          name: ambassador.name,
+          email: ambassador.email,
+          mobile: ambassador.mobile,
+          profile_image: ambassador.profile_image,
+
+          city: ambassador.city,
+          country: ambassador.country,
+
+          ambassadorCode: ambassador.ambassadorCode,
+
+          ambassadorStatus: ambassador.ambassadorStatus,
+
+          ambassadorType: ambassador.ambassadorType,
+
+          commissionRate: ambassador.commissionRate || 0,
+
+          completedPaidServices: ambassador.completedPaidServices || 0,
+
+          ambassadorApprovedAt: ambassador.ambassadorApprovedAt,
+
+          ambassadorReviewDueAt: ambassador.ambassadorReviewDueAt,
+
+          created_at: ambassador.created_at,
+
+          territory: ambassador.territory || null,
+
+          parentAmbassador: ambassador.parentAmbassador || null,
+
+          wallet: {
+            balance: wallet?.balance || 0,
+
+            totalEarned: wallet?.totalEarned || 0,
+
+            totalWithdrawn: wallet?.totalWithdrawn || 0,
+          },
+
+          subAmbassadorCount,
+        };
+      }),
+    );
+
+    return res.status(200).json({
       isSuccess: true,
-      count: ambassadors.length,
-      ambassadors,
+
+      count: formattedAmbassadors.length,
+
+      ambassadors: formattedAmbassadors,
     });
   } catch (err) {
+    console.error("getAllAmbassadors error:", err);
+
     return res.status(500).json({
       isSuccess: false,
       message: err.message,
     });
   }
 };
-
 // =====================================
 // ADMIN REMOVE AMBASSADOR
 // =====================================
@@ -1553,6 +1636,244 @@ exports.walletHistory = async (req, res) => {
     return res.status(500).json({
       isSuccess: false,
       message: error.message,
+    });
+  }
+};
+exports.getAmbassadorById = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const ambassador = await User.findById(id)
+      .populate("territory")
+      .populate("parentAmbassador", "name email ambassadorCode");
+
+    if (!ambassador) {
+      return res.status(404).json({
+        isSuccess: false,
+        message: "Ambassador not found",
+      });
+    }
+
+    const wallet = await AmbassadorWallet.findOne({
+      ambassador: ambassador._id,
+    });
+
+    const subAmbassadorCount = await User.countDocuments({
+      parentAmbassador: ambassador._id,
+    });
+
+    return res.status(200).json({
+      isSuccess: true,
+
+      ambassador: {
+        _id: ambassador._id,
+        name: ambassador.name,
+        email: ambassador.email,
+        mobile: ambassador.mobile,
+        city: ambassador.city,
+        country: ambassador.country,
+        profile_image: ambassador.profile_image,
+
+        ambassadorCode: ambassador.ambassadorCode,
+
+        ambassadorType: ambassador.ambassadorType,
+
+        ambassadorStatus: ambassador.ambassadorStatus,
+
+        commissionRate: ambassador.commissionRate,
+
+        completedPaidServices: ambassador.completedPaidServices,
+
+        ambassadorApprovedAt: ambassador.ambassadorApprovedAt,
+
+        ambassadorReviewDueAt: ambassador.ambassadorReviewDueAt,
+
+        territory: ambassador.territory,
+
+        parentAmbassador: ambassador.parentAmbassador,
+
+        subAmbassadorCount,
+
+        wallet: {
+          balance: wallet?.balance || 0,
+
+          totalEarned: wallet?.totalEarned || 0,
+
+          totalWithdrawn: wallet?.totalWithdrawn || 0,
+        },
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({
+      isSuccess: false,
+      message: err.message,
+    });
+  }
+};
+exports.getAmbassadorWalletHistory = async (req, res) => {
+  try {
+    const ambassadorId = req.params.id;
+
+    const page = Number(req.query.page || 1);
+
+    const limit = Number(req.query.limit || 20);
+
+    const skip = (page - 1) * limit;
+
+    const total = await AmbassadorWalletHistory.countDocuments({
+      ambassador: ambassadorId,
+    });
+
+    const history = await AmbassadorWalletHistory.find({
+      ambassador: ambassadorId,
+    })
+      .populate("booking", "_id amount status createdAt")
+      .populate("service", "title city")
+      .populate("referredUser", "name email")
+      .populate("territory", "city country")
+      .sort({
+        createdAt: -1,
+      })
+      .skip(skip)
+      .limit(limit);
+
+    return res.status(200).json({
+      isSuccess: true,
+
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+
+      history,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      isSuccess: false,
+      message: err.message,
+    });
+  }
+};
+exports.getAmbassadorAnalytics = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const ambassadorObjectId = new mongoose.Types.ObjectId(id);
+
+    const customerSide = await AmbassadorWalletHistory.aggregate([
+      {
+        $match: {
+          ambassador: ambassadorObjectId,
+
+          commissionSource: "customer_side",
+        },
+      },
+      {
+        $group: {
+          _id: null,
+
+          total: {
+            $sum: "$amount",
+          },
+        },
+      },
+    ]);
+
+    const providerSide = await AmbassadorWalletHistory.aggregate([
+      {
+        $match: {
+          ambassador: ambassadorObjectId,
+
+          commissionSource: "provider_side",
+        },
+      },
+      {
+        $group: {
+          _id: null,
+
+          total: {
+            $sum: "$amount",
+          },
+        },
+      },
+    ]);
+
+    const territorial = await AmbassadorWalletHistory.aggregate([
+      {
+        $match: {
+          ambassador: ambassadorObjectId,
+
+          commissionSource: "territorial",
+        },
+      },
+      {
+        $group: {
+          _id: null,
+
+          total: {
+            $sum: "$amount",
+          },
+        },
+      },
+    ]);
+
+    const earningsChart = await AmbassadorWalletHistory.aggregate([
+      {
+        $match: {
+          ambassador: ambassadorObjectId,
+
+          type: "commission_earned",
+        },
+      },
+      {
+        $group: {
+          _id: {
+            year: {
+              $year: "$createdAt",
+            },
+
+            month: {
+              $month: "$createdAt",
+            },
+          },
+
+          total: {
+            $sum: "$amount",
+          },
+        },
+      },
+      {
+        $sort: {
+          "_id.year": 1,
+          "_id.month": 1,
+        },
+      },
+    ]);
+
+    return res.status(200).json({
+      isSuccess: true,
+
+      analytics: {
+        customerCommission: customerSide[0]?.total || 0,
+
+        providerCommission: providerSide[0]?.total || 0,
+
+        territorialCommission: territorial[0]?.total || 0,
+
+        totalCommission:
+          (customerSide[0]?.total || 0) +
+          (providerSide[0]?.total || 0) +
+          (territorial[0]?.total || 0),
+
+        earningsChart,
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({
+      isSuccess: false,
+      message: err.message,
     });
   }
 };

@@ -489,7 +489,7 @@ exports.getAllUsers = async (req, res) => {
         { is_fake: false },
         { is_fake: { $exists: false } }, // include users without the field
       ],
-    }).select("name email mobile city age profile_image created_at status");
+    }).select("name email mobile city age profile_image created_at status is_active");
     res.json({ success: true, data: users });
     //  console.log("Get all users called",users);
   } catch (err) {

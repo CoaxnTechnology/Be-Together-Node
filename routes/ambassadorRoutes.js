@@ -20,6 +20,9 @@ const {
   assignParentAmbassador,
   dashboard,
   walletHistory,
+  getAmbassadorById,
+  getAmbassadorWalletHistory,
+  getAmbassadorAnalytics,
 } = require("../controller/ambassadorController");
 // USER
 
@@ -59,7 +62,23 @@ router.get("/admin/ambassadors", adminAuth, getAllAmbassadors);
 
 router.post("/remove-ambassador/:userId", adminAuth, removeAmbassador);
 router.post("/create-user", auth, createUserByAmbassador);
+// =====================================
+// ADMIN AMBASSADOR DETAILS
+// =====================================
 
+router.get("/admin/:id", adminAuth, getAmbassadorById);
+
+// =====================================
+// ADMIN WALLET HISTORY
+// =====================================
+
+router.get("/admin/:id/wallet-history", adminAuth, getAmbassadorWalletHistory);
+
+// =====================================
+// ADMIN ANALYTICS
+// =====================================
+
+router.get("/admin/:id/analytics", adminAuth, getAmbassadorAnalytics);
 router.post("/verify-user-otp", auth, verifyUserOtpByAmbassador);
 
 module.exports = router;

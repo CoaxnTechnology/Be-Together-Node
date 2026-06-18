@@ -7,6 +7,7 @@ const Territory = require("../model/Territory");
 const fs = require("fs");
 const crypto = require("crypto");
 const path = require("path");
+const mongoose = require("mongoose");
 const AmbassadorWallet = require("../model/AmbassadorWallet");
 const { sendOtpEmail, sendCredentialsEmail } = require("../utils/email");
 const {

@@ -1759,71 +1759,69 @@ exports.getAmbassadorWalletHistory = async (req, res) => {
 exports.getAmbassadorAnalytics = async (req, res) => {
   try {
     const { id } = req.params;
+    console.log("getAmbassadorAnalytics start", { id });
 
     const ambassadorObjectId = new mongoose.Types.ObjectId(id);
+    console.log("ambassadorObjectId created", { ambassadorObjectId });
 
     const customerSide = await AmbassadorWalletHistory.aggregate([
       {
         $match: {
           ambassador: ambassadorObjectId,
-
           commissionSource: "customer_side",
         },
       },
       {
         $group: {
           _id: null,
-
           total: {
             $sum: "$amount",
           },
         },
       },
     ]);
+    console.log("customerSide aggregate result", { customerSide });
 
     const providerSide = await AmbassadorWalletHistory.aggregate([
       {
         $match: {
           ambassador: ambassadorObjectId,
-
           commissionSource: "provider_side",
         },
       },
       {
         $group: {
           _id: null,
-
           total: {
             $sum: "$amount",
           },
         },
       },
     ]);
+    console.log("providerSide aggregate result", { providerSide });
 
     const territorial = await AmbassadorWalletHistory.aggregate([
       {
         $match: {
           ambassador: ambassadorObjectId,
-
           commissionSource: "territorial",
         },
       },
       {
         $group: {
           _id: null,
-
           total: {
             $sum: "$amount",
           },
         },
       },
     ]);
+    console.log("territorial aggregate result", { territorial });
 
     const earningsChart = await AmbassadorWalletHistory.aggregate([
       {
         $match: {
           ambassador: ambassadorObjectId,
-
           type: "commission_earned",
         },
       },
@@ -1833,12 +1831,10 @@ exports.getAmbassadorAnalytics = async (req, res) => {
             year: {
               $year: "$createdAt",
             },
-
             month: {
               $month: "$createdAt",
             },
           },
-
           total: {
             $sum: "$amount",
           },
@@ -1851,26 +1847,36 @@ exports.getAmbassadorAnalytics = async (req, res) => {
         },
       },
     ]);
+    console.log("earningsChart aggregate result", { earningsChart });
 
-    return res.status(200).json({
+    const customerCommission = customerSide[0]?.total || 0;
+    const providerCommission = providerSide[0]?.total || 0;
+    const territorialCommission = territorial[0]?.total || 0;
+    const totalCommission =
+      customerCommission + providerCommission + territorialCommission;
+
+    console.log("commission totals computed", {
+      customerCommission,
+      providerCommission,
+      territorialCommission,
+      totalCommission,
+    });
+
+    const response = {
       isSuccess: true,
-
       analytics: {
-        customerCommission: customerSide[0]?.total || 0,
-
-        providerCommission: providerSide[0]?.total || 0,
-
-        territorialCommission: territorial[0]?.total || 0,
-
-        totalCommission:
-          (customerSide[0]?.total || 0) +
-          (providerSide[0]?.total || 0) +
-          (territorial[0]?.total || 0),
-
+        customerCommission,
+        providerCommission,
+        territorialCommission,
+        totalCommission,
         earningsChart,
       },
-    });
+    };
+
+    console.log("getAmbassadorAnalytics response", { response });
+    return res.status(200).json(response);
   } catch (err) {
+    console.log("getAmbassadorAnalytics error", err);
     return res.status(500).json({
       isSuccess: false,
       message: err.message,

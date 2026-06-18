@@ -78,6 +78,7 @@ router.get("/admin/:id/wallet-history", adminAuth, getAmbassadorWalletHistory);
 // ADMIN ANALYTICS
 // =====================================
 
+console.log("Ambassador analytics route registered: GET /admin/:id/analytics");
 router.get("/admin/:id/analytics", adminAuth, getAmbassadorAnalytics);
 router.post("/verify-user-otp", auth, verifyUserOtpByAmbassador);
 

@@ -1845,10 +1845,12 @@ exports.getAmbassadorWalletHistory = async (req, res) => {
 exports.getAmbassadorAnalytics = async (req, res) => {
   try {
     const { id } = req.params;
-    console.log("getAmbassadorAnalytics start", { id });
 
     const ambassadorObjectId = new mongoose.Types.ObjectId(id);
-    console.log("ambassadorObjectId created", { ambassadorObjectId });
+
+    // ==========================
+    // COMMISSION BREAKDOWN
+    // ==========================
 
     const customerSide = await AmbassadorWalletHistory.aggregate([
       {
@@ -1860,13 +1862,10 @@ exports.getAmbassadorAnalytics = async (req, res) => {
       {
         $group: {
           _id: null,
-          total: {
-            $sum: "$amount",
-          },
+          total: { $sum: "$amount" },
         },
       },
     ]);
-    console.log("customerSide aggregate result", { customerSide });
 
     const providerSide = await AmbassadorWalletHistory.aggregate([
       {
@@ -1878,13 +1877,10 @@ exports.getAmbassadorAnalytics = async (req, res) => {
       {
         $group: {
           _id: null,
-          total: {
-            $sum: "$amount",
-          },
+          total: { $sum: "$amount" },
         },
       },
     ]);
-    console.log("providerSide aggregate result", { providerSide });
 
     const territorial = await AmbassadorWalletHistory.aggregate([
       {
@@ -1896,13 +1892,14 @@ exports.getAmbassadorAnalytics = async (req, res) => {
       {
         $group: {
           _id: null,
-          total: {
-            $sum: "$amount",
-          },
+          total: { $sum: "$amount" },
         },
       },
     ]);
-    console.log("territorial aggregate result", { territorial });
+
+    // ==========================
+    // EARNINGS CHART
+    // ==========================
 
     const earningsChart = await AmbassadorWalletHistory.aggregate([
       {
@@ -1914,12 +1911,8 @@ exports.getAmbassadorAnalytics = async (req, res) => {
       {
         $group: {
           _id: {
-            year: {
-              $year: "$createdAt",
-            },
-            month: {
-              $month: "$createdAt",
-            },
+            year: { $year: "$createdAt" },
+            month: { $month: "$createdAt" },
           },
           total: {
             $sum: "$amount",
@@ -1933,22 +1926,54 @@ exports.getAmbassadorAnalytics = async (req, res) => {
         },
       },
     ]);
-    console.log("earningsChart aggregate result", { earningsChart });
+
+    // ==========================
+    // SUB AMBASSADORS
+    // ==========================
+
+    const subAmbassadors = await User.find({
+      parentAmbassador: ambassadorObjectId,
+    }).select(`
+      name
+      email
+      ambassadorType
+      commissionRate
+      ambassadorCode
+    `);
+
+    // ==========================
+    // WALLET BALANCE FOR EACH
+    // ==========================
+
+    const subAmbassadorsWithWallet = await Promise.all(
+      subAmbassadors.map(async (amb) => {
+        const wallet = await AmbassadorWallet.findOne({
+          ambassador: amb._id,
+        });
+
+        return {
+          _id: amb._id,
+          name: amb.name,
+          email: amb.email,
+          ambassadorType: amb.ambassadorType,
+          ambassadorCode: amb.ambassadorCode,
+          commissionRate: amb.commissionRate || 0,
+          walletBalance: wallet?.balance || 0,
+          totalEarned: wallet?.totalEarned || 0,
+        };
+      }),
+    );
 
     const customerCommission = customerSide[0]?.total || 0;
     const providerCommission = providerSide[0]?.total || 0;
     const territorialCommission = territorial[0]?.total || 0;
+
     const totalCommission =
-      customerCommission + providerCommission + territorialCommission;
+      customerCommission +
+      providerCommission +
+      territorialCommission;
 
-    console.log("commission totals computed", {
-      customerCommission,
-      providerCommission,
-      territorialCommission,
-      totalCommission,
-    });
-
-    const response = {
+    return res.status(200).json({
       isSuccess: true,
       analytics: {
         customerCommission,
@@ -1956,13 +1981,14 @@ exports.getAmbassadorAnalytics = async (req, res) => {
         territorialCommission,
         totalCommission,
         earningsChart,
-      },
-    };
 
-    console.log("getAmbassadorAnalytics response", { response });
-    return res.status(200).json(response);
+        subAmbassadors: subAmbassadorsWithWallet,
+        subAmbassadorCount: subAmbassadorsWithWallet.length,
+      },
+    });
   } catch (err) {
-    console.log("getAmbassadorAnalytics error", err);
+    console.error("getAmbassadorAnalytics Error:", err);
+
     return res.status(500).json({
       isSuccess: false,
       message: err.message,

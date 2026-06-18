@@ -900,7 +900,26 @@ exports.removeAmbassador = async (req, res) => {
       });
     }
 
-    // Territory cleanup
+    // =====================================
+    // CHECK SUB AMBASSADORS
+    // =====================================
+
+    const subAmbassadorCount = await User.countDocuments({
+      parentAmbassador: user._id,
+      isAmbassador: true,
+    });
+
+    if (subAmbassadorCount > 0) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: `Cannot remove ambassador. ${subAmbassadorCount} active sub ambassadors are still assigned.`,
+      });
+    }
+
+    // =====================================
+    // TERRITORY CLEANUP
+    // =====================================
+
     if (user.territory) {
       await Territory.findByIdAndUpdate(user.territory, {
         $set: {
@@ -908,6 +927,10 @@ exports.removeAmbassador = async (req, res) => {
         },
       });
     }
+
+    // =====================================
+    // DISABLE AMBASSADOR
+    // =====================================
 
     user.isAmbassador = false;
 
@@ -928,19 +951,37 @@ exports.removeAmbassador = async (req, res) => {
     user.ambassadorApprovedBy = null;
 
     user.ambassadorReviewDueAt = null;
+
+    // Historical data preserve karo
+    // user.totalReferralUsers
+    // user.totalReferralEarned
+    // user.ambassadorCode
+
     await user.save();
+
+    // =====================================
+    // SEND NOTIFICATION
+    // =====================================
+
     await sendAmbassadorRemovedNotification(user);
-    return res.json({
+
+    return res.status(200).json({
       isSuccess: true,
       message: "Ambassador removed successfully",
       user: {
         _id: user._id,
+        name: user.name,
+        email: user.email,
+
         isAmbassador: false,
         ambassadorStatus: "disabled",
+
         ambassadorCode: user.ambassadorCode,
       },
     });
   } catch (err) {
+    console.error("removeAmbassador Error:", err);
+
     return res.status(500).json({
       isSuccess: false,
       message: err.message,

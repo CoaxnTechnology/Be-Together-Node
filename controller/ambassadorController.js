@@ -647,18 +647,103 @@ exports.makeAmbassador = async (req, res) => {
 exports.getAllApplications = async (req, res) => {
   try {
     const applications = await AmbassadorApplication.find()
-      .populate("user", "name email mobile profile_image city country")
+      .populate({
+        path: "user",
+        select: `
+          name
+          email
+          mobile
+          profile_image
+          city
+          country
+          bio
+          created_at
+          totalBookings
+          successfulBookings
+          services
+          isAmbassador
+          ambassadorStatus
+        `,
+      })
       .populate("reviewedBy", "name email")
       .sort({
         created_at: -1,
       });
 
-    return res.json({
+    const formattedApplications = applications.map((app) => ({
+      _id: app._id,
+
+      // Application Details
+      status: app.status,
+      acceptedAgreement: app.acceptedAgreement,
+
+      profession: app.profession,
+      targetAudience: app.targetAudience,
+
+      whyBecomeAmbassador: app.whyBecomeAmbassador,
+
+      howPromoteBetogether: app.howPromoteBetogether,
+
+      socialMediaUrls: app.socialMediaUrls || [],
+
+      rejectionReason: app.rejectionReason,
+
+      reviewedAt: app.reviewedAt,
+
+      created_at: app.created_at,
+
+      updated_at: app.updated_at,
+
+      // User Profile
+      user: app.user
+        ? {
+            _id: app.user._id,
+
+            name: app.user.name,
+
+            email: app.user.email,
+
+            mobile: app.user.mobile,
+
+            profile_image: app.user.profile_image,
+
+            city: app.user.city,
+
+            country: app.user.country,
+
+            bio: app.user.bio,
+
+            joinedAt: app.user.created_at,
+
+            totalBookings: app.user.totalBookings || 0,
+
+            successfulBookings: app.user.successfulBookings || 0,
+
+            totalServices: Array.isArray(app.user.services)
+              ? app.user.services.length
+              : 0,
+
+            ambassadorStatus: app.user.ambassadorStatus,
+          }
+        : null,
+
+      reviewedBy: app.reviewedBy
+        ? {
+            _id: app.reviewedBy._id,
+            name: app.reviewedBy.name,
+            email: app.reviewedBy.email,
+          }
+        : null,
+    }));
+
+    return res.status(200).json({
       isSuccess: true,
-      count: applications.length,
-      applications,
+      count: formattedApplications.length,
+      applications: formattedApplications,
     });
   } catch (err) {
+    console.error("getAllApplications Error:", err);
+
     return res.status(500).json({
       isSuccess: false,
       message: err.message,

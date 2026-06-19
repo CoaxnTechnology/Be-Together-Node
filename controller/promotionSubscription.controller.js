@@ -220,9 +220,7 @@ exports.stripeWebhook = async (req, res) => {
       console.log("RENEWAL SUBSCRIPTION METADATA");
       console.log(stripeSubscription.metadata);
       console.log("=================================");
-      const invoicePaymentIntentId = data.payment_intent;
 
-      console.log("INVOICE PAYMENT INTENT:", invoicePaymentIntentId);
       const invoice = await stripe.invoices.retrieve(data.id, {
         expand: ["payment_intent"],
       });

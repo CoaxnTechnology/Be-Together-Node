@@ -221,14 +221,8 @@ exports.stripeWebhook = async (req, res) => {
       console.log(stripeSubscription.metadata);
       console.log("=================================");
 
-      const invoice = await stripe.invoices.retrieve(data.id, {
-        expand: ["payment_intent"],
-      });
-
-      console.log("RETRIEVED PAYMENT INTENT:", invoice.payment_intent?.id);
-
-      const invoicePaymentIntentId = invoice.payment_intent?.id;
       const line = data.lines?.data?.[0];
+
       if (!line) {
         console.log("⚠ No invoice line found");
         return res.json({ received: true });
@@ -268,29 +262,7 @@ exports.stripeWebhook = async (req, res) => {
       service.promotionEnd = endDate;
       service.isPromoted = true;
       service.promotionStatus = "active";
-      if (invoicePaymentIntentId) {
-        await stripe.paymentIntents.update(invoicePaymentIntentId, {
-          metadata: {
-            serviceId: stripeSubscription.metadata.serviceId || "",
 
-            serviceTitle: stripeSubscription.metadata.serviceTitle || "",
-
-            userEmail: stripeSubscription.metadata.userEmail || "",
-
-            planId: stripeSubscription.metadata.planId || "",
-
-            planName: stripeSubscription.metadata.planName || "",
-
-            planDays: stripeSubscription.metadata.planDays || "",
-
-            planPrice: stripeSubscription.metadata.planPrice || "",
-
-            promotionType: stripeSubscription.metadata.promotionType || "",
-          },
-        });
-
-        console.log("✅ Payment Intent Metadata Updated");
-      }
       await service.save();
 
       console.log("🔄 Subscription Renewed Successfully");
@@ -414,7 +386,18 @@ exports.cancelPromotionSubscription = async (req, res) => {
     }
 
     console.log("🔄 Cancelling subscription:", subscriptionId);
+    const existingSubscription =
+      await stripe.subscriptions.retrieve(subscriptionId);
 
+    if (
+      existingSubscription.status === "canceled" ||
+      existingSubscription.canceled_at
+    ) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Subscription already cancelled",
+      });
+    }
     const subscription = await stripe.subscriptions.update(subscriptionId, {
       cancel_at_period_end: true,
     });

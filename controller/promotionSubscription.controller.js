@@ -181,35 +181,7 @@ exports.stripeWebhook = async (req, res) => {
         return res.json({ received: true });
       }
 
-      const latestInvoice = await stripe.invoices.retrieve(
-        subscription.latest_invoice,
-        {
-          expand: ["payment_intent"],
-        },
-      );
-
-      console.log("LATEST INVOICE:", latestInvoice.id);
-      console.log("PAYMENT INTENT:", latestInvoice.payment_intent?.id);
-
-      if (latestInvoice.payment_intent?.id) {
-        await stripe.paymentIntents.update(latestInvoice.payment_intent.id, {
-          metadata: {
-            serviceId: service._id.toString(),
-            serviceTitle: service.title,
-
-            promotionType: "service_promotion",
-
-            userEmail: subscription.metadata.userEmail || "",
-
-            planId: subscription.metadata.planId || "",
-            planName: subscription.metadata.planName || "",
-            planDays: subscription.metadata.planDays || "",
-            planPrice: subscription.metadata.planPrice || "",
-          },
-        });
-
-        console.log("✅ Payment Intent metadata updated");
-      }
+     
       service.promotionSubscriptionId = subscription.id;
       service.promotionPriceId = item.price.id;
       service.promotionStart = startDate;
@@ -249,7 +221,9 @@ exports.stripeWebhook = async (req, res) => {
       console.log("RENEWAL SUBSCRIPTION METADATA");
       console.log(stripeSubscription.metadata);
       console.log("=================================");
+      const invoicePaymentIntentId = data.payment_intent;
 
+      console.log("INVOICE PAYMENT INTENT:", invoicePaymentIntentId);
       const line = data.lines?.data?.[0];
       if (!line) {
         console.log("⚠ No invoice line found");
@@ -290,7 +264,29 @@ exports.stripeWebhook = async (req, res) => {
       service.promotionEnd = endDate;
       service.isPromoted = true;
       service.promotionStatus = "active";
+      if (invoicePaymentIntentId) {
+        await stripe.paymentIntents.update(invoicePaymentIntentId, {
+          metadata: {
+            serviceId: stripeSubscription.metadata.serviceId || "",
 
+            serviceTitle: stripeSubscription.metadata.serviceTitle || "",
+
+            userEmail: stripeSubscription.metadata.userEmail || "",
+
+            planId: stripeSubscription.metadata.planId || "",
+
+            planName: stripeSubscription.metadata.planName || "",
+
+            planDays: stripeSubscription.metadata.planDays || "",
+
+            planPrice: stripeSubscription.metadata.planPrice || "",
+
+            promotionType: stripeSubscription.metadata.promotionType || "",
+          },
+        });
+
+        console.log("✅ Payment Intent Metadata Updated");
+      }
       await service.save();
 
       console.log("🔄 Subscription Renewed Successfully");

@@ -69,22 +69,39 @@ exports.createPromotionSubscriptionCheckout = async (req, res) => {
       mode: "subscription",
       customer: customerId,
       payment_method_types: ["card"],
-      line_items: [{ price: plan.stripePriceId, quantity: 1 }],
+
+      line_items: [
+        {
+          price: plan.stripePriceId,
+          quantity: 1,
+        },
+      ],
+
       metadata: {
-        userId,
-        serviceId,
-        planId: plan._id.toString(),
-        planName: plan.name,
-        planDays: plan.days,
+        userId: user._id.toString(),
+        serviceId: service._id.toString(),
       },
+
+      subscription_data: {
+        metadata: {
+          userId: user._id.toString(),
+          userEmail: user.email,
+
+          serviceId: service._id.toString(),
+          serviceTitle: service.title,
+
+          providerId: service.owner.toString(),
+          promotionType: "service_promotion",
+          planId: plan._id.toString(),
+          planName: plan.name,
+          planDays: String(plan.days),
+          planPrice: String(plan.price),
+        },
+      },
+
       success_url:
         "https://yourapp.com/success?session_id={CHECKOUT_SESSION_ID}",
       cancel_url: "https://yourapp.com/cancel",
-      // 🔴 THIS IS THE KEY PART
-      // metadata: {
-      //   serviceId: service._id.toString(),
-      //   userId: user._id.toString(), // buyer
-      // },
     });
 
     res.json({ isSuccess: true, redirectUrl: session.url });
@@ -137,6 +154,10 @@ exports.stripeWebhook = async (req, res) => {
       }
 
       const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+      console.log("=================================");
+      console.log("SUBSCRIPTION METADATA");
+      console.log(subscription.metadata);
+      console.log("=================================");
       const item = subscription.items?.data?.[0];
 
       if (!item?.current_period_start || !item?.current_period_end) {
@@ -198,6 +219,9 @@ exports.stripeWebhook = async (req, res) => {
 
       if (!service) {
         console.log("❌ Service not found for renewal");
+
+        console.log("Subscription Metadata:", stripeSubscription.metadata);
+
         return res.json({ received: true });
       }
 
@@ -209,6 +233,13 @@ exports.stripeWebhook = async (req, res) => {
       await service.save();
 
       console.log("🔄 Subscription Renewed Successfully");
+      console.log({
+        serviceId: stripeSubscription.metadata.serviceId,
+        serviceTitle: stripeSubscription.metadata.serviceTitle,
+        userEmail: stripeSubscription.metadata.userEmail,
+        planName: stripeSubscription.metadata.planName,
+        planDays: stripeSubscription.metadata.planDays,
+      });
     }
 
     //////////////////////////////////////////////////////////////
@@ -218,6 +249,10 @@ exports.stripeWebhook = async (req, res) => {
       console.log("➡ invoice.payment_failed triggered");
 
       const subscriptionId = data.parent?.subscription_details?.subscription;
+      console.log("=================================");
+      console.log("RENEWAL SUBSCRIPTION METADATA");
+      console.log(stripeSubscription.metadata);
+      console.log("=================================");
 
       console.log("Failed Subscription:", subscriptionId);
 

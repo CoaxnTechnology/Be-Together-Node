@@ -98,7 +98,23 @@ exports.createPromotionSubscriptionCheckout = async (req, res) => {
           planPrice: String(plan.price),
         },
       },
+      payment_intent_data: {
+        metadata: {
+          userId: user._id.toString(),
+          userEmail: user.email,
 
+          serviceId: service._id.toString(),
+          serviceTitle: service.title,
+
+          providerId: service.owner.toString(),
+          promotionType: "service_promotion",
+
+          planId: plan._id.toString(),
+          planName: plan.name,
+          planDays: String(plan.days),
+          planPrice: String(plan.price),
+        },
+      },
       success_url:
         "https://yourapp.com/success?session_id={CHECKOUT_SESSION_ID}",
       cancel_url: "https://yourapp.com/cancel",
@@ -134,6 +150,12 @@ exports.stripeWebhook = async (req, res) => {
   }
 
   const data = event.data.object;
+  if (processedEvents.has(event.id)) {
+    console.log("⚠ Duplicate webhook skipped:", event.id);
+    return res.json({ received: true });
+  }
+
+  processedEvents.add(event.id);
 
   try {
     //////////////////////////////////////////////////////////////
@@ -190,7 +212,6 @@ exports.stripeWebhook = async (req, res) => {
       //   buyerId: data.metadata?.userId, // IMPORTANT
       //   serviceId: service._id,
       // });
-      console.log("✅ Promotion Activated (First Time)");
     }
 
     //////////////////////////////////////////////////////////////
@@ -207,22 +228,48 @@ exports.stripeWebhook = async (req, res) => {
         console.log("⚠ No subscription in invoice");
         return res.json({ received: true });
       }
+      const stripeSubscription =
+        await stripe.subscriptions.retrieve(subscriptionId);
+
+      console.log("=================================");
+      console.log("RENEWAL SUBSCRIPTION METADATA");
+      console.log(stripeSubscription.metadata);
+      console.log("=================================");
 
       const line = data.lines?.data?.[0];
+      if (!line) {
+        console.log("⚠ No invoice line found");
+        return res.json({ received: true });
+      }
 
       const startDate = new Date(line.period.start * 1000);
       const endDate = new Date(line.period.end * 1000);
 
-      const service = await Service.findOne({
+      let service = await Service.findOne({
         promotionSubscriptionId: subscriptionId,
       });
 
       if (!service) {
-        console.log("❌ Service not found for renewal");
+        console.log("⚠ Service not found by subscriptionId");
 
-        console.log("Subscription Metadata:", stripeSubscription.metadata);
+        const serviceId = stripeSubscription.metadata.serviceId;
 
-        return res.json({ received: true });
+        if (serviceId) {
+          const serviceByMetadata = await Service.findById(serviceId);
+
+          if (serviceByMetadata) {
+            service = serviceByMetadata;
+
+            service.promotionSubscriptionId = subscriptionId;
+            await service.save();
+
+            console.log("✅ Service recovered using metadata");
+          }
+        }
+
+        if (!service) {
+          return res.json({ received: true });
+        }
       }
 
       service.promotionStart = startDate;
@@ -249,6 +296,12 @@ exports.stripeWebhook = async (req, res) => {
       console.log("➡ invoice.payment_failed triggered");
 
       const subscriptionId = data.parent?.subscription_details?.subscription;
+      if (!subscriptionId) {
+        console.log("⚠ No subscription found");
+        return res.json({ received: true });
+      }
+      const stripeSubscription =
+        await stripe.subscriptions.retrieve(subscriptionId);
       console.log("=================================");
       console.log("RENEWAL SUBSCRIPTION METADATA");
       console.log(stripeSubscription.metadata);

@@ -175,10 +175,22 @@ exports.stripeWebhook = async (req, res) => {
       const endDate = new Date(item.current_period_end * 1000);
 
       const service = await Service.findById(serviceId);
+
       if (!service) {
         console.log("❌ Service not found");
         return res.json({ received: true });
       }
+
+      const latestInvoice = await stripe.invoices.retrieve(
+        subscription.latest_invoice,
+        {
+          expand: ["payment_intent"],
+        },
+      );
+
+      console.log("LATEST INVOICE:", latestInvoice.id);
+      console.log("PAYMENT INTENT:", latestInvoice.payment_intent?.id);
+
       if (latestInvoice.payment_intent?.id) {
         await stripe.paymentIntents.update(latestInvoice.payment_intent.id, {
           metadata: {

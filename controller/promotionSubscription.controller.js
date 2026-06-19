@@ -98,23 +98,7 @@ exports.createPromotionSubscriptionCheckout = async (req, res) => {
           planPrice: String(plan.price),
         },
       },
-      payment_intent_data: {
-        metadata: {
-          userId: user._id.toString(),
-          userEmail: user.email,
 
-          serviceId: service._id.toString(),
-          serviceTitle: service.title,
-
-          providerId: service.owner.toString(),
-          promotionType: "service_promotion",
-
-          planId: plan._id.toString(),
-          planName: plan.name,
-          planDays: String(plan.days),
-          planPrice: String(plan.price),
-        },
-      },
       success_url:
         "https://yourapp.com/success?session_id={CHECKOUT_SESSION_ID}",
       cancel_url: "https://yourapp.com/cancel",
@@ -195,7 +179,25 @@ exports.stripeWebhook = async (req, res) => {
         console.log("❌ Service not found");
         return res.json({ received: true });
       }
+      if (latestInvoice.payment_intent?.id) {
+        await stripe.paymentIntents.update(latestInvoice.payment_intent.id, {
+          metadata: {
+            serviceId: service._id.toString(),
+            serviceTitle: service.title,
 
+            promotionType: "service_promotion",
+
+            userEmail: subscription.metadata.userEmail || "",
+
+            planId: subscription.metadata.planId || "",
+            planName: subscription.metadata.planName || "",
+            planDays: subscription.metadata.planDays || "",
+            planPrice: subscription.metadata.planPrice || "",
+          },
+        });
+
+        console.log("✅ Payment Intent metadata updated");
+      }
       service.promotionSubscriptionId = subscription.id;
       service.promotionPriceId = item.price.id;
       service.promotionStart = startDate;

@@ -181,7 +181,6 @@ exports.stripeWebhook = async (req, res) => {
         return res.json({ received: true });
       }
 
-     
       service.promotionSubscriptionId = subscription.id;
       service.promotionPriceId = item.price.id;
       service.promotionStart = startDate;
@@ -224,6 +223,13 @@ exports.stripeWebhook = async (req, res) => {
       const invoicePaymentIntentId = data.payment_intent;
 
       console.log("INVOICE PAYMENT INTENT:", invoicePaymentIntentId);
+      const invoice = await stripe.invoices.retrieve(data.id, {
+        expand: ["payment_intent"],
+      });
+
+      console.log("RETRIEVED PAYMENT INTENT:", invoice.payment_intent?.id);
+
+      const invoicePaymentIntentId = invoice.payment_intent?.id;
       const line = data.lines?.data?.[0];
       if (!line) {
         console.log("⚠ No invoice line found");

@@ -7,11 +7,12 @@ const notificationController = require("./notificationController");
 const path = require("path");
 const fs = require("fs");
 const BASE_URL = process.env.BASE_URL;
+const AmbassadorApplication = require("../model/AmbassadorApplication");
 // ---------------- UPDATE Profile ----------------
 exports.editProfile = async (req, res) => {
   try {
     // don't set defaults here; we need to detect if a field was provided
-    let { email, name, bio, city, age,mobile  } = req.body;
+    let { email, name, bio, city, age, mobile } = req.body;
 
     // helper: try parse JSON string fields (common with multipart/form-data)
     const tryParse = (val) => {
@@ -345,6 +346,11 @@ exports.getUserProfileByEmail = async (req, res) => {
         .status(404)
         .json({ isSuccess: false, message: "User not found" });
     }
+    const ambassadorApplication = await AmbassadorApplication.findOne({
+      user: user._id,
+    })
+      .sort({ created_at: -1 })
+      .select("status rejectionReason");
 
     // ✅ Compute avg rating for each service
     const servicesWithRating = user.services.map((service) => {
@@ -377,6 +383,8 @@ exports.getUserProfileByEmail = async (req, res) => {
         interests: user.interests || [],
         offeredTags: user.offeredTags || [],
         currency: user.currency || "EUR",
+        ambassadorStatus: ambassadorApplication?.status || null,
+        ambassadorRejectionReason: ambassadorApplication?.rejectionReason || null,
         servicesCount: servicesWithRating.length, // total services
         services: servicesWithRating, // full service details with avg rating
       },
@@ -469,11 +477,15 @@ exports.blockUser = async (req, res) => {
     const { targetUserId } = req.body;
 
     if (!targetUserId) {
-      return res.status(400).json({ success: false, message: "targetUserId required" });
+      return res
+        .status(400)
+        .json({ success: false, message: "targetUserId required" });
     }
 
     if (userId === targetUserId) {
-      return res.status(400).json({ success: false, message: "You cannot block yourself" });
+      return res
+        .status(400)
+        .json({ success: false, message: "You cannot block yourself" });
     }
 
     await User.findByIdAndUpdate(userId, {
@@ -512,11 +524,10 @@ exports.getBlockedUsers = async (req, res) => {
 
     console.log("🔍 Fetch blocked users for:", userId);
 
-    const user = await User.findById(userId)
-      .populate({
-        path: "blockedUsers",
-        select: "name email profile_image bio city age languages interests",
-      });
+    const user = await User.findById(userId).populate({
+      path: "blockedUsers",
+      select: "name email profile_image bio city age languages interests",
+    });
 
     if (!user) {
       return res.status(404).json({
@@ -532,7 +543,6 @@ exports.getBlockedUsers = async (req, res) => {
       total: user.blockedUsers.length,
       data: user.blockedUsers,
     });
-
   } catch (err) {
     console.error("❌ getBlockedUsers error:", err);
     res.status(500).json({

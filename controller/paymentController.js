@@ -26,7 +26,7 @@ const AdminWalletConfig = require("../model/AdminWalletConfig");
 const AmbassadorWallet = require("../model/AmbassadorWallet");
 const AmbassadorCommissionSetting = require("../model/AmbassadorCommissionSetting");
 const AmbassadorWalletHistory = require("../model/AmbassadorWalletHistory");
-const processAmbassadorCommission=  require("../services/ambassadorCommissionService");
+const processAmbassadorCommission = require("../services/ambassadorCommissionService");
 const logPaymentFlow = (step, data = {}) => {
   console.log(`[paymentController] ${step}`, data);
 };

@@ -132,6 +132,9 @@ app.get("/api/privacy", (req, res) => {
 app.get("/api/cookie", (req, res) => {
   res.sendFile(path.join(__dirname, "templates", "cookie.html"));
 });
+app.get("/api/ambassador-terms", (req, res) => {
+  res.sendFile(path.join(__dirname, "templates", "ambassador-terms-condition.html"));
+});
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 app.use(express.static(path.join(__dirname, "public")));
 

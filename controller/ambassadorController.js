@@ -99,6 +99,21 @@ exports.applyForAmbassador = async (req, res) => {
         message: "You already have a pending ambassador application",
       });
     }
+    const lastRejectedApplication = await AmbassadorApplication.findOne({
+      user: userId,
+      status: "rejected",
+    }).sort({ created_at: -1 });
+
+    if (
+      lastRejectedApplication &&
+      lastRejectedApplication.rejectionCooldownUntil &&
+      new Date() < lastRejectedApplication.rejectionCooldownUntil
+    ) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: `You can reapply after ${lastRejectedApplication.rejectionCooldownUntil.toDateString()}`,
+      });
+    }
 
     // ==========================
     // Save Agreement Acceptance
@@ -425,6 +440,9 @@ exports.rejectApplication = async (req, res) => {
     application.reviewedAt = new Date();
 
     application.rejectionReason = reason || "Rejected by admin";
+    application.rejectionCooldownUntil = new Date(
+      Date.now() + 7 * 24 * 60 * 60 * 1000,
+    );
 
     await application.save();
 

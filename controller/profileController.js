@@ -350,7 +350,7 @@ exports.getUserProfileByEmail = async (req, res) => {
       user: user._id,
     })
       .sort({ created_at: -1 })
-      .select("status rejectionReason");
+      .select("status rejectionReason rejectionCooldownUntil");
 
     // ✅ Compute avg rating for each service
     const servicesWithRating = user.services.map((service) => {
@@ -384,7 +384,10 @@ exports.getUserProfileByEmail = async (req, res) => {
         offeredTags: user.offeredTags || [],
         currency: user.currency || "EUR",
         ambassadorStatus: ambassadorApplication?.status || null,
-        ambassadorRejectionReason: ambassadorApplication?.rejectionReason || null,
+        ambassadorRejectionReason:
+          ambassadorApplication?.rejectionReason || null,
+        ambassadorCooldownUntil:
+          ambassadorApplication?.rejectionCooldownUntil || null,
         servicesCount: servicesWithRating.length, // total services
         services: servicesWithRating, // full service details with avg rating
       },

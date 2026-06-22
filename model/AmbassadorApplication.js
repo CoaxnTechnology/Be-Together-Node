@@ -86,6 +86,10 @@ const ambassadorApplicationSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    rejectionCooldownUntil: {
+      type: Date,
+      default: null,
+    },
 
     created_at: {
       type: Date,

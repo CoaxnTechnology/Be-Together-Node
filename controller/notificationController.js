@@ -879,6 +879,42 @@ async function sendAmbassadorRemovedNotification(user) {
     console.error("❌ sendAmbassadorRemovedNotification:", err.message);
   }
 }
+async function sendAmbassadorRejectedNotification(user, reason) {
+  try {
+    if (!user?.fcmToken?.length) {
+      console.log("⚠️ User has no FCM tokens");
+      return;
+    }
+
+    await admin.messaging().sendEachForMulticast({
+      tokens: user.fcmToken,
+
+      notification: {
+        title: "❌ Ambassador Application Rejected",
+        body:
+          reason ||
+          "Your ambassador application has been rejected by admin.",
+      },
+
+      data: {
+        type: "ambassador_rejected",
+        ambassadorStatus: "rejected",
+        userId: user._id.toString(),
+        rejectionReason:
+          reason || "Your ambassador application has been rejected.",
+      },
+    });
+
+    console.log(
+      `✅ Ambassador rejection notification sent to ${user.name}`,
+    );
+  } catch (err) {
+    console.error(
+      "❌ sendAmbassadorRejectedNotification:",
+      err.message,
+    );
+  }
+}
 // async function notifyServiceOwnerOnSubscription({ buyerId, serviceId }) {
 //   try {
 //     const buyer = await User.findById(buyerId);
@@ -936,5 +972,7 @@ module.exports.sendAmbassadorApprovedNotification =
   sendAmbassadorApprovedNotification;
 module.exports.sendAmbassadorRemovedNotification =
   sendAmbassadorRemovedNotification;
+module.exports.sendAmbassadorRejectedNotification =
+  sendAmbassadorRejectedNotification;
 //module.exports.notifyServiceOwnerOnSubscription = notifyServiceOwnerOnSubscription;
 //notificaton addd

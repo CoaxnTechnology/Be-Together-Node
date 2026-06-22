@@ -13,6 +13,7 @@ const { sendOtpEmail, sendCredentialsEmail } = require("../utils/email");
 const {
   sendAmbassadorApprovedNotification,
   sendAmbassadorRemovedNotification,
+  sendAmbassadorRejectedNotification,
 } = require("./notificationController");
 const AmbassadorWalletHistory = require("../model/AmbassadorWalletHistory");
 function generateTempPassword(length = 8) {
@@ -451,6 +452,14 @@ exports.rejectApplication = async (req, res) => {
       ambassadorAgreementAccepted: false,
       ambassadorAgreementAcceptedAt: null,
     });
+    const user = await User.findById(application.user);
+
+    if (user) {
+      await sendAmbassadorRejectedNotification(
+        user,
+        application.rejectionReason,
+      );
+    }
 
     return res.json({
       isSuccess: true,

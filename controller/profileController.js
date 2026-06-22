@@ -383,7 +383,9 @@ exports.getUserProfileByEmail = async (req, res) => {
         interests: user.interests || [],
         offeredTags: user.offeredTags || [],
         currency: user.currency || "EUR",
-        ambassadorStatus: ambassadorApplication?.status || null,
+        ambassadorStatus: user.isAmbassador
+          ? user.ambassadorStatus
+          : ambassadorApplication?.status || null,
         ambassadorRejectionReason:
           ambassadorApplication?.rejectionReason || null,
         ambassadorCooldownUntil:

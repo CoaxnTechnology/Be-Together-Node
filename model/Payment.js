@@ -36,6 +36,30 @@ const paymentSchema = new mongoose.Schema(
 
     appCommission: { type: Number, default: 0 },
     providerAmount: { type: Number, default: 0 },
+    providerCommissionPercentage: {
+      type: Number,
+      default: 0,
+    },
+
+    customerCommissionPercentage: {
+      type: Number,
+      default: 0,
+    },
+
+    providerCommissionAmount: {
+      type: Number,
+      default: 0,
+    },
+
+    customerCommissionAmount: {
+      type: Number,
+      default: 0,
+    },
+
+    totalPaidByCustomer: {
+      type: Number,
+      default: 0,
+    },
     walletCoinsUsed: {
       type: Number,
       default: 0,
@@ -66,7 +90,16 @@ const paymentSchema = new mongoose.Schema(
       default: false,
     },
     currency: { type: String, default: null },
+    transferStatus: {
+      type: String,
+      enum: ["pending", "completed", "failed"],
+      default: "pending",
+    },
 
+    transferId: {
+      type: String,
+      default: null,
+    },
     status: {
       type: String,
       enum: ["pending", "completed", "held", "failed", "refunded", "canceled"],
@@ -76,6 +109,35 @@ const paymentSchema = new mongoose.Schema(
     refundReason: { type: String, default: null },
     completedAt: { type: Date, default: null },
     refundedAt: { type: Date, default: null },
+    refundStatus: {
+      type: String,
+      default: null,
+    },
+
+    refundedAmount: {
+      type: Number,
+      default: 0,
+    },
+
+    cancellationFee: {
+      type: Number,
+      default: 0,
+    },
+
+    platformRetainedAmount: {
+      type: Number,
+      default: 0,
+    },
+
+    transferFailureReason: {
+      type: String,
+      default: null,
+    },
+
+    transferFailureCode: {
+      type: String,
+      default: null,
+    },
   },
   { timestamps: true },
 );

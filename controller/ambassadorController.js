@@ -1129,6 +1129,7 @@ exports.createUserByAmbassador = async (req, res) => {
 
       registeredByAmbassador: ambassador._id,
       registeredByAmbassadorAt: new Date(),
+      registeredAfterAmbassadorApproval: true,
 
       otp_code: otp,
       otp_expiry: otpExpiry,
@@ -1413,14 +1414,14 @@ exports.dashboard = async (req, res) => {
     // =====================================
 
     const referredUsers = await User.find({
-      referredBy: ambassadorId,
+      registeredByAmbassador: ambassadorId,
     }).select("_id");
 
     const referredUserIds = referredUsers.map((user) => user._id);
 
     const totalReferralUsers = referredUserIds.length;
     const recentReferrals = await User.find({
-      referredBy: ambassadorId,
+      registeredByAmbassador: ambassadorId,
     })
       .select(
         "name email profile_image city country created_at successfulBookings",
@@ -2013,7 +2014,7 @@ exports.getAmbassadorAnalytics = async (req, res) => {
     // ======================================
 
     const referredUsers = await User.find({
-      referredBy: ambassadorObjectId,
+      registeredByAmbassador: ambassadorObjectId,
     }).select("_id");
 
     const referredUserIds = referredUsers.map((u) => u._id);

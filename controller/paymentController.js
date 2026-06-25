@@ -324,12 +324,27 @@ exports.bookService = async (req, res) => {
         .json({ message: "Provider stripe account missing" });
     }
     const commissionSetting = await CommissionSetting.findOne();
-    const commissionPercent = commissionSetting?.percentage || 20;
-    const commission = Math.round((amount * commissionPercent) / 100);
-    const providerAmount = amount - commission;
+
+    const providerCommissionPercent =
+      commissionSetting?.providerCommissionPercentage || 0;
+
+    const customerCommissionPercent =
+      commissionSetting?.customerCommissionPercentage || 0;
+
+    const providerCommissionAmount = Number(
+      ((amount * providerCommissionPercent) / 100).toFixed(2),
+    );
+
+    const customerCommissionAmount = Number(
+      ((amount * customerCommissionPercent) / 100).toFixed(2),
+    );
+
+    const providerAmount = amount - providerCommissionAmount;
     logPaymentFlow("bookService:commissionCalculated", {
-      commissionPercent,
-      commission,
+      providerCommissionPercent,
+      customerCommissionPercent,
+      providerCommissionAmount,
+      customerCommissionAmount,
       providerAmount,
     });
     // =======================
@@ -342,7 +357,7 @@ exports.bookService = async (req, res) => {
 
     let walletAmountUsed = 0;
 
-    let customerPayable = amount;
+    let customerPayable = amount + customerCommissionAmount;
 
     let platformContribution = 0;
 
@@ -387,7 +402,7 @@ exports.bookService = async (req, res) => {
         walletAmountUsed = walletCoinsUsed * coinValue;
 
         walletAmountUsed = Math.min(walletAmountUsed, amount);
-        customerPayable = amount - walletAmountUsed;
+        customerPayable = amount - walletAmountUsed + customerCommissionAmount;
 
         if (customerPayable < 0) {
           customerPayable = 0;
@@ -491,7 +506,7 @@ exports.bookService = async (req, res) => {
       originalAmount: amount,
       walletCoinsUsed,
       walletAmountUsed,
-      appCommission: commission,
+      appCommission: providerCommissionAmount + customerCommissionAmount,
       providerAmount,
     });
     const payment = await Payment.create({
@@ -514,7 +529,18 @@ exports.bookService = async (req, res) => {
       platformContribution,
 
       usedWallet: walletCoinsUsed > 0,
-      appCommission: commission,
+      appCommission: providerCommissionAmount + customerCommissionAmount,
+
+      providerCommissionPercentage: providerCommissionPercent,
+
+      customerCommissionPercentage: customerCommissionPercent,
+
+      providerCommissionAmount,
+
+      customerCommissionAmount,
+
+      totalPaidByCustomer: customerPayable,
+
       providerAmount,
       paymentIntentId: session.payment_intent,
       status: "pending",
@@ -946,7 +972,12 @@ exports.completeService = async (req, res) => {
       logPaymentFlow("completeService:bookingNotFound", { bookingId });
       return res.status(404).json({ message: "Booking not found" });
     }
-
+    if (booking.status === "completed") {
+      return res.json({
+        isSuccess: true,
+        message: "Service already completed",
+      });
+    }
     console.log("📌 Booking loaded:", booking);
 
     const customer = booking.customer;
@@ -1038,16 +1069,35 @@ exports.completeService = async (req, res) => {
       });
       return res.status(404).json({ message: "Payment not found" });
     }
+    if (payment.status === "completed") {
+      return res.json({
+        isSuccess: true,
+        message: "Payment already completed",
+      });
+    }
 
     console.log("💰 Payment found:", payment._id);
 
     logPaymentFlow("completeService:capturingPaymentIntent", {
       paymentIntentId: payment.paymentIntentId,
     });
-    await stripe.paymentIntents.capture(payment.paymentIntentId);
-    logPaymentFlow("completeService:paymentIntentCaptured", {
-      paymentIntentId: payment.paymentIntentId,
-    });
+
+    const paymentIntent = await stripe.paymentIntents.retrieve(
+      payment.paymentIntentId,
+    );
+
+    if (paymentIntent.status === "requires_capture") {
+      await stripe.paymentIntents.capture(payment.paymentIntentId);
+
+      logPaymentFlow("completeService:paymentIntentCaptured", {
+        paymentIntentId: payment.paymentIntentId,
+      });
+    } else {
+      logPaymentFlow("completeService:paymentAlreadyCaptured", {
+        paymentIntentId: payment.paymentIntentId,
+        status: paymentIntent.status,
+      });
+    }
     // ========================
     // AUTO PROVIDER PAYOUT
     // ========================
@@ -1058,18 +1108,35 @@ exports.completeService = async (req, res) => {
       destination: provider.stripeAccountId,
       bookingId: booking._id,
     });
-    await stripe.transfers.create({
-      amount: Math.round(payment.providerAmount * 100),
+    let transferStatus = "pending";
+    let transferId = null;
 
-      currency: payment.currency,
+    try {
+      const transfer = await stripe.transfers.create({
+        amount: Math.round(payment.providerAmount * 100),
+        currency: payment.currency,
+        destination: provider.stripeAccountId,
+        transfer_group: booking._id.toString(),
+      });
 
-      destination: provider.stripeAccountId,
+      transferStatus = "completed";
+      transferId = transfer.id;
 
-      transfer_group: booking._id.toString(),
-    });
-    logPaymentFlow("completeService:providerTransferCreated", {
-      bookingId: booking._id,
-    });
+      logPaymentFlow("completeService:providerTransferCreated", {
+        bookingId: booking._id,
+        transferId: transfer.id,
+      });
+    } catch (transferError) {
+      transferStatus = "failed";
+
+      payment.transferFailureReason = transferError.message;
+
+      payment.transferFailureCode = transferError.code || null;
+
+      console.error("❌ Provider Transfer Failed", transferError);
+
+      logPaymentError("providerTransfer:error", transferError);
+    }
 
     // ========================
     // WALLET DEDUCTION
@@ -1138,6 +1205,10 @@ exports.completeService = async (req, res) => {
 
     payment.status = "completed";
     payment.completedAt = new Date();
+
+    payment.transferStatus = transferStatus;
+    payment.transferId = transferId;
+
     await payment.save();
     // =====================================
     // AMBASSADOR COMMISSION
@@ -1547,17 +1618,23 @@ exports.refundBooking = async (req, res) => {
       });
     }
 
-    const totalAmount = payment.amount;
-    const cancellationFee = Math.round(
-      (totalAmount * cancellationPercent) / 100,
+    const discountedServiceAmount =
+      payment.originalAmount - (payment.walletAmountUsed || 0);
+    const cancellationFee = Number(
+      (discountedServiceAmount * cancellationPercent).toFixed(2),
     );
-    const refundAmount = totalAmount - cancellationFee;
-
-    console.log("💰 Total Amount:", totalAmount);
+    const refundAmount = Number(
+      (discountedServiceAmount - cancellationFee).toFixed(2),
+    );
+    const platformRetainedAmount = Number(
+      (cancellationFee + (payment.customerCommissionAmount || 0)).toFixed(2),
+    );
+    console.log("💰 Total Amount:", discountedServiceAmount);
     console.log("💰 Cancellation Fee:", cancellationFee);
     console.log("💰 Refundable Amount:", refundAmount);
     logPaymentFlow("refundBooking:refundAmountsCalculated", {
-      totalAmount,
+      discountedServiceAmount,
+
       cancellationPercent,
       cancellationFee,
       refundAmount,
@@ -1589,7 +1666,7 @@ exports.refundBooking = async (req, res) => {
 
     const refund = await stripe.refunds.create({
       payment_intent: payment.paymentIntentId,
-      amount: refundAmount * 100,
+      amount: Math.round(refundAmount * 100),
       reason: "requested_by_customer",
     });
 
@@ -1646,10 +1723,20 @@ exports.refundBooking = async (req, res) => {
     }
     // ✅ UPDATE PAYMENT
     payment.status = "refunded";
-    payment.refundedAmount = refundAmount;
-    payment.cancellationFee = cancellationFee;
-    payment.refundAt = new Date();
 
+    payment.refundId = refund.id;
+
+    payment.refundStatus = refund.status;
+
+    payment.refundReason = reason || null;
+
+    payment.refundedAmount = refundAmount;
+
+    payment.cancellationFee = cancellationFee;
+
+    payment.platformRetainedAmount = platformRetainedAmount;
+
+    payment.refundedAt = new Date();
     await payment.save();
     console.log("✔ Payment Updated");
     logPaymentFlow("refundBooking:paymentUpdated", {
@@ -1782,7 +1869,15 @@ exports.bookingPreview = async (req, res) => {
     });
 
     const amount = Number(service.price || 0);
+    const commissionSetting = await CommissionSetting.findOne();
 
+    const providerCommissionPercent =
+      commissionSetting?.providerCommissionPercentage || 0;
+
+    const customerCommissionPercent =
+      commissionSetting?.customerCommissionPercentage || 0;
+
+    const customerCommissionAmount = (amount * customerCommissionPercent) / 100;
     const coinValue = Number(config?.coinToCurrencyValue) || 1;
 
     const redeemPercent = Number(config?.maxWalletUsagePercent) || 0;
@@ -1799,7 +1894,7 @@ exports.bookingPreview = async (req, res) => {
 
     let walletDiscount = 0;
 
-    let finalPayable = amount;
+    let finalPayable = amount + customerCommissionAmount;
     logPaymentFlow("bookingPreview:baseValuesCalculated", {
       amount,
       coinValue,
@@ -1821,7 +1916,7 @@ exports.bookingPreview = async (req, res) => {
 
       walletDiscount = Math.min(walletDiscount, amount);
 
-      finalPayable = amount - walletDiscount;
+      finalPayable = amount - walletDiscount + customerCommissionAmount;
       logPaymentFlow("bookingPreview:walletCalculationDone", {
         coinsUsed,
         walletDiscount,
@@ -1883,6 +1978,9 @@ exports.bookingPreview = async (req, res) => {
       canRedeem,
 
       isOwnService,
+      providerCommissionPercent,
+      customerCommissionPercent,
+      customerCommissionAmount,
 
       useWallet,
       walletEligibleCoins,

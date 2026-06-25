@@ -138,7 +138,10 @@ const userSchema = new mongoose.Schema(
     // =====================================
     // AMBASSADOR SYSTEM
     // =====================================
-
+    registeredAfterAmbassadorApproval: {
+      type: Boolean,
+      default: false,
+    },
     ambassadorType: {
       type: String,
       enum: ["standard", "exclusive"],

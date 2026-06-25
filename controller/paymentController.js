@@ -1,4 +1,6 @@
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
+const endpointSecret = process.env.STRIPE_PAYMENT_WEBHOOK_SECRET;
+console.log("Stripe Webhook Secret:", endpointSecret);
 const nodemailer = require("nodemailer");
 const {
   sendServiceOtpEmail,
@@ -642,7 +644,7 @@ exports.updateBookingStatus = async (req, res) => {
     // =============================================
     // 🚫 PREVENT DOUBLE BOOKING
     // =============================================
-    if (payment.status === "held") {
+    if (payment.status === "held" || payment.bookingId) {
       console.log("⚠️ Booking already exists:", payment.bookingId);
       logPaymentFlow("updateBookingStatus:bookingAlreadyCreated", {
         paymentId: payment._id,
@@ -1618,26 +1620,54 @@ exports.refundBooking = async (req, res) => {
       });
     }
 
-    const discountedServiceAmount =
+    let discountedServiceAmount =
       payment.originalAmount - (payment.walletAmountUsed || 0);
-    const cancellationFee = Number(
-      (discountedServiceAmount * cancellationPercent).toFixed(2),
+
+    let cancellationFee = 0;
+    let refundAmount = 0;
+    let platformRetainedAmount = 0;
+
+    if (cancelledBy === "provider") {
+      // Provider ki galti
+      refundAmount = payment.customerPaidAmount;
+
+      cancellationFee = 0;
+
+      platformRetainedAmount = 0;
+    } else {
+      cancellationFee = Number(
+        (discountedServiceAmount * cancellationPercent).toFixed(2),
+      );
+
+      refundAmount = Number(
+        (discountedServiceAmount - cancellationFee).toFixed(2),
+      );
+
+      platformRetainedAmount = Number(
+        (cancellationFee + (payment.customerCommissionAmount || 0)).toFixed(2),
+      );
+    }
+    console.log(
+      "💰 Total Amount:",
+      cancelledBy === "provider"
+        ? payment.customerPaidAmount
+        : discountedServiceAmount,
     );
-    const refundAmount = Number(
-      (discountedServiceAmount - cancellationFee).toFixed(2),
-    );
-    const platformRetainedAmount = Number(
-      (cancellationFee + (payment.customerCommissionAmount || 0)).toFixed(2),
-    );
-    console.log("💰 Total Amount:", discountedServiceAmount);
     console.log("💰 Cancellation Fee:", cancellationFee);
     console.log("💰 Refundable Amount:", refundAmount);
     logPaymentFlow("refundBooking:refundAmountsCalculated", {
-      discountedServiceAmount,
+      totalAmount:
+        cancelledBy === "provider"
+          ? payment.customerPaidAmount
+          : discountedServiceAmount,
 
       cancellationPercent,
+
       cancellationFee,
+
       refundAmount,
+
+      platformRetainedAmount,
     });
 
     // ---------------------------------------------------------
@@ -1663,18 +1693,38 @@ exports.refundBooking = async (req, res) => {
       paymentIntentId: payment.paymentIntentId,
       refundAmount,
     });
-
+    const stripeRefundReason = "requested_by_customer";
     const refund = await stripe.refunds.create({
       payment_intent: payment.paymentIntentId,
       amount: Math.round(refundAmount * 100),
-      reason: "requested_by_customer",
-    });
+      reason: stripeRefundReason,
 
-    console.log("🔁 Stripe Refund ID:", refund.id);
-    logPaymentFlow("refundBooking:stripeRefundCreated", {
-      refundId: refund.id,
-      status: refund.status,
+      metadata: {
+        bookingId: booking._id.toString(),
+        paymentId: payment._id.toString(),
+        customerId: booking.customer._id.toString(),
+        providerId: booking.provider._id.toString(),
+        serviceId: booking.service._id.toString(),
+        cancelledBy,
+        cancellationReason: reason || "",
+      },
     });
+    console.log("🔁 Stripe Refund ID:", refund.id);
+    if (refund.status !== "succeeded") {
+      console.error("Refund not completed immediately");
+
+      console.error({
+        status: refund.status,
+        failureReason: refund.failure_reason,
+        failureBalanceTransaction: refund.failure_balance_transaction,
+      });
+
+      logPaymentFlow("refundBooking:refundPending", {
+        refundId: refund.id,
+        status: refund.status,
+        failureReason: refund.failure_reason,
+      });
+    }
 
     // ---------------------------------------------------------
     // 6️⃣ UPDATE DB — BOOKING + PAYMENT
@@ -1722,14 +1772,16 @@ exports.refundBooking = async (req, res) => {
       }
     }
     // ✅ UPDATE PAYMENT
-    payment.status = "refunded";
+    payment.status = refund.status === "succeeded" ? "refunded" : "pending";
 
     payment.refundId = refund.id;
 
     payment.refundStatus = refund.status;
 
-    payment.refundReason = reason || null;
-
+    payment.refundReason =
+      cancelledBy === "provider"
+        ? "Provider cancelled booking"
+        : reason || "Customer cancelled booking";
     payment.refundedAmount = refundAmount;
 
     payment.cancellationFee = cancellationFee;
@@ -1796,7 +1848,7 @@ exports.refundBooking = async (req, res) => {
     // ---------------------------------------------------------
     console.log("🔔 Sending Cancel Notifications…");
 
-    sendServiceCancelledNotification(
+    await sendServiceCancelledNotification(
       booking.customer,
       booking.provider,
       booking.service,
@@ -1989,6 +2041,207 @@ exports.bookingPreview = async (req, res) => {
     logPaymentError("bookingPreview:error", err);
     return res.status(500).json({
       isSuccess: false,
+      message: err.message,
+    });
+  }
+};
+exports.stripeWebhook = async (req, res) => {
+  let event;
+
+  try {
+    const signature = req.headers["stripe-signature"];
+
+    event = stripe.webhooks.constructEvent(req.body, signature, endpointSecret);
+
+    console.log("✅ Stripe Event :", event.type);
+  } catch (err) {
+    console.log("❌ Webhook Verify Failed", err.message);
+
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  try {
+    switch (event.type) {
+      case "checkout.session.completed": {
+        const session = event.data.object;
+
+        console.log("Checkout Completed :", session.id);
+
+        const payment = await Payment.findOne({
+          checkoutSessionId: session.id,
+        });
+
+        if (!payment) {
+          console.log("Payment not found");
+          break;
+        }
+
+        if (payment.status === "held"|| payment.bookingId) {
+          console.log("Already processed");
+          break;
+        }
+        const alreadyBooking = await Booking.findOne({
+          paymentId: payment._id,
+        });
+
+        if (alreadyBooking) {
+          console.log("Booking already exists");
+          break;
+        }
+
+        const paymentIntent = await stripe.paymentIntents.retrieve(
+          session.payment_intent,
+        );
+        if (paymentIntent.status !== "requires_capture") {
+          console.log("Payment not authorized");
+          break;
+        }
+
+        const { userId, providerId, serviceId } = paymentIntent.metadata;
+        const customer = await User.findById(userId);
+        const provider = await User.findById(providerId);
+        const service = await Service.findById(serviceId);
+
+        if (!customer || !provider || !service) {
+          console.log("Invalid customer/provider/service");
+          break;
+        }
+
+        const booking = await Booking.create({
+          customer: userId,
+          provider: providerId,
+          service: serviceId,
+
+          amount: payment.originalAmount,
+          currency: payment.currency,
+
+          paymentId: payment._id,
+
+          status: "booked",
+
+          contactPhone: payment.contactPhone,
+
+          location_name: payment.location_name,
+
+          ...(payment.location && {
+            location: payment.location,
+          }),
+        });
+
+        payment.status = "held";
+        payment.bookingId = booking._id;
+        payment.paymentIntentId = paymentIntent.id;
+        payment.customerStripeId = paymentIntent.customer;
+        payment.heldAt = new Date();
+        await payment.save();
+
+        try {
+          await sendServiceBookedEmail(
+            customer,
+            service,
+            provider,
+            booking,
+            "customer",
+          );
+        } catch (err) {
+          console.log("Error sending email to customer:", err);
+        }
+        try {
+          await sendServiceBookedEmail(
+            customer,
+            service,
+            provider,
+            booking,
+            "provider",
+          );
+        } catch (err) {
+          console.log("Error sending email to provider:", err);
+        }
+
+        try {
+          await sendBookingNotification(customer, provider, service, booking);
+        } catch (err) {
+          console.log("Error sending notification:", err);
+        }
+
+        console.log("Booking Created");
+        break;
+      }
+
+      case "charge.refunded": {
+        console.log("Refund Success");
+
+        const charge = event.data.object;
+
+        const payment = await Payment.findOne({
+          paymentIntentId: charge.payment_intent,
+        });
+
+        if (payment) {
+          payment.status = "refunded";
+          payment.refundId = charge.refunds?.data?.[0]?.id || null;
+
+          payment.refundStatus =
+            charge.refunds?.data?.[0]?.status || "succeeded";
+          payment.refundedAt = new Date();
+          payment.refundedAmount = (charge.amount_refunded || 0) / 100;
+          payment.refundReason = charge.refunds?.data?.[0]?.reason || null;
+          await payment.save();
+
+          console.log("Payment Updated");
+        }
+
+        break;
+      }
+      case "payment_intent.payment_failed": {
+        console.log("Payment Failed");
+
+        const paymentIntent = event.data.object;
+
+        const payment = await Payment.findOne({
+          paymentIntentId: paymentIntent.id,
+        });
+
+        if (payment) {
+          payment.status = "failed";
+          payment.failureReason =
+            paymentIntent.last_payment_error?.message || null;
+          await payment.save();
+
+          console.log("Payment marked as failed");
+        }
+
+        break;
+      }
+      case "charge.captured": {
+        console.log("Charge Captured");
+
+        const charge = event.data.object;
+
+        const payment = await Payment.findOne({
+          paymentIntentId: charge.payment_intent,
+        });
+
+        if (payment) {
+          payment.captureStatus = "captured";
+          payment.capturedAt = new Date();
+
+          await payment.save();
+
+          console.log("Capture updated");
+        }
+
+        break;
+      }
+      default:
+        console.log("Unhandled Event :", event.type);
+    }
+
+    return res.json({ received: true });
+  } catch (err) {
+    console.log(err);
+
+    return res.status(500).json({
       message: err.message,
     });
   }

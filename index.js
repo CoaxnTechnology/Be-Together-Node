@@ -26,6 +26,7 @@ const { exec } = require("child_process");
 const promotionSubscription = require("./routes/promotionSubscription.Routes");
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const promotionController = require("./controller/promotionSubscription.controller");
+const paymentController = require("./controller/paymentController");
 const promotionPlanAdminRoutes = require("./routes/promotionPlanadminRoutes");
 const serviceReportRoutes = require("./routes/serviceReportRoutes");
 const referralRoutes = require("./routes/referralRoutes");
@@ -102,7 +103,13 @@ app.post(
   express.raw({ type: "application/json" }),
   promotionController.stripeWebhook,
 );
-
+app.post(
+  "/api/payment/stripe/webhook",
+  express.raw({
+    type: "application/json",
+  }),
+  paymentController.stripeWebhook,
+);
 // Middleware
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
@@ -133,7 +140,9 @@ app.get("/api/cookie", (req, res) => {
   res.sendFile(path.join(__dirname, "templates", "cookie.html"));
 });
 app.get("/api/ambassador-terms", (req, res) => {
-  res.sendFile(path.join(__dirname, "templates", "ambassador-terms-condition.html"));
+  res.sendFile(
+    path.join(__dirname, "templates", "ambassador-terms-condition.html"),
+  );
 });
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 app.use(express.static(path.join(__dirname, "public")));
@@ -180,6 +189,7 @@ app.use("/api/account", deleteAccountRoutes);
 console.log("Product ID:", process.env.STRIPE_PROMOTION_PRODUCT_ID);
 console.log("apple client ID:", process.env.APPLE_CLIENT_ID);
 console.log("reset password link:", process.env.FRONTEND_RESET_URL);
+console.log(process.env.STRIPE_PAYMENT_WEBHOOK_SECRET);
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
 module.exports = app;

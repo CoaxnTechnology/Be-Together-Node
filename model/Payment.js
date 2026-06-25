@@ -105,6 +105,14 @@ const paymentSchema = new mongoose.Schema(
       enum: ["pending", "completed", "held", "failed", "refunded", "canceled"],
       default: "pending",
     },
+    captureStatus: {
+      type: String,
+      default: null,
+    },
+    capturedAt: {
+      type: Date,
+      default: null,
+    },
     refundId: { type: String, default: null },
     refundReason: { type: String, default: null },
     completedAt: { type: Date, default: null },
@@ -123,13 +131,20 @@ const paymentSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
-
+    heldAt: {
+      type: Date,
+      default: null,
+    },
     platformRetainedAmount: {
       type: Number,
       default: 0,
     },
 
     transferFailureReason: {
+      type: String,
+      default: null,
+    },
+    failureReason: {
       type: String,
       default: null,
     },

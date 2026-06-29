@@ -11,6 +11,15 @@ const ambassadorWalletSchema = new mongoose.Schema({
     type: Number,
     default: 0,
   },
+  availableBalance: {
+    type: Number,
+    default: 0,
+  },
+
+  reservedBalance: {
+    type: Number,
+    default: 0,
+  },
   totalEarned: {
     type: Number,
     default: 0,

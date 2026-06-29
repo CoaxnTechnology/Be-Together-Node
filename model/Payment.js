@@ -92,8 +92,20 @@ const paymentSchema = new mongoose.Schema(
     currency: { type: String, default: null },
     transferStatus: {
       type: String,
-      enum: ["pending", "completed", "failed"],
-      default: "pending",
+      enum: ["pending", "completed", "failed", "reversed"],
+      default: null,
+    },
+    transferAmount: {
+      type: Number,
+      default: 0,
+    },
+    transferDestination: {
+      type: String,
+      default: null,
+    },
+    transferCreatedAt: {
+      type: Date,
+      default: null,
     },
 
     transferId: {
@@ -148,7 +160,6 @@ const paymentSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
-
     transferFailureCode: {
       type: String,
       default: null,

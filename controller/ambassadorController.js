@@ -1,11 +1,14 @@
 const User = require("../model/User");
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const AmbassadorApplication = require("../model/AmbassadorApplication");
 const Service = require("../model/Service");
 const Booking = require("../model/Booking");
 const bcrypt = require("bcryptjs");
+const endpointSecret = process.env.STRIPE_PAYMENT_WEBHOOK_SECRET;
 const Territory = require("../model/Territory");
 const fs = require("fs");
 const crypto = require("crypto");
+const AmbassadorWithdrawal = require("../model/AmbassadorWithdrawal");
 const path = require("path");
 const mongoose = require("mongoose");
 const AmbassadorWallet = require("../model/AmbassadorWallet");
@@ -2094,5 +2097,554 @@ exports.getAmbassadorAnalytics = async (req, res) => {
       isSuccess: false,
       message: err.message,
     });
+  }
+};
+exports.withdrawAmount = async (req, res) => {
+  const session = await mongoose.startSession();
+
+  try {
+    session.startTransaction();
+
+    const ambassadorId = req.user.id;
+    const amount = Number(req.body.amount);
+    let withdrawalDoc = null;
+    // ============================
+    // Amount Validation
+    // ============================
+
+    if (!amount || isNaN(amount)) {
+      await session.abortTransaction();
+
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Amount is required",
+      });
+    }
+
+    if (amount < 20) {
+      await session.abortTransaction();
+
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Minimum withdrawal amount is €20",
+      });
+    }
+    if (!Number.isFinite(amount) || !Number.isInteger(amount * 100)) {
+      await session.abortTransaction();
+
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Invalid amount",
+      });
+    }
+
+    // ============================
+    // User
+    // ============================
+
+    const user = await User.findById(ambassadorId).session(session);
+
+    if (!user) {
+      await session.abortTransaction();
+
+      return res.status(404).json({
+        isSuccess: false,
+        message: "User not found",
+      });
+    }
+
+    // ============================
+    // Ambassador Check
+    // ============================
+
+    if (!user.isAmbassador || user.ambassadorStatus !== "approved") {
+      await session.abortTransaction();
+
+      return res.status(403).json({
+        isSuccess: false,
+        message: "Only approved ambassadors can withdraw.",
+      });
+    }
+
+    // ============================
+    // Wallet
+    // ============================
+
+    const wallet = await AmbassadorWallet.findOne({
+      ambassador: ambassadorId,
+    }).session(session);
+
+    if (!wallet) {
+      await session.abortTransaction();
+
+      return res.status(404).json({
+        isSuccess: false,
+        message: "Wallet not found",
+      });
+    }
+
+    if (wallet.availableBalance < amount) {
+      await session.abortTransaction();
+
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Insufficient wallet balance",
+      });
+    }
+
+    // ============================
+    // Stripe Account
+    // ============================
+
+    if (!user.stripeAccountId) {
+      const account = await stripe.accounts.create({
+        type: "express",
+
+        country: "IT",
+
+        email: user.email,
+
+        capabilities: {
+          transfers: {
+            requested: true,
+          },
+        },
+      });
+
+      user.stripeAccountId = account.id;
+      user.stripeAccountCreatedAt = new Date();
+
+      await user.save({ session });
+
+      const accountLink = await stripe.accountLinks.create({
+        account: account.id,
+
+        refresh_url: `${process.env.APP_URL}/withdraw`,
+
+        return_url: `${process.env.APP_URL}/withdraw-success`,
+
+        type: "account_onboarding",
+      });
+
+      await session.commitTransaction();
+
+      return res.status(200).json({
+        isSuccess: true,
+
+        requiresOnboarding: true,
+
+        onboardingCompleted: false,
+
+        onboardingUrl: accountLink.url,
+
+        message:
+          "Stripe account created successfully. Please complete KYC before withdrawing.",
+      });
+    }
+
+    // ============================
+    // Existing Stripe Account
+    // ============================
+
+    const account = await stripe.accounts.retrieve(user.stripeAccountId);
+
+    if (
+      !account.details_submitted ||
+      !account.charges_enabled ||
+      !account.payouts_enabled
+    ) {
+      const accountLink = await stripe.accountLinks.create({
+        account: user.stripeAccountId,
+
+        refresh_url: `${process.env.APP_URL}/withdraw`,
+
+        return_url: `${process.env.APP_URL}/withdraw-success`,
+
+        type: "account_onboarding",
+      });
+
+      await session.commitTransaction();
+
+      return res.status(200).json({
+        isSuccess: true,
+
+        requiresOnboarding: true,
+
+        onboardingCompleted: false,
+
+        onboardingUrl: accountLink.url,
+
+        message:
+          "Please complete your Stripe KYC before requesting withdrawal.",
+      });
+    }
+    // ======================================
+    // PART 2 STARTS HERE
+    // ======================================
+
+    // Stripe payout
+
+    const withdrawal = await AmbassadorWithdrawal.create(
+      [
+        {
+          ambassador: ambassadorId,
+
+          requestedAmount: amount,
+
+          finalAmount: amount,
+
+          currency: "eur",
+
+          status: "pending",
+
+          requestedAt: new Date(),
+        },
+      ],
+      { session },
+    );
+
+    withdrawalDoc = withdrawal[0];
+
+    // Wallet Update
+
+    wallet.availableBalance -= amount;
+
+    wallet.reservedBalance += amount;
+
+    await wallet.save({
+      session,
+    });
+
+    // Wallet History
+
+    await session.commitTransaction();
+    const payout = await stripe.payouts.create(
+      {
+        amount: Math.round(amount * 100),
+        currency: "eur",
+
+        metadata: {
+          withdrawalId: withdrawalDoc._id.toString(),
+          ambassadorId: ambassadorId.toString(),
+          amount: amount.toString(),
+          currency: "eur",
+        },
+      },
+      {
+        stripeAccount: user.stripeAccountId,
+        idempotencyKey: withdrawalDoc._id.toString(),
+      },
+    );
+    withdrawalDoc.stripePayoutId = payout.id;
+    withdrawalDoc.status = "processing";
+    withdrawalDoc.stripeAccountId = user.stripeAccountId;
+
+    withdrawalDoc.arrivalDate = payout.arrival_date
+      ? new Date(payout.arrival_date * 1000)
+      : null;
+    try {
+      await withdrawalDoc.save();
+    } catch (err) {
+      console.log("Withdrawal save failed:", err.message);
+    }
+    return res.status(200).json({
+      isSuccess: true,
+
+      message: "Withdrawal request created successfully.",
+
+      withdrawalId: withdrawalDoc._id,
+
+      status: withdrawalDoc.status,
+
+      amount,
+
+      availableBalance: wallet.availableBalance,
+    });
+  } catch (err) {
+    if (session.inTransaction()) {
+      await session.abortTransaction();
+    }
+    console.log(err);
+    if (withdrawalDoc && !withdrawalDoc.stripePayoutId) {
+      await AmbassadorWithdrawal.findByIdAndUpdate(withdrawalDoc._id, {
+        status: "failed",
+        failureReason: err.message,
+      });
+    }
+
+    return res.status(500).json({
+      isSuccess: false,
+
+      message: err.message,
+    });
+  } finally {
+    session.endSession();
+  }
+};
+exports.handlePayoutCreated = async (payout) => {
+  try {
+    console.log("========== PAYOUT CREATED ==========");
+
+    console.log(payout.id);
+
+    // metadata se withdrawal id nikalo
+    const withdrawalId = payout.metadata?.withdrawalId;
+
+    if (!withdrawalId) {
+      console.log("Withdrawal Id Missing");
+      return;
+    }
+
+    const withdrawal = await AmbassadorWithdrawal.findById(withdrawalId);
+
+    if (!withdrawal) {
+      console.log("Withdrawal Not Found");
+      return;
+    }
+
+    // already processed
+    if (withdrawal.stripePayoutId && withdrawal.stripePayoutId !== payout.id) {
+      console.log("Different payout");
+      return;
+    }
+    withdrawal.stripePayoutId = payout.id;
+
+    withdrawal.status = "processing";
+
+    withdrawal.arrivalDate = payout.arrival_date
+      ? new Date(payout.arrival_date * 1000)
+      : null;
+
+    await withdrawal.save();
+
+    console.log("Withdrawal Updated");
+  } catch (err) {
+    console.log(err);
+  }
+};
+exports.handlePayoutUpdated = async (payout) => {
+  try {
+    console.log("========== PAYOUT UPDATED ==========");
+
+    const withdrawalId = payout.metadata?.withdrawalId;
+
+    if (!withdrawalId) {
+      console.log("Withdrawal Id Missing");
+      return;
+    }
+
+    const withdrawal = await AmbassadorWithdrawal.findById(withdrawalId);
+
+    if (!withdrawal) {
+      console.log("Withdrawal Not Found");
+      return;
+    }
+
+    if (withdrawal.stripePayoutId !== payout.id) {
+      console.log("Invalid payout");
+      return;
+    }
+
+    withdrawal.status =
+      payout.status === "paid"
+        ? "completed"
+        : payout.status === "failed"
+          ? "failed"
+          : "processing";
+
+    withdrawal.availableAt = payout.arrival_date
+      ? new Date(payout.arrival_date * 1000)
+      : withdrawal.availableAt;
+
+    await withdrawal.save();
+
+    console.log("Withdrawal Updated");
+  } catch (err) {
+    console.log(err);
+  }
+};
+exports.handlePayoutPaid = async (payout) => {
+  const session = await mongoose.startSession();
+
+  try {
+    session.startTransaction();
+
+    const withdrawalId = payout.metadata?.withdrawalId;
+
+    if (!withdrawalId) {
+      await session.abortTransaction();
+      return;
+    }
+
+    const withdrawal =
+      await AmbassadorWithdrawal.findById(withdrawalId).session(session);
+
+    if (!withdrawal) {
+      await session.abortTransaction();
+      return;
+    }
+    // Already completed
+    if (withdrawal.status === "completed") {
+      await session.abortTransaction();
+      console.log("Withdrawal already completed");
+      return;
+    }
+    const wallet = await AmbassadorWallet.findOne({
+      ambassador: withdrawal.ambassador,
+    }).session(session);
+
+    if (!wallet) {
+      await session.abortTransaction();
+      return;
+    }
+
+    if (wallet.reservedBalance < withdrawal.finalAmount) {
+      await session.abortTransaction();
+      return;
+    }
+
+    const balanceBefore = wallet.balance;
+
+    wallet.balance -= withdrawal.finalAmount;
+
+    wallet.reservedBalance -= withdrawal.finalAmount;
+
+    wallet.totalWithdrawn += withdrawal.finalAmount;
+
+    await wallet.save({ session });
+    const exists = await AmbassadorWalletHistory.findOne({
+      ambassador: withdrawal.ambassador,
+      type: "withdrawal",
+      stripePayoutId: payout.id,
+    }).session(session);
+
+    if (exists) {
+      await session.abortTransaction();
+      return;
+    }
+    await AmbassadorWalletHistory.create(
+      [
+        {
+          ambassador: withdrawal.ambassador,
+
+          transactionType: "debit",
+
+          type: "withdrawal",
+
+          amount: withdrawal.finalAmount,
+
+          balanceBefore,
+
+          balanceAfter: wallet.balance,
+
+          note: "Stripe payout completed",
+        },
+      ],
+      { session },
+    );
+
+    withdrawal.status = "completed";
+
+    withdrawal.processedAt = new Date();
+
+    await withdrawal.save({ session });
+
+    await session.commitTransaction();
+
+    console.log("Withdrawal Completed");
+  } catch (err) {
+    if (session.inTransaction()) {
+      await session.abortTransaction();
+    }
+
+    console.log(err);
+  } finally {
+    session.endSession();
+  }
+};
+exports.handlePayoutFailed = async (payout) => {
+  const session = await mongoose.startSession();
+
+  try {
+    session.startTransaction();
+
+    console.log("========== PAYOUT FAILED ==========");
+
+    const withdrawalId = payout.metadata?.withdrawalId;
+
+    if (!withdrawalId) {
+      await session.abortTransaction();
+      return;
+    }
+
+    const withdrawal =
+      await AmbassadorWithdrawal.findById(withdrawalId).session(session);
+
+    if (!withdrawal) {
+      await session.abortTransaction();
+      return;
+    }
+    // Duplicate webhook protection
+    if (withdrawal.status === "completed") {
+      await session.abortTransaction();
+      console.log("Withdrawal already completed");
+      return;
+    }
+
+    if (withdrawal.stripePayoutId !== payout.id) {
+      await session.abortTransaction();
+      return;
+    }
+
+    const wallet = await AmbassadorWallet.findOne({
+      ambassador: withdrawal.ambassador,
+    }).session(session);
+
+    if (!wallet) {
+      await session.abortTransaction();
+      return;
+    }
+
+    if (wallet.reservedBalance < withdrawal.finalAmount) {
+      await session.abortTransaction();
+      return;
+    }
+    if (withdrawal.status === "failed") {
+      await session.abortTransaction();
+      return;
+    }
+
+    // Release Reserved Balance
+    wallet.reservedBalance = Math.max(
+      0,
+      wallet.reservedBalance - withdrawal.finalAmount,
+    );
+
+    wallet.availableBalance += withdrawal.finalAmount;
+
+    await wallet.save({ session });
+
+    withdrawal.status = "failed";
+
+    withdrawal.failureReason =
+      payout.failure_code || payout.failure_message || "Stripe payout failed";
+
+    withdrawal.failureCode = payout.failure_code || null;
+
+    withdrawal.failedAt = new Date();
+
+    await withdrawal.save({ session });
+
+    await session.commitTransaction();
+
+    console.log("Withdrawal Failed");
+  } catch (err) {
+    if (session.inTransaction()) {
+      await session.abortTransaction();
+    }
+
+    console.log(err);
+  } finally {
+    session.endSession();
   }
 };

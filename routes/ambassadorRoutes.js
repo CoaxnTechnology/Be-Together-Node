@@ -23,6 +23,8 @@ const {
   getAmbassadorById,
   getAmbassadorWalletHistory,
   getAmbassadorAnalytics,
+  withdrawAmount,
+  getWithdrawalHistory,
 } = require("../controller/ambassadorController");
 // USER
 
@@ -67,7 +69,13 @@ router.post("/create-user", auth, createUserByAmbassador);
 // =====================================
 
 router.get("/admin/:id", adminAuth, getAmbassadorById);
+// =====================================
+// WITHDRAWAL
+// =====================================
 
+router.post("/withdraw", auth, withdrawAmount);
+
+router.get("/withdraw-history", auth, getWithdrawalHistory);
 // =====================================
 // ADMIN WALLET HISTORY
 // =====================================

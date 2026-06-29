@@ -8,6 +8,7 @@ const {
   sendServiceCompletedEmail,
   sendServiceCancelledEmail,
 } = require("../utils/email");
+const ambassadorController = require("./ambassadorController");
 const { generateOTP } = require("../utils/otp");
 const {
   sendBookingNotification,
@@ -1119,6 +1120,11 @@ exports.completeService = async (req, res) => {
         currency: payment.currency,
         destination: provider.stripeAccountId,
         transfer_group: booking._id.toString(),
+        metadata: {
+          paymentId: payment._id.toString(),
+          bookingId: booking._id.toString(),
+          providerId: provider._id.toString(),
+        },
       });
 
       transferStatus = "completed";
@@ -1210,7 +1216,9 @@ exports.completeService = async (req, res) => {
 
     payment.transferStatus = transferStatus;
     payment.transferId = transferId;
+    payment.transferAmount = payment.providerAmount;
 
+    payment.transferDestination = provider.stripeAccountId;
     await payment.save();
     // =====================================
     // AMBASSADOR COMMISSION
@@ -1647,6 +1655,19 @@ exports.refundBooking = async (req, res) => {
         (cancellationFee + (payment.customerCommissionAmount || 0)).toFixed(2),
       );
     }
+    console.log("========== REFUND DEBUG ==========");
+    console.log("payment.originalAmount:", payment.originalAmount);
+    console.log("payment.walletAmountUsed:", payment.walletAmountUsed);
+    console.log("payment.customerPaidAmount:", payment.customerPaidAmount);
+    console.log(
+      "payment.customerCommissionAmount:",
+      payment.customerCommissionAmount,
+    );
+    console.log("discountedServiceAmount:", discountedServiceAmount);
+    console.log("cancellationPercent:", cancellationPercent);
+    console.log("cancellationFee:", cancellationFee);
+    console.log("refundAmount:", refundAmount);
+    console.log("==================================");
     console.log(
       "💰 Total Amount:",
       cancelledBy === "provider"
@@ -2076,7 +2097,7 @@ exports.stripeWebhook = async (req, res) => {
           break;
         }
 
-        if (payment.status === "held"|| payment.bookingId) {
+        if (payment.status === "held" || payment.bookingId) {
           console.log("Already processed");
           break;
         }
@@ -2233,6 +2254,91 @@ exports.stripeWebhook = async (req, res) => {
 
         break;
       }
+      case "transfer.created": {
+        console.log("Transfer Created");
+
+        const transfer = event.data.object;
+
+        const payment = await Payment.findOne({
+          transferId: transfer.id,
+        });
+
+        if (payment) {
+          payment.transferStatus = "completed";
+          payment.transferAmount = transfer.amount / 100;
+
+          payment.transferDestination = transfer.destination;
+
+          payment.transferCreatedAt = new Date(transfer.created * 1000);
+
+          await payment.save();
+
+          console.log("Transfer saved");
+        }
+
+        break;
+      }
+      case "transfer.updated": {
+        console.log("Transfer Updated");
+
+        const transfer = event.data.object;
+
+        const payment = await Payment.findOne({
+          transferId: transfer.id,
+        });
+
+        if (payment) {
+          payment.transferStatus = transfer.reversed ? "reversed" : "completed";
+          payment.transferAmount = transfer.amount / 100;
+
+          payment.transferDestination = transfer.destination;
+          await payment.save();
+
+          console.log("Transfer updated");
+        }
+
+        break;
+      }
+      case "transfer.reversed": {
+        console.log("Transfer Reversed");
+
+        const reversal = event.data.object;
+
+        const payment = await Payment.findOne({
+          transferId: reversal.transfer,
+        });
+
+        if (payment) {
+          payment.transferStatus = "reversed";
+          payment.transferFailureReason =
+            reversal.metadata?.reason || "Transfer reversed";
+          payment.transferFailureCode = reversal.failure_code || null;
+          await payment.save();
+
+          console.log("Transfer reversal updated");
+        }
+
+        break;
+      }
+      // ======================================
+      // AMBASSADOR PAYOUT WEBHOOKS
+      // ======================================
+
+      case "payout.created":
+        await ambassadorController.handlePayoutCreated(event.data.object);
+        break;
+
+      case "payout.updated":
+        await ambassadorController.handlePayoutUpdated(event.data.object);
+        break;
+
+      case "payout.paid":
+        await ambassadorController.handlePayoutPaid(event.data.object);
+        break;
+
+      case "payout.failed":
+        await ambassadorController.handlePayoutFailed(event.data.object);
+        break;
       default:
         console.log("Unhandled Event :", event.type);
     }

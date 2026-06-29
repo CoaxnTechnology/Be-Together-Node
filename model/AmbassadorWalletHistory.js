@@ -18,7 +18,7 @@ const ambassadorWalletHistorySchema = new mongoose.Schema(
 
     type: {
       type: String,
-      enum: ["commission_earned", "withdrawal", "adjustment", "refund"],
+      enum: ["commission_earned", "withdrawal", "refund", "adjustment"],
       required: true,
       index: true,
     },
@@ -26,30 +26,22 @@ const ambassadorWalletHistorySchema = new mongoose.Schema(
     amount: {
       type: Number,
       required: true,
-      min: 0,
     },
 
     balanceBefore: {
       type: Number,
       required: true,
-      min: 0,
     },
 
     balanceAfter: {
       type: Number,
       required: true,
-      min: 0,
     },
-
-    // ===========================
-    // COMMISSION TRACKING
-    // ===========================
 
     commissionSource: {
       type: String,
       enum: ["customer_side", "provider_side", "territorial"],
       default: null,
-      index: true,
     },
 
     commissionRate: {
@@ -69,15 +61,10 @@ const ambassadorWalletHistorySchema = new mongoose.Schema(
       default: null,
     },
 
-    // ===========================
-    // BOOKING RELATIONS
-    // ===========================
-
     booking: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Booking",
       default: null,
-      index: true,
     },
 
     service: {
@@ -86,23 +73,8 @@ const ambassadorWalletHistorySchema = new mongoose.Schema(
       default: null,
     },
 
-    // ===========================
-    // PAYOUT / WITHDRAWAL
-    // ===========================
-
-    stripeTransferId: {
-      type: String,
-      default: null,
-      index: true,
-    },
-
-    // ===========================
-    // NOTES
-    // ===========================
-
     note: {
       type: String,
-      maxlength: 500,
       default: null,
     },
 
@@ -116,11 +88,11 @@ const ambassadorWalletHistorySchema = new mongoose.Schema(
   },
 );
 
-// Fast ambassador history lookup
 ambassadorWalletHistorySchema.index({
   ambassador: 1,
   createdAt: -1,
 });
+
 ambassadorWalletHistorySchema.index(
   {
     booking: 1,
@@ -135,6 +107,7 @@ ambassadorWalletHistorySchema.index(
     },
   },
 );
+
 module.exports = mongoose.model(
   "AmbassadorWalletHistory",
   ambassadorWalletHistorySchema,

@@ -1644,7 +1644,7 @@ exports.refundBooking = async (req, res) => {
       platformRetainedAmount = 0;
     } else {
       cancellationFee = Number(
-        (discountedServiceAmount * cancellationPercent).toFixed(2),
+        ((discountedServiceAmount * cancellationPercent) / 100).toFixed(2),
       );
 
       refundAmount = Number(

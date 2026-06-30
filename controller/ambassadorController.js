@@ -40,6 +40,8 @@ exports.applyForAmbassador = async (req, res) => {
     const userId = req.user.id;
 
     const {
+      applicationType = "self",
+      requestedUserId,
       name,
       email,
       phoneNumber,
@@ -52,21 +54,24 @@ exports.applyForAmbassador = async (req, res) => {
       acceptedAgreement,
     } = req.body;
 
-    // ==========================
-    // Required Fields Validation
-    // ==========================
-    if (!name || !email || !phoneNumber || !city) {
-      return res.status(400).json({
-        isSuccess: false,
-        message: "Name, email, phone number and city are required",
-      });
-    }
+    // =====================================
+    // SELF APPLICATION VALIDATION
+    // =====================================
 
-    if (!acceptedAgreement) {
-      return res.status(400).json({
-        isSuccess: false,
-        message: "You must accept the Ambassador Agreement before applying",
-      });
+    if (applicationType === "self") {
+      if (!name || !email || !phoneNumber || !city) {
+        return res.status(400).json({
+          isSuccess: false,
+          message: "Name, email, phone number and city are required",
+        });
+      }
+
+      if (!acceptedAgreement) {
+        return res.status(400).json({
+          isSuccess: false,
+          message: "You must accept the Ambassador Agreement before applying",
+        });
+      }
     }
 
     // ==========================
@@ -80,21 +85,74 @@ exports.applyForAmbassador = async (req, res) => {
         message: "User not found",
       });
     }
+    // =====================================
+    // EXCLUSIVE AMBASSADOR REQUEST VALIDATION
+    // =====================================
 
-    // Already Ambassador
-    if (user.isAmbassador) {
-      return res.status(400).json({
-        isSuccess: false,
-        message: "User is already an ambassador",
-      });
+    if (applicationType === "exclusive_request") {
+      if (
+        !user.isAmbassador ||
+        user.ambassadorStatus !== "approved" ||
+        user.ambassadorType !== "exclusive"
+      ) {
+        return res.status(403).json({
+          isSuccess: false,
+          message:
+            "Only approved exclusive ambassadors can create this request",
+        });
+      }
     }
 
+    // Already Ambassador
+    if (applicationType === "self") {
+      if (user.isAmbassador) {
+        return res.status(400).json({
+          isSuccess: false,
+          message: "User is already an ambassador",
+        });
+      }
+    }
+    // =====================================
+    // EXCLUSIVE REQUEST USER CHECK
+    // =====================================
+
+    let requestedUser = null;
+
+    if (applicationType === "exclusive_request") {
+      if (!requestedUserId) {
+        return res.status(400).json({
+          isSuccess: false,
+          message: "requestedUserId is required",
+        });
+      }
+
+      requestedUser = await User.findById(requestedUserId);
+
+      if (!requestedUser) {
+        return res.status(404).json({
+          isSuccess: false,
+          message: "Requested user not found",
+        });
+      }
+
+      if (requestedUser.isAmbassador) {
+        return res.status(400).json({
+          isSuccess: false,
+          message: "User is already an ambassador",
+        });
+      }
+    }
     // ==========================
     // Pending Application Check
     // ==========================
     const existingApplication = await AmbassadorApplication.findOne({
-      user: userId,
+      user:
+        applicationType === "exclusive_request" ? requestedUser._id : userId,
+
       status: "pending",
+
+      applicationType:
+        applicationType === "exclusive_request" ? "exclusive_request" : "self",
     });
 
     if (existingApplication) {
@@ -104,10 +162,13 @@ exports.applyForAmbassador = async (req, res) => {
       });
     }
     const lastRejectedApplication = await AmbassadorApplication.findOne({
-      user: userId,
-      status: "rejected",
-    }).sort({ created_at: -1 });
+      user:
+        applicationType === "exclusive_request" ? requestedUser._id : userId,
 
+      status: "rejected",
+    }).sort({
+      created_at: -1,
+    });
     if (
       lastRejectedApplication &&
       lastRejectedApplication.rejectionCooldownUntil &&
@@ -122,41 +183,81 @@ exports.applyForAmbassador = async (req, res) => {
     // ==========================
     // Save Agreement Acceptance
     // ==========================
-    user.ambassadorAgreementAccepted = true;
-    user.ambassadorAgreementAcceptedAt = new Date();
+    if (applicationType === "self") {
+      user.ambassadorAgreementAccepted = true;
 
-    await user.save();
+      user.ambassadorAgreementAcceptedAt = new Date();
 
+      await user.save();
+    }
     // ==========================
     // Create Application
     // ==========================
-    const application = await AmbassadorApplication.create({
-      user: userId,
+    let application;
 
-      // Required
-      name: name.trim(),
-      email: email.trim().toLowerCase(),
-      phoneNumber: phoneNumber.trim(),
-      city: city.trim(),
+    // =====================================
+    // SELF APPLICATION
+    // =====================================
 
-      // Optional
-      profession: profession || null,
-      targetAudience: targetAudience || null,
+    if (applicationType === "self") {
+      application = await AmbassadorApplication.create({
+        applicationType: "self",
 
-      whyBecomeAmbassador: whyBecomeAmbassador || null,
+        user: userId,
 
-      howPromoteBetogether: howPromoteBetogether || null,
+        name: name.trim(),
+        email: email.trim().toLowerCase(),
+        phoneNumber: phoneNumber.trim(),
+        city: city.trim(),
 
-      socialMediaUrls: Array.isArray(socialMediaUrls) ? socialMediaUrls : [],
+        profession: profession || null,
+        targetAudience: targetAudience || null,
+        whyBecomeAmbassador: whyBecomeAmbassador || null,
+        howPromoteBetogether: howPromoteBetogether || null,
 
-      acceptedAgreement: true,
+        socialMediaUrls: Array.isArray(socialMediaUrls) ? socialMediaUrls : [],
 
-      status: "pending",
-    });
+        acceptedAgreement: true,
+
+        status: "pending",
+      });
+    }
+
+    // =====================================
+    // EXCLUSIVE REQUEST
+    // =====================================
+    else {
+      application = await AmbassadorApplication.create({
+        applicationType: "exclusive_request",
+
+        user: requestedUser._id,
+
+        requestedUser: requestedUser._id,
+
+        requestedByExclusive: user._id,
+
+        name: requestedUser.name,
+
+        email: requestedUser.email,
+
+        phoneNumber: requestedUser.mobile || "",
+
+        city: requestedUser.city || "",
+
+        acceptedAgreement: true,
+
+        status: "pending",
+      });
+    }
 
     return res.status(201).json({
       isSuccess: true,
-      message: "Ambassador application submitted successfully",
+
+      message:
+        applicationType === "self"
+          ? "Ambassador application submitted successfully"
+          : "Standard ambassador request submitted successfully",
+
       application,
     });
   } catch (err) {
@@ -177,17 +278,66 @@ exports.getMyApplication = async (req, res) => {
   try {
     const userId = req.user.id;
 
+    const user = await User.findById(userId);
+
+    if (!user) {
+      return res.status(404).json({
+        isSuccess: false,
+        message: "User not found",
+      });
+    }
+
+    // ====================================================
+    // EXCLUSIVE AMBASSADOR
+    // Return all requests created by this ambassador
+    // ====================================================
+
+    if (
+      user.isAmbassador &&
+      user.ambassadorStatus === "approved" &&
+      user.ambassadorType === "exclusive"
+    ) {
+      const applications = await AmbassadorApplication.find({
+        applicationType: "exclusive_request",
+        requestedByExclusive: userId,
+      })
+        .populate("requestedUser", "name email mobile city profile_image")
+        .sort({
+          created_at: -1,
+        });
+
+      return res.json({
+        isSuccess: true,
+        applicationType: "exclusive_request",
+        totalRequests: applications.length,
+        applications,
+      });
+    }
+
+    // ====================================================
+    // NORMAL USER
+    // Return own ambassador application
+    // ====================================================
+
     const application = await AmbassadorApplication.findOne({
       user: userId,
-    }).sort({
-      created_at: -1,
-    });
+    })
+      .populate(
+        "requestedByExclusive",
+        "name email ambassadorCode ambassadorType",
+      )
+      .sort({
+        created_at: -1,
+      });
 
     return res.json({
       isSuccess: true,
+      applicationType: "self",
       application,
     });
   } catch (err) {
+    console.error("getMyApplication Error:", err);
+
     return res.status(500).json({
       isSuccess: false,
       message: err.message,
@@ -205,8 +355,15 @@ exports.approveApplication = async (req, res) => {
 
     const { ambassadorType, territoryId, parentAmbassadorId, commissionRate } =
       req.body;
-    const application = await AmbassadorApplication.findById(applicationId);
-
+    const application = await AmbassadorApplication.findById(
+      applicationId,
+    ).populate({
+      path: "requestedByExclusive",
+      select: "_id territory isAmbassador ambassadorStatus ambassadorType",
+      populate: {
+        path: "territory",
+      },
+    });
     if (!application) {
       return res.status(404).json({
         isSuccess: false,
@@ -234,8 +391,17 @@ exports.approveApplication = async (req, res) => {
         message: "User is already ambassador",
       });
     }
+    // =====================================
+    // FORCE STANDARD FOR EXCLUSIVE REQUEST
+    // =====================================
 
-    if (!["standard", "exclusive"].includes(ambassadorType)) {
+    let finalAmbassadorType = ambassadorType;
+
+    if (application.applicationType === "exclusive_request") {
+      finalAmbassadorType = "standard";
+    }
+
+    if (!["standard", "exclusive"].includes(finalAmbassadorType)) {
       return res.status(400).json({
         isSuccess: false,
         message: "ambassadorType must be standard or exclusive",
@@ -275,7 +441,7 @@ exports.approveApplication = async (req, res) => {
       Date.now() + 180 * 24 * 60 * 60 * 1000,
     );
 
-    user.ambassadorType = ambassadorType;
+    user.ambassadorType = finalAmbassadorType;
 
     user.commissionRate = Number(commissionRate);
 
@@ -289,9 +455,36 @@ exports.approveApplication = async (req, res) => {
     // STANDARD AMBASSADOR
     // =====================================
 
-    if (ambassadorType === "standard") {
+    if (finalAmbassadorType === "standard") {
       user.territory = null;
-      if (parentAmbassadorId) {
+      // =====================================
+      // EXCLUSIVE REQUEST
+      // =====================================
+
+      if (application.applicationType === "exclusive_request") {
+        const exclusive = application.requestedByExclusive;
+
+        if (!exclusive) {
+          return res.status(404).json({
+            isSuccess: false,
+            message: "Exclusive ambassador not found",
+          });
+        }
+        if (
+          !exclusive.isAmbassador ||
+          exclusive.ambassadorStatus !== "approved" ||
+          exclusive.ambassadorType !== "exclusive"
+        ) {
+          return res.status(400).json({
+            isSuccess: false,
+            message: "Exclusive ambassador is no longer active",
+          });
+        }
+
+        user.parentAmbassador = exclusive._id;
+
+        user.territory = exclusive.territory;
+      } else if (parentAmbassadorId) {
         const parent = await User.findById(parentAmbassadorId);
 
         if (!parent) {
@@ -307,12 +500,14 @@ exports.approveApplication = async (req, res) => {
             message: "Parent ambassador is not active",
           });
         }
+
         if (parent.ambassadorType !== "exclusive") {
           return res.status(400).json({
             isSuccess: false,
             message: "Parent ambassador must be an exclusive ambassador",
           });
         }
+
         user.parentAmbassador = parent._id;
       }
     }
@@ -321,7 +516,7 @@ exports.approveApplication = async (req, res) => {
     // EXCLUSIVE AMBASSADOR
     // =====================================
 
-    if (ambassadorType === "exclusive") {
+    if (finalAmbassadorType === "exclusive") {
       user.parentAmbassador = null;
       if (!territoryId) {
         return res.status(400).json({
@@ -451,10 +646,12 @@ exports.rejectApplication = async (req, res) => {
     await application.save();
 
     // Reset ambassador agreement acceptance
-    await User.findByIdAndUpdate(application.user, {
-      ambassadorAgreementAccepted: false,
-      ambassadorAgreementAcceptedAt: null,
-    });
+    if (application.applicationType === "self") {
+      await User.findByIdAndUpdate(application.user, {
+        ambassadorAgreementAccepted: false,
+        ambassadorAgreementAcceptedAt: null,
+      });
+    }
     const user = await User.findById(application.user);
 
     if (user) {
@@ -466,7 +663,10 @@ exports.rejectApplication = async (req, res) => {
 
     return res.json({
       isSuccess: true,
-      message: "Application rejected successfully",
+      message:
+        application.applicationType === "self"
+          ? "Ambassador application rejected successfully"
+          : "Standard ambassador request rejected successfully",
     });
   } catch (err) {
     return res.status(500).json({
@@ -695,6 +895,16 @@ exports.getAllApplications = async (req, res) => {
           ambassadorStatus
         `,
       })
+
+      .populate("requestedUser", "name email mobile city profile_image")
+      .populate({
+        path: "requestedByExclusive",
+        select: "name email ambassadorCode territory",
+        populate: {
+          path: "territory",
+          select: "city country",
+        },
+      })
       .populate("reviewedBy", "name email")
       .sort({
         created_at: -1,
@@ -705,8 +915,42 @@ exports.getAllApplications = async (req, res) => {
       city: app.city,
       // Application Details
       status: app.status,
-      acceptedAgreement: app.acceptedAgreement,
+      applicationType: app.applicationType || "self",
 
+      requestedUser:
+        (app.applicationType || "self") === "exclusive_request" &&
+        app.requestedUser
+          ? {
+              _id: app.requestedUser._id,
+              name: app.requestedUser.name,
+              email: app.requestedUser.email,
+              mobile: app.requestedUser.mobile,
+              city: app.requestedUser.city,
+              profile_image: app.requestedUser.profile_image,
+            }
+          : null,
+
+      requestedByExclusive:
+        (app.applicationType || "self") === "exclusive_request" &&
+        app.requestedByExclusive
+          ? {
+              _id: app.requestedByExclusive._id,
+              name: app.requestedByExclusive.name,
+              email: app.requestedByExclusive.email,
+              ambassadorCode: app.requestedByExclusive.ambassadorCode,
+              territory: app.requestedByExclusive.territory
+                ? {
+                    _id: app.requestedByExclusive.territory._id,
+                    city: app.requestedByExclusive.territory.city,
+                    country: app.requestedByExclusive.territory.country,
+                  }
+                : null,
+            }
+          : null,
+      acceptedAgreement:
+        (app.applicationType || "self") === "self"
+          ? app.acceptedAgreement
+          : null,
       profession: app.profession,
       targetAudience: app.targetAudience,
 
@@ -725,37 +969,26 @@ exports.getAllApplications = async (req, res) => {
       updated_at: app.updated_at,
 
       // User Profile
-      user: app.user
-        ? {
-            _id: app.user._id,
-
-            name: app.user.name,
-
-            email: app.user.email,
-
-            mobile: app.user.mobile,
-
-            profile_image: app.user.profile_image,
-
-            city: app.user.city,
-
-            country: app.user.country,
-
-            bio: app.user.bio,
-
-            joinedAt: app.user.created_at,
-
-            totalBookings: app.user.totalBookings || 0,
-
-            successfulBookings: app.user.successfulBookings || 0,
-
-            totalServices: Array.isArray(app.user.services)
-              ? app.user.services.length
-              : 0,
-
-            ambassadorStatus: app.user.ambassadorStatus,
-          }
-        : null,
+      user:
+        (app.applicationType || "self") === "self" && app.user
+          ? {
+              _id: app.user._id,
+              name: app.user.name,
+              email: app.user.email,
+              mobile: app.user.mobile,
+              profile_image: app.user.profile_image,
+              city: app.user.city,
+              country: app.user.country,
+              bio: app.user.bio,
+              joinedAt: app.user.created_at,
+              totalBookings: app.user.totalBookings || 0,
+              successfulBookings: app.user.successfulBookings || 0,
+              totalServices: Array.isArray(app.user.services)
+                ? app.user.services.length
+                : 0,
+              ambassadorStatus: app.user.ambassadorStatus,
+            }
+          : null,
 
       reviewedBy: app.reviewedBy
         ? {
@@ -929,6 +1162,12 @@ exports.removeAmbassador = async (req, res) => {
         message: "User not found",
       });
     }
+    if (!user.isAmbassador) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "User is not an ambassador",
+      });
+    }
 
     // =====================================
     // CHECK SUB AMBASSADORS
@@ -937,6 +1176,7 @@ exports.removeAmbassador = async (req, res) => {
     const subAmbassadorCount = await User.countDocuments({
       parentAmbassador: user._id,
       isAmbassador: true,
+      ambassadorStatus: "approved",
     });
 
     if (subAmbassadorCount > 0) {
@@ -981,7 +1221,8 @@ exports.removeAmbassador = async (req, res) => {
     user.ambassadorApprovedBy = null;
 
     user.ambassadorReviewDueAt = null;
-
+    user.ambassadorAgreementAccepted = false;
+    user.ambassadorAgreementAcceptedAt = null;
     // Historical data preserve karo
     // user.totalReferralUsers
     // user.totalReferralEarned

@@ -7,7 +7,27 @@ const ambassadorApplicationSchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
+    // =====================================
+    // APPLICATION TYPE
+    // =====================================
 
+    applicationType: {
+      type: String,
+      enum: ["self", "exclusive_request"],
+      default: "self",
+    },
+
+    requestedByExclusive: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+
+    requestedUser: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
     // Required Fields
     name: {
       type: String,

@@ -895,8 +895,23 @@ exports.getAllApplications = async (req, res) => {
           ambassadorStatus
         `,
       })
-
-      .populate("requestedUser", "name email mobile city profile_image")
+      .populate(
+        "requestedUser",
+        `
+    name
+    email
+    mobile
+    city
+    country
+    bio
+    profile_image
+    created_at
+    totalBookings
+    successfulBookings
+    services
+    ambassadorStatus
+  `,
+      )
       .populate({
         path: "requestedByExclusive",
         select: "name email ambassadorCode territory",
@@ -926,7 +941,16 @@ exports.getAllApplications = async (req, res) => {
               email: app.requestedUser.email,
               mobile: app.requestedUser.mobile,
               city: app.requestedUser.city,
+              country: app.requestedUser.country,
+              bio: app.requestedUser.bio,
               profile_image: app.requestedUser.profile_image,
+              joinedAt: app.requestedUser.created_at,
+              totalBookings: app.requestedUser.totalBookings || 0,
+              successfulBookings: app.requestedUser.successfulBookings || 0,
+              totalServices: Array.isArray(app.requestedUser.services)
+                ? app.requestedUser.services.length
+                : 0,
+              ambassadorStatus: app.requestedUser.ambassadorStatus,
             }
           : null,
 

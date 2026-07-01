@@ -129,7 +129,7 @@ exports.createService = async (req, res) => {
       }
     }
     const location = tryParse(body.location);
-    // const city = body.city;
+     const city = body.city;
     const isDoorstepService =
       body.isDoorstepService === true || body.isDoorstepService === "true";
     const service_type = body.service_type || "one_time";
@@ -160,10 +160,10 @@ exports.createService = async (req, res) => {
       return res
         .status(400)
         .json({ isSuccess: false, message: "Location is required" });
-    // if (!city)
-    //   return res
-    //     .status(400)
-    //     .json({ isSuccess: false, message: "City is required" });
+    if (!city)
+      return res
+        .status(400)
+        .json({ isSuccess: false, message: "City is required" });
     if (!categoryId)
       return res
         .status(400)
@@ -1172,7 +1172,7 @@ exports.updateService = async (req, res) => {
     }
 
     // City
-    //if (body.city) updatePayload.city = body.city;
+    if (body.city) updatePayload.city = body.city;
 
     // Category (optional now)
     if (body.categoryId) {

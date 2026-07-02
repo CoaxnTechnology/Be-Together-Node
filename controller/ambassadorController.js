@@ -2185,6 +2185,25 @@ exports.getAmbassadorAnalytics = async (req, res) => {
 
     const ambassadorObjectId = new mongoose.Types.ObjectId(id);
 
+    // AMBASSADOR DETAILS
+    // ==========================
+
+    const ambassador = await User.findById(id).populate("territory");
+
+    if (!ambassador) {
+      return res.status(404).json({
+        isSuccess: false,
+        message: "Ambassador not found",
+      });
+    }
+
+    // ==========================
+    // WALLET
+    // ==========================
+
+    const wallet = await AmbassadorWallet.findOne({
+      ambassador: id,
+    });
     // ==========================
     // COMMISSION BREAKDOWN
     // ==========================
@@ -2311,6 +2330,69 @@ exports.getAmbassadorAnalytics = async (req, res) => {
       ],
     });
     // ==========================
+    // TERRITORY ANALYTICS
+    // ==========================
+
+    let territoryRevenue = 0;
+    let territoryBookings = 0;
+    let kpiProgress = 0;
+
+    if (ambassador.ambassadorType === "exclusive" && ambassador.territory) {
+      const territoryServices = await Service.find({
+        city: ambassador.territory.city,
+      }).select("_id");
+
+      const territoryServiceIds = territoryServices.map(
+        (service) => service._id,
+      );
+
+      // Total completed bookings
+      territoryBookings = await Booking.countDocuments({
+        status: "completed",
+        service: {
+          $in: territoryServiceIds,
+        },
+      });
+
+      // Territory revenue
+      const revenue = await Booking.aggregate([
+        {
+          $match: {
+            status: "completed",
+            service: {
+              $in: territoryServiceIds,
+            },
+          },
+        },
+        {
+          $group: {
+            _id: null,
+            totalRevenue: {
+              $sum: "$amount",
+            },
+          },
+        },
+      ]);
+
+      territoryRevenue = revenue[0]?.totalRevenue || 0;
+
+      // KPI Progress
+      const sixMonthsAgo = new Date();
+      sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+
+      const completedBookings = await Booking.countDocuments({
+        status: "completed",
+        createdAt: {
+          $gte: sixMonthsAgo,
+        },
+        service: {
+          $in: territoryServiceIds,
+        },
+      });
+
+      kpiProgress = Number(((completedBookings / 400) * 100).toFixed(2));
+    }
+    // ==========================
     // WALLET BALANCE FOR EACH
     // ==========================
 
@@ -2343,14 +2425,37 @@ exports.getAmbassadorAnalytics = async (req, res) => {
     return res.status(200).json({
       isSuccess: true,
       analytics: {
+        // Wallet
+        wallet: {
+          balance: wallet?.balance || 0,
+          totalEarned: wallet?.totalEarned || 0,
+          totalWithdrawn: wallet?.totalWithdrawn || 0,
+        },
+
+        // Referral Stats
+        referrals: totalReferralUsers,
+        totalReferralUsers,
+
+        // Service & Booking Stats
+        services: totalServices,
+        bookings: totalBookings,
+
+        // Territory Stats
+        territoryRevenue,
+        territoryBookings,
+        territoryCommission: territorialCommission,
+        kpiProgress,
+
+        // Commission
         customerCommission,
         providerCommission,
         territorialCommission,
         totalCommission,
+
+        // Charts
         earningsChart,
-        totalReferralUsers,
-        services: totalServices,
-        bookings: totalBookings,
+
+        // Sub Ambassadors
         subAmbassadors: subAmbassadorsWithWallet,
         subAmbassadorCount: subAmbassadorsWithWallet.length,
       },

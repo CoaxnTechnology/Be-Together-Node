@@ -2031,7 +2031,20 @@ exports.walletHistory = async (req, res) => {
     const history = await AmbassadorWalletHistory.find({
       ambassador: ambassadorId,
     })
-      .populate("booking", "_id amount status createdAt")
+      .populate({
+        path: "booking",
+        select: "_id amount status createdAt customer provider",
+        populate: [
+          {
+            path: "customer",
+            select: "name email profile_image",
+          },
+          {
+            path: "provider",
+            select: "name email profile_image",
+          },
+        ],
+      })
       .populate("service", "title city")
       .populate("referredUser", "name email")
       .populate("territory", "city country")

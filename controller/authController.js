@@ -648,7 +648,6 @@ exports.login = async (req, res) => {
       name,
       profile_image,
       identityToken,
-      ambassadorUserAgreementAccepted,
     } = body;
     // ✅ Email check (Apple ko skip)
     if (!email && login_type !== "apple_auth") {
@@ -712,33 +711,6 @@ exports.login = async (req, res) => {
           .json({ IsSucces: false, message: "Invalid password" });
       }
 
-      // =====================================
-      // AMBASSADOR USER AGREEMENT SAVE
-      // =====================================
-
-      if (
-        user.registeredByAmbassador &&
-        ambassadorUserAgreementAccepted === true &&
-        !user.ambassadorUserAgreementAccepted
-      ) {
-        user.ambassadorUserAgreementAccepted = true;
-        user.ambassadorUserAgreementAcceptedAt = new Date();
-
-        await saveGdprData(user, req);
-
-        await user.save();
-      }
-      if (
-        user.registeredByAmbassador &&
-        !user.ambassadorUserAgreementAccepted
-      ) {
-        return res.json({
-          IsSucces: true,
-          requireAgreement: true,
-          userId: user._id,
-          message: "Please accept Ambassador User Agreement",
-        });
-      }
 
       // ✅ OTP LOGIC (STATIC + NORMAL)
       let otp, expiry;

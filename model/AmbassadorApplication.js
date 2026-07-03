@@ -7,6 +7,7 @@ const ambassadorApplicationSchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
+
     // =====================================
     // APPLICATION TYPE
     // =====================================
@@ -28,33 +29,48 @@ const ambassadorApplicationSchema = new mongoose.Schema(
       ref: "User",
       default: null,
     },
-    // Required Fields
+
+    // =====================================
+    // SELF APPLICATION FIELDS
+    // =====================================
+
     name: {
       type: String,
-      required: true,
       trim: true,
+      required: function () {
+        return this.applicationType === "self";
+      },
     },
 
     email: {
       type: String,
-      required: true,
       trim: true,
       lowercase: true,
+      required: function () {
+        return this.applicationType === "self";
+      },
     },
 
     phoneNumber: {
       type: String,
-      required: true,
       trim: true,
+      required: function () {
+        return this.applicationType === "self";
+      },
     },
 
     city: {
       type: String,
-      required: true,
       trim: true,
+      required: function () {
+        return this.applicationType === "self";
+      },
     },
 
-    // Optional Fields
+    // =====================================
+    // OPTIONAL FIELDS
+    // =====================================
+
     profession: {
       type: String,
       default: null,
@@ -82,8 +98,15 @@ const ambassadorApplicationSchema = new mongoose.Schema(
 
     acceptedAgreement: {
       type: Boolean,
-      required: true,
+      default: false,
+      required: function () {
+        return this.applicationType === "self";
+      },
     },
+
+    // =====================================
+    // STATUS
+    // =====================================
 
     status: {
       type: String,
@@ -106,6 +129,7 @@ const ambassadorApplicationSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+
     rejectionCooldownUntil: {
       type: Date,
       default: null,
@@ -123,8 +147,12 @@ const ambassadorApplicationSchema = new mongoose.Schema(
   },
   {
     timestamps: false,
-  },
+  }
 );
+
+// =====================================
+// UPDATE TIMESTAMP
+// =====================================
 
 ambassadorApplicationSchema.pre("save", function (next) {
   this.updated_at = new Date();
@@ -133,5 +161,5 @@ ambassadorApplicationSchema.pre("save", function (next) {
 
 module.exports = mongoose.model(
   "AmbassadorApplication",
-  ambassadorApplicationSchema,
+  ambassadorApplicationSchema
 );

@@ -2484,7 +2484,7 @@ exports.getAmbassadorAnalytics = async (req, res) => {
 };
 exports.withdrawAmount = async (req, res) => {
   const session = await mongoose.startSession();
-let withdrawalDoc=null
+  let withdrawalDoc = null;
   try {
     session.startTransaction();
 
@@ -2665,17 +2665,24 @@ let withdrawalDoc=null
     // ======================================
 
     // Stripe payout
-
+const balanceBefore = wallet.availableBalance;
+const balanceAfter = balanceBefore - amount;
     const withdrawal = await AmbassadorWithdrawal.create(
       [
         {
           ambassador: ambassadorId,
+
+          wallet: wallet._id,
 
           requestedAmount: amount,
 
           finalAmount: amount,
 
           currency: "eur",
+
+          balanceBefore: wallet.availableBalance,
+
+          balanceAfter: wallet.availableBalance - amount,
 
           status: "pending",
 
@@ -2689,7 +2696,7 @@ let withdrawalDoc=null
 
     // Wallet Update
 
-    wallet.availableBalance -= amount;
+    wallet.availableBalance = balanceAfter;
 
     wallet.reservedBalance += amount;
 

@@ -2484,13 +2484,12 @@ exports.getAmbassadorAnalytics = async (req, res) => {
 };
 exports.withdrawAmount = async (req, res) => {
   const session = await mongoose.startSession();
-
+let withdrawalDoc=null
   try {
     session.startTransaction();
 
     const ambassadorId = req.user.id;
     const amount = Number(req.body.amount);
-    let withdrawalDoc = null;
     // ============================
     // Amount Validation
     // ============================

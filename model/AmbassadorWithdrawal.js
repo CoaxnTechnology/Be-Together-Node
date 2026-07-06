@@ -1,4 +1,4 @@
- mongoose = require("mongoose");
+mongoose = require("mongoose");
 
 const ambassadorWithdrawalSchema = new mongoose.Schema(
   {
@@ -86,13 +86,7 @@ const ambassadorWithdrawalSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: [
-        "pending",
-        "processing",
-        "paid",
-        "failed",
-        "cancelled",
-      ],
+      enum: ["pending", "processing", "paid", "failed", "cancelled"],
       default: "pending",
       index: true,
     },
@@ -139,7 +133,10 @@ const ambassadorWithdrawalSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
-
+    failedAt: {
+      type: Date,
+      default: null,
+    },
     // ==========================
     // Extra
     // ==========================
@@ -156,7 +153,7 @@ const ambassadorWithdrawalSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 ambassadorWithdrawalSchema.index({
@@ -174,5 +171,5 @@ ambassadorWithdrawalSchema.index({
 
 module.exports = mongoose.model(
   "AmbassadorWithdrawal",
-  ambassadorWithdrawalSchema
+  ambassadorWithdrawalSchema,
 );

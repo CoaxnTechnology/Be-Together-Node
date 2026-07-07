@@ -2092,6 +2092,13 @@ exports.stripeWebhook = async (req, res) => {
           checkoutSessionId: session.id,
         });
 
+        console.log("🧾 Webhook payment lookup:", {
+          checkoutSessionId: session.id,
+          paymentId: payment?._id,
+          paymentStatus: payment?.status,
+          bookingId: payment?.bookingId,
+        });
+
         if (!payment) {
           console.log("Payment not found");
           break;

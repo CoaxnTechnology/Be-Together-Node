@@ -3074,6 +3074,12 @@ exports.handlePayoutCreated = async (payout) => {
     }
 
     const withdrawal = await AmbassadorWithdrawal.findById(withdrawalId);
+    console.log("[handlePayoutCreated] Withdrawal loaded", {
+      withdrawalId,
+      status: withdrawal?.status,
+      stripePayoutId: withdrawal?.stripePayoutId,
+      finalAmount: withdrawal?.finalAmount,
+    });
 
     if (!withdrawal) {
       console.log("[handlePayoutCreated] Withdrawal Not Found", {
@@ -3127,6 +3133,12 @@ exports.handlePayoutUpdated = async (payout) => {
     }
 
     const withdrawal = await AmbassadorWithdrawal.findById(withdrawalId);
+    console.log("[handlePayoutUpdated] Withdrawal loaded", {
+      withdrawalId,
+      currentStatus: withdrawal?.status,
+      stripePayoutId: withdrawal?.stripePayoutId,
+      finalAmount: withdrawal?.finalAmount,
+    });
 
     if (!withdrawal) {
       console.log("[handlePayoutUpdated] Withdrawal Not Found", {
@@ -3188,6 +3200,12 @@ exports.handlePayoutPaid = async (payout) => {
 
     const withdrawal =
       await AmbassadorWithdrawal.findById(withdrawalId).session(session);
+    console.log("[handlePayoutPaid] Withdrawal loaded", {
+      withdrawalId,
+      currentStatus: withdrawal?.status,
+      stripePayoutId: withdrawal?.stripePayoutId,
+      finalAmount: withdrawal?.finalAmount,
+    });
 
     if (!withdrawal) {
       console.log("[handlePayoutPaid] Withdrawal Not Found", { withdrawalId });
@@ -3316,6 +3334,12 @@ exports.handlePayoutFailed = async (payout) => {
 
     const withdrawal =
       await AmbassadorWithdrawal.findById(withdrawalId).session(session);
+    console.log("[handlePayoutFailed] Withdrawal loaded", {
+      withdrawalId,
+      currentStatus: withdrawal?.status,
+      stripePayoutId: withdrawal?.stripePayoutId,
+      finalAmount: withdrawal?.finalAmount,
+    });
 
     if (!withdrawal) {
       console.log("[handlePayoutFailed] Withdrawal Not Found", {

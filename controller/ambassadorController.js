@@ -1572,7 +1572,7 @@ exports.getMyWallet = async (req, res) => {
   reservedBalance: wallet.reservedBalance,
   totalEarned: wallet.totalEarned,
   totalWithdrawn: wallet.totalWithdrawn,
-}
+},
 
       history,
     });

@@ -1567,12 +1567,12 @@ exports.getMyWallet = async (req, res) => {
       isSuccess: true,
 
       wallet: {
-  balance: wallet.availableBalance,
-  availableBalance: wallet.availableBalance,
-  reservedBalance: wallet.reservedBalance,
-  totalEarned: wallet.totalEarned,
-  totalWithdrawn: wallet.totalWithdrawn,
-},
+        balance: wallet.availableBalance,
+        availableBalance: wallet.availableBalance,
+        reservedBalance: wallet.reservedBalance,
+        totalEarned: wallet.totalEarned,
+        totalWithdrawn: wallet.totalWithdrawn,
+      },
 
       history,
     });
@@ -1672,13 +1672,13 @@ exports.dashboard = async (req, res) => {
     });
 
     const walletData = {
-      balance: wallet?.balance || 0,
+      balance: wallet?.availableBalance || 0, // Available balance for UI
+      availableBalance: wallet?.availableBalance || 0,
+      reservedBalance: wallet?.reservedBalance || 0,
       totalEarned: wallet?.totalEarned || 0,
       totalWithdrawn: wallet?.totalWithdrawn || 0,
-
-      pendingWithdrawal: 0,
+      pendingWithdrawal: wallet?.reservedBalance || 0,
     };
-
     // =====================================
     // REFERRALS
     // =====================================

@@ -1,6 +1,8 @@
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const endpointSecret = process.env.STRIPE_PAYMENT_WEBHOOK_SECRET;
+const ambassadorEndpointSecret = process.env.STRIPE_AMBASSADOR_WEBHOOK_SECRET;
 console.log("Stripe Webhook Secret:", endpointSecret);
+console.log("Ambassador Stripe Webhook Secret:", ambassadorEndpointSecret);
 const nodemailer = require("nodemailer");
 const {
   sendServiceOtpEmail,
@@ -2069,18 +2071,28 @@ exports.bookingPreview = async (req, res) => {
 exports.stripeWebhook = async (req, res) => {
   let event;
 
+  const signature = req.headers["stripe-signature"];
+
   try {
-    const signature = req.headers["stripe-signature"];
-
-    event = stripe.webhooks.constructEvent(req.body, signature, endpointSecret);
-
-    console.log("✅ Stripe Event :", event.type);
+    event = stripe.webhooks.constructEvent(
+      req.body,
+      signature,
+      endpointSecret,
+    );
   } catch (err) {
-    console.log("❌ Webhook Verify Failed", err.message);
-
-    return res.status(400).send(`Webhook Error: ${err.message}`);
+    try {
+      event = stripe.webhooks.constructEvent(
+        req.body,
+        signature,
+        ambassadorEndpointSecret,
+      );
+    } catch (e) {
+      console.log("❌ Webhook Verify Failed", e.message);
+      return res.status(400).send(`Webhook Error: ${e.message}`);
+    }
   }
-
+console.log("✅ Stripe Event:", event.type);
+console.log("🔹 Account:", event.account || "Platform");
   try {
     switch (event.type) {
       case "checkout.session.completed": {

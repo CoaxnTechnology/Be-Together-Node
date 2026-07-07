@@ -1567,10 +1567,12 @@ exports.getMyWallet = async (req, res) => {
       isSuccess: true,
 
       wallet: {
-        balance: wallet.balance,
-        totalEarned: wallet.totalEarned,
-        totalWithdrawn: wallet.totalWithdrawn,
-      },
+  balance: wallet.availableBalance,
+  availableBalance: wallet.availableBalance,
+  reservedBalance: wallet.reservedBalance,
+  totalEarned: wallet.totalEarned,
+  totalWithdrawn: wallet.totalWithdrawn,
+}
 
       history,
     });

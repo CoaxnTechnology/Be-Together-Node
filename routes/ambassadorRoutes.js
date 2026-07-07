@@ -24,6 +24,7 @@ const {
   getAmbassadorWalletHistory,
   getAmbassadorAnalytics,
   withdrawAmount,
+  getMyWallet,
 } = require("../controller/ambassadorController");
 // USER
 
@@ -32,6 +33,7 @@ router.post("/apply", auth, applyForAmbassador);
 router.get("/my-application", auth, getMyApplication);
 router.get("/dashboard", auth, dashboard);
 router.get("/wallet-history", auth, walletHistory);
+router.get("/wallet", auth, getMyWallet);
 // ADMIN
 
 router.post("/admin/approve/:applicationId", adminAuth, approveApplication);

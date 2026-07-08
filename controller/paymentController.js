@@ -31,7 +31,10 @@ const AdminWalletConfig = require("../model/AdminWalletConfig");
 const AmbassadorWallet = require("../model/AmbassadorWallet");
 const AmbassadorCommissionSetting = require("../model/AmbassadorCommissionSetting");
 const AmbassadorWalletHistory = require("../model/AmbassadorWalletHistory");
-const processAmbassadorCommission = require("../services/ambassadorCommissionService");
+const {
+  processAmbassadorCommission,
+  creditAmbassador,
+} = require("../services/ambassadorCommissionService");
 const logPaymentFlow = (step, data = {}) => {
   console.log(`[paymentController] ${step}`, data);
 };
@@ -2074,11 +2077,7 @@ exports.stripeWebhook = async (req, res) => {
   const signature = req.headers["stripe-signature"];
 
   try {
-    event = stripe.webhooks.constructEvent(
-      req.body,
-      signature,
-      endpointSecret,
-    );
+    event = stripe.webhooks.constructEvent(req.body, signature, endpointSecret);
   } catch (err) {
     try {
       event = stripe.webhooks.constructEvent(
@@ -2091,8 +2090,8 @@ exports.stripeWebhook = async (req, res) => {
       return res.status(400).send(`Webhook Error: ${e.message}`);
     }
   }
-console.log("✅ Stripe Event:", event.type);
-console.log("🔹 Account:", event.account || "Platform");
+  console.log("✅ Stripe Event:", event.type);
+  console.log("🔹 Account:", event.account || "Platform");
   try {
     switch (event.type) {
       case "checkout.session.completed": {

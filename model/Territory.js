@@ -26,12 +26,6 @@ const territorySchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
-
-    kpiTarget: {
-      type: Number,
-      default: 400,
-    },
-
     completedServicesLast6Months: {
       type: Number,
       default: 0,

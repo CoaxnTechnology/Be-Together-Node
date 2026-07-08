@@ -161,7 +161,7 @@ exports.updateTerritory = async (req, res) => {
   try {
     const { territoryId } = req.params;
 
-    const { city, country, active, kpiTarget, notes } = req.body;
+    const { city, country, active, notes } = req.body;
 
     logTerritoryFlow("updateTerritory:start", {
       territoryId,
@@ -184,7 +184,6 @@ exports.updateTerritory = async (req, res) => {
       city: territory.city,
       country: territory.country,
       active: territory.active,
-      kpiTarget: territory.kpiTarget,
       notes: territory.notes,
     });
 
@@ -194,10 +193,6 @@ exports.updateTerritory = async (req, res) => {
 
     if (typeof active === "boolean") {
       territory.active = active;
-    }
-
-    if (kpiTarget) {
-      territory.kpiTarget = kpiTarget;
     }
 
     if (notes !== undefined) {
@@ -211,7 +206,6 @@ exports.updateTerritory = async (req, res) => {
       city: territory.city,
       country: territory.country,
       active: territory.active,
-      kpiTarget: territory.kpiTarget,
       notes: territory.notes,
     });
 

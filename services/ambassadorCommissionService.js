@@ -206,14 +206,17 @@ async function processAmbassadorCommission({
     // CUSTOMER AMBASSADOR
     // ==================================================
 
-    if (customer?.referredBy) {
+    const customerAmbassadorId =
+      customer?.referredBy || customer?.registeredByAmbassador;
+
+    if (customerAmbassadorId) {
       console.log("[AmbassadorCommission] customer referral found", {
         customerId: customer._id,
-        referredBy: customer.referredBy,
+        ambassadorId: customerAmbassadorId,
+        source: customer?.referredBy ? "referredBy" : "registeredByAmbassador",
       });
 
-      const customerAmbassador = await User.findById(customer.referredBy);
-
+      const customerAmbassador = await User.findById(customerAmbassadorId);
       console.log("[AmbassadorCommission] customer ambassador lookup result", {
         ambassadorId: customerAmbassador?._id,
         isAmbassador: customerAmbassador?.isAmbassador,
@@ -247,7 +250,7 @@ async function processAmbassadorCommission({
       } else {
         console.log("[AmbassadorCommission] customer ambassador skipped", {
           reason: "not_found_or_not_approved",
-          referredBy: customer.referredBy,
+          ambassadorId: customerAmbassadorId,
         });
       }
     } else {
@@ -260,14 +263,17 @@ async function processAmbassadorCommission({
     // PROVIDER AMBASSADOR
     // ==================================================
 
-    if (provider?.referredBy) {
+    const providerAmbassadorId =
+      provider?.referredBy || provider?.registeredByAmbassador;
+
+    if (providerAmbassadorId) {
       console.log("[AmbassadorCommission] provider referral found", {
         providerId: provider._id,
-        referredBy: provider.referredBy,
+        ambassadorId: providerAmbassadorId,
+        source: provider?.referredBy ? "referredBy" : "registeredByAmbassador",
       });
 
-      const providerAmbassador = await User.findById(provider.referredBy);
-
+      const providerAmbassador = await User.findById(providerAmbassadorId);
       console.log("[AmbassadorCommission] provider ambassador lookup result", {
         ambassadorId: providerAmbassador?._id,
         isAmbassador: providerAmbassador?.isAmbassador,
@@ -301,7 +307,7 @@ async function processAmbassadorCommission({
       } else {
         console.log("[AmbassadorCommission] provider ambassador skipped", {
           reason: "not_found_or_not_approved",
-          referredBy: provider.referredBy,
+          ambassadorId: providerAmbassadorId,
         });
       }
     } else {

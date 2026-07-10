@@ -1253,6 +1253,9 @@ exports.updateService = async (req, res) => {
       { $set: updatePayload },
       { new: true },
     );
+    console.log("✅ Service updated successfully:", updatedService);
+    console.log(updatedService.city);
+
     console.log("Sending notification...");
     const notifiedCount =
       await notificationController.notifyOnUpdate(updatedService);

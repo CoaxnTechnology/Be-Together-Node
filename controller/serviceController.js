@@ -129,7 +129,7 @@ exports.createService = async (req, res) => {
       }
     }
     const location = tryParse(body.location);
-     const city = body.city;
+    const city = body.city;
     const isDoorstepService =
       body.isDoorstepService === true || body.isDoorstepService === "true";
     const service_type = body.service_type || "one_time";
@@ -269,6 +269,7 @@ exports.createService = async (req, res) => {
       image: serviceImage,
 
       location_name: location.name,
+      city,
       isDoorstepService,
       location: {
         type: "Point",
@@ -1173,6 +1174,8 @@ exports.updateService = async (req, res) => {
 
     // City
     if (body.city) updatePayload.city = body.city;
+    console.log(req.body.city);
+    console.log(req.body);
 
     // Category (optional now)
     if (body.categoryId) {

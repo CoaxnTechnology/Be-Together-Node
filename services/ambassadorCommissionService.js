@@ -79,8 +79,11 @@ async function creditAmbassador({
 
     const balanceBefore = wallet.balance;
 
-    wallet.balance += roundedAmount;
+    wallet.availableBalance += roundedAmount;
     wallet.totalEarned += roundedAmount;
+
+    // Sync Balance
+    wallet.balance = wallet.availableBalance + wallet.reservedBalance;
 
     await wallet.save();
 

@@ -1672,7 +1672,7 @@ exports.dashboard = async (req, res) => {
     });
 
     const walletData = {
-      balance: wallet?.availableBalance || 0, // Available balance for UI
+      balance: wallet?.balance  || 0, // Available balance for UI
       availableBalance: wallet?.availableBalance || 0,
       reservedBalance: wallet?.reservedBalance || 0,
       totalEarned: wallet?.totalEarned || 0,
@@ -2835,7 +2835,8 @@ exports.withdrawAmount = async (req, res) => {
     // ======================================
 
     wallet.availableBalance = balanceAfter;
-
+    // Sync Balance
+    wallet.balance = wallet.availableBalance + wallet.reservedBalance;
     wallet.reservedBalance += amount;
 
     await wallet.save({ session });
@@ -3024,6 +3025,9 @@ exports.withdrawAmount = async (req, res) => {
             restoredWallet.reservedBalance - amount,
           );
 
+          restoredWallet.balance =
+            restoredWallet.availableBalance + restoredWallet.reservedBalance;
+
           await restoredWallet.save();
           console.log("[withdrawAmount] Wallet restored after failure", {
             ambassadorId,
@@ -3038,6 +3042,8 @@ exports.withdrawAmount = async (req, res) => {
         wallet.availableBalance += amount;
 
         wallet.reservedBalance = Math.max(0, wallet.reservedBalance - amount);
+
+        wallet.balance = wallet.availableBalance + wallet.reservedBalance;
 
         await wallet.save();
         console.log("[withdrawAmount] Wallet balance adjusted in catch block", {
@@ -3254,7 +3260,8 @@ exports.handlePayoutPaid = async (payout) => {
     wallet.reservedBalance -= withdrawal.finalAmount;
 
     wallet.totalWithdrawn += withdrawal.finalAmount;
-
+    // Sync Balance
+    wallet.balance = wallet.availableBalance + wallet.reservedBalance;
     await wallet.save({ session });
     const exists = await AmbassadorWalletHistory.findOne({
       ambassador: withdrawal.ambassador,
@@ -3408,6 +3415,9 @@ exports.handlePayoutFailed = async (payout) => {
     );
 
     wallet.availableBalance += withdrawal.finalAmount;
+
+    // Sync Balance
+    wallet.balance = wallet.availableBalance + wallet.reservedBalance;
 
     await wallet.save({ session });
 

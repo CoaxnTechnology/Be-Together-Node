@@ -2,7 +2,7 @@ const User = require("../model/User");
 const Territory = require("../model/Territory");
 const AmbassadorWallet = require("../model/AmbassadorWallet");
 const AmbassadorWalletHistory = require("../model/AmbassadorWalletHistory");
-
+const CommissionSetting = require("../model/CommissionSetting");
 async function creditAmbassador({
   ambassador,
   amount,
@@ -187,14 +187,25 @@ async function processAmbassadorCommission({
     const serviceAmount = Number(
       payment?.originalAmount || booking.amount || 0,
     );
+    const commissionSetting = await CommissionSetting.findOne();
+    if (!commissionSetting) {
+      throw new Error("Commission settings not found");
+    }
+    const totalPlatformCommissionPercentage =
+      commissionSetting.providerCommissionPercentage +
+      commissionSetting.customerCommissionPercentage;
 
+    const platformCommissionAmount = Number(
+      (serviceAmount * (totalPlatformCommissionPercentage / 100)).toFixed(2),
+    );
     console.log("[AmbassadorCommission] service amount resolved", {
       serviceAmount,
+      totalPlatformCommissionPercentage,
+      platformCommissionAmount,
       source: payment?.originalAmount
         ? "payment.originalAmount"
         : "booking.amount",
     });
-
     if (serviceAmount <= 0) {
       console.log("[AmbassadorCommission] process:skipped", {
         reason: "invalid_service_amount",
@@ -232,11 +243,15 @@ async function processAmbassadorCommission({
         customerAmbassador.isAmbassador &&
         customerAmbassador.ambassadorStatus === "approved"
       ) {
-        const commission =
-          serviceAmount * (customerAmbassador.commissionRate / 100);
-
+        const commission = Number(
+          (
+            platformCommissionAmount *
+            (customerAmbassador.commissionRate / 100)
+          ).toFixed(2),
+        );
         console.log("[AmbassadorCommission] customer commission calculated", {
           serviceAmount,
+          platformCommissionAmount,
           commissionRate: customerAmbassador.commissionRate,
           commission,
         });
@@ -269,49 +284,70 @@ async function processAmbassadorCommission({
     const providerAmbassadorId =
       provider?.referredBy || provider?.registeredByAmbassador;
 
+    const isSameDirectAmbassador =
+      customerAmbassadorId &&
+      providerAmbassadorId &&
+      String(customerAmbassadorId) === String(providerAmbassadorId);
+
     if (providerAmbassadorId) {
-      console.log("[AmbassadorCommission] provider referral found", {
-        providerId: provider._id,
-        ambassadorId: providerAmbassadorId,
-        source: provider?.referredBy ? "referredBy" : "registeredByAmbassador",
-      });
-
-      const providerAmbassador = await User.findById(providerAmbassadorId);
-      console.log("[AmbassadorCommission] provider ambassador lookup result", {
-        ambassadorId: providerAmbassador?._id,
-        isAmbassador: providerAmbassador?.isAmbassador,
-        ambassadorStatus: providerAmbassador?.ambassadorStatus,
-        commissionRate: providerAmbassador?.commissionRate,
-      });
-
-      if (
-        providerAmbassador &&
-        providerAmbassador.isAmbassador &&
-        providerAmbassador.ambassadorStatus === "approved"
-      ) {
-        const commission =
-          serviceAmount * (providerAmbassador.commissionRate / 100);
-
-        console.log("[AmbassadorCommission] provider commission calculated", {
-          serviceAmount,
-          commissionRate: providerAmbassador.commissionRate,
-          commission,
-        });
-
-        await creditAmbassador({
-          ambassador: providerAmbassador,
-          amount: commission,
-          booking,
-          service,
-          commissionSource: "provider_side",
-          commissionRate: providerAmbassador.commissionRate,
-          referredUser: provider._id,
-        });
+      if (isSameDirectAmbassador) {
+        console.log(
+          "[AmbassadorCommission] Same ambassador for customer & provider. Provider commission skipped.",
+        );
       } else {
-        console.log("[AmbassadorCommission] provider ambassador skipped", {
-          reason: "not_found_or_not_approved",
+        console.log("[AmbassadorCommission] provider referral found", {
+          providerId: provider._id,
           ambassadorId: providerAmbassadorId,
+          source: provider?.referredBy
+            ? "referredBy"
+            : "registeredByAmbassador",
         });
+
+        const providerAmbassador = await User.findById(providerAmbassadorId);
+
+        console.log(
+          "[AmbassadorCommission] provider ambassador lookup result",
+          {
+            ambassadorId: providerAmbassador?._id,
+            isAmbassador: providerAmbassador?.isAmbassador,
+            ambassadorStatus: providerAmbassador?.ambassadorStatus,
+            commissionRate: providerAmbassador?.commissionRate,
+          },
+        );
+
+        if (
+          providerAmbassador &&
+          providerAmbassador.isAmbassador &&
+          providerAmbassador.ambassadorStatus === "approved"
+        ) {
+          const commission = Number(
+            (
+              platformCommissionAmount *
+              (providerAmbassador.commissionRate / 100)
+            ).toFixed(2),
+          );
+          console.log("[AmbassadorCommission] provider commission calculated", {
+            serviceAmount,
+            platformCommissionAmount,
+            commissionRate: providerAmbassador.commissionRate,
+            commission,
+          });
+
+          await creditAmbassador({
+            ambassador: providerAmbassador,
+            amount: commission,
+            booking,
+            service,
+            commissionSource: "provider_side",
+            commissionRate: providerAmbassador.commissionRate,
+            referredUser: provider._id,
+          });
+        } else {
+          console.log("[AmbassadorCommission] provider ambassador skipped", {
+            reason: "not_found_or_not_approved",
+            ambassadorId: providerAmbassadorId,
+          });
+        }
       }
     } else {
       console.log("[AmbassadorCommission] no provider referral", {
@@ -353,13 +389,17 @@ async function processAmbassadorCommission({
       ) {
         const territoryAmbassador = territory.exclusiveAmbassador;
 
-        const commission =
-          serviceAmount * (territoryAmbassador.commissionRate / 100);
-
+        const commission = Number(
+          (
+            platformCommissionAmount *
+            (territoryAmbassador.commissionRate / 100)
+          ).toFixed(2),
+        );
         console.log(
           "[AmbassadorCommission] territorial commission calculated",
           {
             serviceAmount,
+            platformCommissionAmount,
             commissionRate: territoryAmbassador.commissionRate,
             commission,
             territoryId: territory._id,

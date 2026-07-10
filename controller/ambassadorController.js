@@ -1672,7 +1672,7 @@ exports.dashboard = async (req, res) => {
     });
 
     const walletData = {
-      balance: wallet?.balance  || 0, // Available balance for UI
+      balance: wallet?.balance || 0, // Available balance for UI
       availableBalance: wallet?.availableBalance || 0,
       reservedBalance: wallet?.reservedBalance || 0,
       totalEarned: wallet?.totalEarned || 0,
@@ -2682,14 +2682,10 @@ exports.withdrawAmount = async (req, res) => {
 
       const accountLink = await stripe.accountLinks.create({
         account: account.id,
-
-        refresh_url: `${process.env.APP_URL}/withdraw`,
-
-        return_url: `${process.env.APP_URL}/withdraw-success`,
-
+        refresh_url: "https://uat.betogetherapp.com/withdraw",
+        return_url: "https://uat.betogetherapp.com/withdraw-success",
         type: "account_onboarding",
       });
-
       console.log("[withdrawAmount] Stripe onboarding link created", {
         ambassadorId,
         onboardingUrl: accountLink.url,
@@ -2742,11 +2738,8 @@ exports.withdrawAmount = async (req, res) => {
       });
       const accountLink = await stripe.accountLinks.create({
         account: user.stripeAccountId,
-
-        refresh_url: `${process.env.APP_URL}/withdraw`,
-
-        return_url: `${process.env.APP_URL}/withdraw-success`,
-
+        refresh_url: "https://uat.betogetherapp.com/withdraw",
+        return_url: "https://uat.betogetherapp.com/withdraw-success",
         type: "account_onboarding",
       });
 

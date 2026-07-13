@@ -2,7 +2,6 @@ const User = require("../model/User");
 const Territory = require("../model/Territory");
 const AmbassadorWallet = require("../model/AmbassadorWallet");
 const AmbassadorWalletHistory = require("../model/AmbassadorWalletHistory");
-const CommissionSetting = require("../model/CommissionSetting");
 async function creditAmbassador({
   ambassador,
   amount,
@@ -187,21 +186,9 @@ async function processAmbassadorCommission({
     const serviceAmount = Number(
       payment?.originalAmount || booking.amount || 0,
     );
-    const commissionSetting = await CommissionSetting.findOne();
-    if (!commissionSetting) {
-      throw new Error("Commission settings not found");
-    }
-    const totalPlatformCommissionPercentage =
-      commissionSetting.providerCommissionPercentage +
-      commissionSetting.customerCommissionPercentage;
 
-    const platformCommissionAmount = Number(
-      (serviceAmount * (totalPlatformCommissionPercentage / 100)).toFixed(2),
-    );
     console.log("[AmbassadorCommission] service amount resolved", {
       serviceAmount,
-      totalPlatformCommissionPercentage,
-      platformCommissionAmount,
       source: payment?.originalAmount
         ? "payment.originalAmount"
         : "booking.amount",
@@ -244,17 +231,10 @@ async function processAmbassadorCommission({
         customerAmbassador.ambassadorStatus === "approved"
       ) {
         const commission = Number(
-          (
-            platformCommissionAmount *
-            (customerAmbassador.commissionRate / 100)
-          ).toFixed(2),
+          (serviceAmount * (customerAmbassador.commissionRate / 100)).toFixed(
+            2,
+          ),
         );
-        console.log("[AmbassadorCommission] customer commission calculated", {
-          serviceAmount,
-          platformCommissionAmount,
-          commissionRate: customerAmbassador.commissionRate,
-          commission,
-        });
 
         await creditAmbassador({
           ambassador: customerAmbassador,
@@ -321,14 +301,12 @@ async function processAmbassadorCommission({
           providerAmbassador.ambassadorStatus === "approved"
         ) {
           const commission = Number(
-            (
-              platformCommissionAmount *
-              (providerAmbassador.commissionRate / 100)
-            ).toFixed(2),
+            (serviceAmount * (providerAmbassador.commissionRate / 100)).toFixed(
+              2,
+            ),
           );
           console.log("[AmbassadorCommission] provider commission calculated", {
             serviceAmount,
-            platformCommissionAmount,
             commissionRate: providerAmbassador.commissionRate,
             commission,
           });
@@ -390,22 +368,19 @@ async function processAmbassadorCommission({
         const territoryAmbassador = territory.exclusiveAmbassador;
 
         const commission = Number(
-          (
-            platformCommissionAmount *
-            (territoryAmbassador.commissionRate / 100)
-          ).toFixed(2),
+          (serviceAmount * (territoryAmbassador.commissionRate / 100)).toFixed(
+            2,
+          ),
         );
         console.log(
           "[AmbassadorCommission] territorial commission calculated",
           {
             serviceAmount,
-            platformCommissionAmount,
             commissionRate: territoryAmbassador.commissionRate,
             commission,
             territoryId: territory._id,
           },
         );
-
         await creditAmbassador({
           ambassador: territoryAmbassador,
           amount: commission,

@@ -413,6 +413,7 @@ exports.register = async (req, res) => {
       mobile: mobile || null,
       hashed_password: hashedPassword,
       register_type,
+      login_type: register_type,   // ✅ ADD THIS
       otp_verified,
       otp_code: otp,
       otp_expiry: expiry,
@@ -782,6 +783,7 @@ exports.login = async (req, res) => {
           email,
           name: userName,
           register_type: "google_auth",
+          login_type: "google_auth",   // ✅ ADD
           provider_id: provider_id || null,
           provider_uid: provider_uid || null,
           otp_verified: true,
@@ -923,6 +925,7 @@ exports.login = async (req, res) => {
           email: appleEmail ? appleEmail.toLowerCase() : null,
           name: name || "Apple User",
           register_type: "apple_auth",
+           login_type: "apple_auth",   // ✅ ADD
           provider_uid: appleUserId,
           otp_verified: true,
           fcmTokens: [],

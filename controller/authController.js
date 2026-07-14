@@ -192,7 +192,8 @@ exports.register = async (req, res) => {
       existing.session_id = session_id;
       existing.access_token = access_token;
       existing.otp_verified = true;
-
+      existing.login_type = "google_auth";
+      existing.last_login = new Date();
       if (provider_id) existing.provider_id = provider_id;
       if (provider_uid) existing.provider_uid = provider_uid;
 
@@ -254,7 +255,8 @@ exports.register = async (req, res) => {
       existing.session_id = session_id;
       existing.access_token = access_token;
       existing.otp_verified = true;
-
+      existing.login_type = "apple_auth";
+      existing.last_login = new Date();
       if (provider_uid) existing.provider_uid = provider_uid;
 
       if (fcmToken) {
@@ -295,13 +297,66 @@ exports.register = async (req, res) => {
       });
     }
     // MANUAL: email exists
-    if (existing && register_type === "manual") {
-      console.log("❌ STEP 13: Manual registration but email exists");
-      return res
-        .status(409)
-        .json({ IsSucces: false, message: "Email already registered." });
-    }
+    // =====================================
+    // MANUAL REGISTRATION RESUME
+    // =====================================
 
+    if (existing && register_type === "manual") {
+      console.log(
+        "🔵 MANUAL RESUME: Existing user found for manual registration",
+        {
+          email: existing.email,
+          otp_verified: existing.otp_verified,
+          hasPassword: !!existing.hashed_password,
+        },
+      );
+
+      // Registration already completed
+      if (existing.otp_verified && existing.hashed_password) {
+        return res.status(409).json({
+          IsSucces: false,
+          message: "Email already registered.",
+        });
+      }
+
+      // Password required
+      if (!password) {
+        return res.status(400).json({
+          IsSucces: false,
+          message: "Password required.",
+        });
+      }
+
+      // Update latest information
+      existing.name = name || existing.name;
+      existing.mobile = mobile || existing.mobile;
+      existing.hashed_password = await bcrypt.hash(String(password), 10);
+
+      // Generate fresh OTP
+      const otpObj = generateOTP();
+
+      existing.otp_code = otpObj.otp;
+      existing.otp_expiry = otpObj.expiry;
+      existing.otp_verified = false;
+
+      // Optional
+      existing.lastResendAt = new Date();
+
+      await existing.save();
+
+      try {
+        await sendOtpEmail(existing.email, otpObj.otp);
+      } catch (err) {
+        console.log("OTP Email Error:", err.message);
+      }
+
+      return res.status(200).json({
+        IsSucces: true,
+        requireOtp: true,
+        isExistingUser: true,
+        message: "Registration resumed. OTP sent successfully.",
+      });
+    }
     // MANUAL registration → create password + otp
     console.log("🔵 STEP 14: Handling password + OTP");
 
@@ -413,7 +468,7 @@ exports.register = async (req, res) => {
       mobile: mobile || null,
       hashed_password: hashedPassword,
       register_type,
-      login_type: register_type,   // ✅ ADD THIS
+      login_type: register_type, // ✅ ADD THIS
       otp_verified,
       otp_code: otp,
       otp_expiry: expiry,
@@ -551,10 +606,6 @@ exports.register = async (req, res) => {
   } catch (err) {
     console.log("❌ STEP 33: Register Error:", err);
 
-    if (typeof uploadedPublicId !== "undefined" && uploadedPublicId) {
-      await cloudinary.uploader.destroy(uploadedPublicId);
-    }
-
     return res.status(500).json({ IsSucces: false, message: "Server error" });
   }
 };
@@ -572,7 +623,7 @@ exports.verifyOtpRegister = async (req, res) => {
       return res.status(400).json({ IsSucces: false, message: "OTP required" });
     }
 
-    email = String(email).toLowerCase();
+    email = String(email).trim().toLowerCase();
     otp = String(otp);
 
     const user = await User.findOne({ email });
@@ -739,6 +790,7 @@ exports.login = async (req, res) => {
       user.otp_code = otp;
       user.otp_expiry = expiry;
       user.otp_verified = false;
+      user.login_type = "manual";
 
       if (fcmToken) {
         await user.addFcmToken(fcmToken);
@@ -746,7 +798,7 @@ exports.login = async (req, res) => {
 
       await user.save();
       await saveGdprData(user, req);
-      
+
       // ✅ SEND EMAIL (STATIC OTP bhi jayega)
       try {
         await sendOtpEmail(user.email, otp);
@@ -783,7 +835,7 @@ exports.login = async (req, res) => {
           email,
           name: userName,
           register_type: "google_auth",
-          login_type: "google_auth",   // ✅ ADD
+          login_type: "google_auth", // ✅ ADD
           provider_id: provider_id || null,
           provider_uid: provider_uid || null,
           otp_verified: true,
@@ -845,7 +897,8 @@ exports.login = async (req, res) => {
       user.session_id = session_id;
       user.access_token = access_token;
       user.otp_verified = true;
-
+      user.login_type = "google_auth";
+      user.last_login = new Date();
       await user.save();
       await saveGdprData(user, req);
 
@@ -925,7 +978,7 @@ exports.login = async (req, res) => {
           email: appleEmail ? appleEmail.toLowerCase() : null,
           name: name || "Apple User",
           register_type: "apple_auth",
-           login_type: "apple_auth",   // ✅ ADD
+          login_type: "apple_auth", // ✅ ADD
           provider_uid: appleUserId,
           otp_verified: true,
           fcmTokens: [],
@@ -972,6 +1025,8 @@ exports.login = async (req, res) => {
       appleUser.session_id = session_id;
       appleUser.access_token = access_token;
       appleUser.otp_verified = true;
+      appleUser.login_type = "apple_auth";
+      appleUser.last_login = new Date();
 
       await appleUser.save();
       await saveGdprData(appleUser, req);
@@ -1115,17 +1170,17 @@ exports.verifyOtpLogin = async (req, res) => {
 
     user.session_id = session_id;
     user.access_token = access_token;
+    user.login_type = "manual";
+    user.last_login = new Date();
 
     console.log("🟦 STEP 16: Saving user after OTP verify");
     await user.save();
     await saveGdprData(user, req);
     const requiresAmbassadorAgreement =
-  !!user.registeredByAmbassador &&
-  (
-    !user.ambassadorUserAgreementAccepted ||
-    !user.termsAccepted ||
-    !user.privacyAccepted
-  );
+      !!user.registeredByAmbassador &&
+      (!user.ambassadorUserAgreementAccepted ||
+        !user.termsAccepted ||
+        !user.privacyAccepted);
 
     console.log("🟦 STEP 17: OTP login success");
     return res.json({
@@ -1144,6 +1199,7 @@ exports.verifyOtpLogin = async (req, res) => {
         register_type: user.register_type,
         otp_verified: user.otp_verified,
         referralCode: user.referralCode,
+        login_type: user.login_type,
       },
     });
   } catch (err) {

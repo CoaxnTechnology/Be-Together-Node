@@ -40,7 +40,10 @@ function generateTempPassword(length = 8) {
 
 exports.applyForAmbassador = async (req, res) => {
   try {
+    console.log("[applyForAmbassador] Starting ambassador application request");
+
     const userId = req.user.id;
+    console.log("[applyForAmbassador] userId:", userId);
 
     const {
       applicationType = "self",
@@ -57,12 +60,17 @@ exports.applyForAmbassador = async (req, res) => {
       acceptedAgreement,
     } = req.body;
 
+    console.log("[applyForAmbassador] request body:", req.body);
+
     // =====================================
     // SELF APPLICATION VALIDATION
     // =====================================
 
     if (applicationType === "self") {
+      console.log("[applyForAmbassador] Validating self application");
+
       if (!name || !email || !phoneNumber || !city) {
+        console.log("[applyForAmbassador] Missing self application fields");
         return res.status(400).json({
           isSuccess: false,
           message: "Name, email, phone number and city are required",
@@ -70,6 +78,7 @@ exports.applyForAmbassador = async (req, res) => {
       }
 
       if (!acceptedAgreement) {
+        console.log("[applyForAmbassador] Agreement not accepted");
         return res.status(400).json({
           isSuccess: false,
           message: "You must accept the Ambassador Agreement before applying",
@@ -80,24 +89,36 @@ exports.applyForAmbassador = async (req, res) => {
     // ==========================
     // User Check
     // ==========================
+    console.log("[applyForAmbassador] Looking up current user");
     const user = await User.findById(userId);
 
     if (!user) {
+      console.log("[applyForAmbassador] User not found for userId:", userId);
       return res.status(404).json({
         isSuccess: false,
         message: "User not found",
       });
     }
+
+    console.log("[applyForAmbassador] Found user:", user._id.toString());
+
     // =====================================
     // EXCLUSIVE AMBASSADOR REQUEST VALIDATION
     // =====================================
 
     if (applicationType === "exclusive_request") {
+      console.log(
+        "[applyForAmbassador] Validating exclusive request permissions",
+      );
+
       if (
         !user.isAmbassador ||
         user.ambassadorStatus !== "approved" ||
         user.ambassadorType !== "exclusive"
       ) {
+        console.log(
+          "[applyForAmbassador] User is not allowed to send exclusive invitation",
+        );
         return res.status(403).json({
           isSuccess: false,
           message:
@@ -108,13 +129,18 @@ exports.applyForAmbassador = async (req, res) => {
 
     // Already Ambassador
     if (applicationType === "self") {
+      console.log(
+        "[applyForAmbassador] Checking if user is already an ambassador",
+      );
       if (user.isAmbassador) {
+        console.log("[applyForAmbassador] User is already an ambassador");
         return res.status(400).json({
           isSuccess: false,
           message: "User is already an ambassador",
         });
       }
     }
+
     // =====================================
     // EXCLUSIVE REQUEST USER CHECK
     // =====================================
@@ -122,7 +148,13 @@ exports.applyForAmbassador = async (req, res) => {
     let requestedUser = null;
 
     if (applicationType === "exclusive_request") {
+      console.log(
+        "[applyForAmbassador] Checking requested user ID:",
+        requestedUserId,
+      );
+
       if (!requestedUserId) {
+        console.log("[applyForAmbassador] requestedUserId missing");
         return res.status(400).json({
           isSuccess: false,
           message: "requestedUserId is required",
@@ -132,22 +164,35 @@ exports.applyForAmbassador = async (req, res) => {
       requestedUser = await User.findById(requestedUserId);
 
       if (!requestedUser) {
+        console.log("[applyForAmbassador] Requested user not found");
         return res.status(404).json({
           isSuccess: false,
           message: "Requested user not found",
         });
       }
 
+      console.log(
+        "[applyForAmbassador] Requested user found:",
+        requestedUser._id.toString(),
+      );
+
       if (requestedUser.isAmbassador) {
+        console.log(
+          "[applyForAmbassador] Requested user is already an ambassador",
+        );
         return res.status(400).json({
           isSuccess: false,
           message: "User is already an ambassador",
         });
       }
     }
+
     // ==========================
     // Pending Application Check
     // ==========================
+    console.log(
+      "[applyForAmbassador] Checking for existing pending application",
+    );
     const existingApplication = await AmbassadorApplication.findOne({
       user:
         applicationType === "exclusive_request" ? requestedUser._id : userId,
@@ -159,11 +204,16 @@ exports.applyForAmbassador = async (req, res) => {
     });
 
     if (existingApplication) {
+      console.log("[applyForAmbassador] Pending application already exists");
       return res.status(400).json({
         isSuccess: false,
         message: "You already have a pending ambassador application",
       });
     }
+
+    console.log(
+      "[applyForAmbassador] Checking for recent rejected application",
+    );
     const lastRejectedApplication = await AmbassadorApplication.findOne({
       user:
         applicationType === "exclusive_request" ? requestedUser._id : userId,
@@ -172,11 +222,13 @@ exports.applyForAmbassador = async (req, res) => {
     }).sort({
       created_at: -1,
     });
+
     if (
       lastRejectedApplication &&
       lastRejectedApplication.rejectionCooldownUntil &&
       new Date() < lastRejectedApplication.rejectionCooldownUntil
     ) {
+      console.log("[applyForAmbassador] Rejection cooldown active");
       return res.status(400).json({
         isSuccess: false,
         message: `You can reapply after ${lastRejectedApplication.rejectionCooldownUntil.toDateString()}`,
@@ -187,12 +239,16 @@ exports.applyForAmbassador = async (req, res) => {
     // Save Agreement Acceptance
     // ==========================
     if (applicationType === "self") {
+      console.log(
+        "[applyForAmbassador] Saving ambassador agreement acceptance",
+      );
       user.ambassadorAgreementAccepted = true;
 
       user.ambassadorAgreementAcceptedAt = new Date();
 
       await user.save();
     }
+
     // ==========================
     // Create Application
     // ==========================
@@ -203,6 +259,7 @@ exports.applyForAmbassador = async (req, res) => {
     // =====================================
 
     if (applicationType === "self") {
+      console.log("[applyForAmbassador] Creating self application record");
       application = await AmbassadorApplication.create({
         applicationType: "self",
 
@@ -224,35 +281,18 @@ exports.applyForAmbassador = async (req, res) => {
 
         status: "pending",
       });
+
+      console.log(
+        "[applyForAmbassador] Self application created:",
+        application._id.toString(),
+      );
     }
 
     // =====================================
     // EXCLUSIVE REQUEST
     // =====================================
-    // else {
-    //   application = await AmbassadorApplication.create({
-    //     applicationType: "exclusive_request",
-
-    //     user: requestedUser._id,
-
-    //     requestedUser: requestedUser._id,
-
-    //     requestedByExclusive: user._id,
-
-    //     name: requestedUser.name,
-
-    //     email: requestedUser.email,
-
-    //     phoneNumber: requestedUser.mobile || "",
-
-    //     city: requestedUser.city || "",
-
-    //     acceptedAgreement: true,
-
-    //     status: "pending",
-    //   });
-    // }
     else {
+      console.log("[applyForAmbassador] Sending exclusive invitation");
       requestedUser.pendingAmbassadorInvitation = {
         invitedBy: user._id,
         invitedAt: new Date(),
@@ -262,8 +302,13 @@ exports.applyForAmbassador = async (req, res) => {
       await requestedUser.save();
 
       await sendExclusiveAmbassadorInvitationNotification(requestedUser, user);
+      console.log("[applyForAmbassador] Exclusive invitation sent");
     }
+
     if (applicationType === "self") {
+      console.log(
+        "[applyForAmbassador] Returning success for self application",
+      );
       return res.status(201).json({
         isSuccess: true,
         message: "Ambassador application submitted successfully",
@@ -271,13 +316,14 @@ exports.applyForAmbassador = async (req, res) => {
       });
     }
 
+    console.log("[applyForAmbassador] Returning success for invitation flow");
     return res.status(200).json({
       isSuccess: true,
       message: "Invitation sent successfully.",
       invitation: requestedUser.pendingAmbassadorInvitation,
     });
   } catch (err) {
-    console.error("applyForAmbassador Error:", err);
+    console.error("[applyForAmbassador] Error:", err);
 
     return res.status(500).json({
       isSuccess: false,
@@ -3076,9 +3122,21 @@ exports.withdrawAmount = async (req, res) => {
 };
 exports.acceptAmbassadorAgreement = async (req, res) => {
   try {
+    console.log(
+      "[acceptAmbassadorAgreement] Starting agreement acceptance flow",
+    );
+
     const user = await User.findById(req.user.id);
+    console.log("[acceptAmbassadorAgreement] Loaded user", {
+      userId: user?._id,
+      registeredByAmbassador: user?.registeredByAmbassador,
+      pendingInvitation: user?.pendingAmbassadorInvitation,
+    });
 
     if (!user) {
+      console.log("[acceptAmbassadorAgreement] User not found", {
+        userId: req.user?.id,
+      });
       return res.status(404).json({
         isSuccess: false,
         message: "User not found",
@@ -3090,17 +3148,27 @@ exports.acceptAmbassadorAgreement = async (req, res) => {
     // =====================================
 
     if (user.registeredByAmbassador) {
+      console.log(
+        "[acceptAmbassadorAgreement] Flow 1: user created by ambassador",
+      );
+
       if (
         user.ambassadorUserAgreementAccepted &&
         user.termsAccepted &&
         user.privacyAccepted
       ) {
+        console.log(
+          "[acceptAmbassadorAgreement] Agreement already accepted for ambassador-created user",
+        );
         return res.status(400).json({
           isSuccess: false,
           message: "Agreement already accepted.",
         });
       }
 
+      console.log(
+        "[acceptAmbassadorAgreement] Saving ambassador-created user agreement acceptance",
+      );
       user.ambassadorUserAgreementAccepted = true;
       user.ambassadorUserAgreementAcceptedAt = new Date();
 
@@ -3109,6 +3177,9 @@ exports.acceptAmbassadorAgreement = async (req, res) => {
 
       await user.save();
 
+      console.log(
+        "[acceptAmbassadorAgreement] Agreement accepted successfully for ambassador-created user",
+      );
       return res.status(200).json({
         isSuccess: true,
         message: "Ambassador Agreement accepted successfully.",
@@ -3129,17 +3200,27 @@ exports.acceptAmbassadorAgreement = async (req, res) => {
       user.pendingAmbassadorInvitation?.invitedBy &&
       user.pendingAmbassadorInvitation.invitationStatus === "pending"
     ) {
+      console.log(
+        "[acceptAmbassadorAgreement] Flow 2: exclusive invitation found",
+      );
+
       if (
         user.ambassadorAgreementAccepted &&
         user.termsAccepted &&
         user.privacyAccepted
       ) {
+        console.log(
+          "[acceptAmbassadorAgreement] Agreement already accepted for invited user",
+        );
         return res.status(400).json({
           isSuccess: false,
           message: "Agreement already accepted.",
         });
       }
 
+      console.log(
+        "[acceptAmbassadorAgreement] Accepting invitation agreement and creating application if needed",
+      );
       // Agreement Accept
       user.ambassadorAgreementAccepted = true;
       user.ambassadorAgreementAcceptedAt = new Date();
@@ -3156,9 +3237,16 @@ exports.acceptAmbassadorAgreement = async (req, res) => {
         },
       });
 
+      console.log("[acceptAmbassadorAgreement] Existing application check", {
+        found: !!existingApplication,
+      });
+
       let application = existingApplication;
 
       if (!existingApplication) {
+        console.log(
+          "[acceptAmbassadorAgreement] Creating exclusive ambassador application",
+        );
         application = await AmbassadorApplication.create({
           applicationType: "exclusive_request",
 
@@ -3185,6 +3273,9 @@ exports.acceptAmbassadorAgreement = async (req, res) => {
       user.pendingAmbassadorInvitation.invitationStatus = "accepted";
 
       await user.save();
+      console.log(
+        "[acceptAmbassadorAgreement] Invitation status updated to accepted",
+      );
 
       return res.status(200).json({
         isSuccess: true,
@@ -3203,12 +3294,13 @@ exports.acceptAmbassadorAgreement = async (req, res) => {
       });
     }
 
+    console.log("[acceptAmbassadorAgreement] No ambassador invitation found");
     return res.status(400).json({
       isSuccess: false,
       message: "No Ambassador invitation found.",
     });
   } catch (err) {
-    console.error("acceptAmbassadorAgreement:", err);
+    console.error("[acceptAmbassadorAgreement] Error:", err);
 
     return res.status(500).json({
       isSuccess: false,

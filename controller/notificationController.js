@@ -4,7 +4,7 @@ const admin = require("../utils/firebase"); // ✅ use initialized admin
 const User = require("../model/User");
 const Service = require("../model/Service");
 const Category = require("../model/Category");
-
+const BASE_URL = process.env.BASE_URL;
 const notifiedMap = {}; // To avoid duplicate notifications
 
 // Helper: distance calculation
@@ -892,8 +892,7 @@ async function sendAmbassadorRejectedNotification(user, reason) {
       notification: {
         title: "❌ Ambassador Application Rejected",
         body:
-          reason ||
-          "Your ambassador application has been rejected by admin.",
+          reason || "Your ambassador application has been rejected by admin.",
       },
 
       data: {
@@ -905,14 +904,9 @@ async function sendAmbassadorRejectedNotification(user, reason) {
       },
     });
 
-    console.log(
-      `✅ Ambassador rejection notification sent to ${user.name}`,
-    );
+    console.log(`✅ Ambassador rejection notification sent to ${user.name}`);
   } catch (err) {
-    console.error(
-      "❌ sendAmbassadorRejectedNotification:",
-      err.message,
-    );
+    console.error("❌ sendAmbassadorRejectedNotification:", err.message);
   }
 }
 async function sendExclusiveAmbassadorInvitationNotification(
@@ -920,12 +914,20 @@ async function sendExclusiveAmbassadorInvitationNotification(
   ambassador,
 ) {
   try {
+    console.log("[sendExclusiveAmbassadorInvitationNotification] Starting", {
+      invitedUserId: invitedUser?._id?.toString(),
+      invitedUserName: invitedUser?.name,
+      ambassadorId: ambassador?._id?.toString(),
+      ambassadorName: ambassador?.name,
+      fcmTokens: invitedUser?.fcmToken || [],
+    });
+
     if (!invitedUser?.fcmToken?.length) {
       console.log("⚠️ Invited user has no FCM tokens");
       return;
     }
 
-    await admin.messaging().sendEachForMulticast({
+    const payload = {
       tokens: invitedUser.fcmToken,
       notification: {
         title: "🎉 Ambassador Invitation",
@@ -934,12 +936,24 @@ async function sendExclusiveAmbassadorInvitationNotification(
       data: {
         type: "exclusive_ambassador_invitation",
         pageType: "WebView",
-        agreementUrl:
-          "https://uat.api.betogetherapp.com/api/ambassador-terms",
+        agreementUrl: `${process.env.BASE_URL}/api/ambassador-terms`,
         ambassadorId: ambassador._id.toString(),
         ambassadorName: ambassador.name,
         userId: invitedUser._id.toString(),
       },
+    };
+
+    console.log(
+      "[sendExclusiveAmbassadorInvitationNotification] Sending payload",
+      payload,
+    );
+
+    const response = await admin.messaging().sendEachForMulticast(payload);
+
+    console.log("[sendExclusiveAmbassadorInvitationNotification] Result", {
+      successCount: response.successCount,
+      failureCount: response.failureCount,
+      responses: response.responses,
     });
 
     console.log(
@@ -1011,7 +1025,7 @@ module.exports.sendAmbassadorRemovedNotification =
   sendAmbassadorRemovedNotification;
 module.exports.sendAmbassadorRejectedNotification =
   sendAmbassadorRejectedNotification;
-  module.exports.sendExclusiveAmbassadorInvitationNotification =
+module.exports.sendExclusiveAmbassadorInvitationNotification =
   sendExclusiveAmbassadorInvitationNotification;
 //module.exports.notifyOnServiceSubscription = notifyServiceOwnerOnSubscription;
 //module.exports.notifyServiceOwnerOnSubscription = notifyServiceOwnerOnSubscription;

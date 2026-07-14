@@ -915,6 +915,43 @@ async function sendAmbassadorRejectedNotification(user, reason) {
     );
   }
 }
+async function sendExclusiveAmbassadorInvitationNotification(
+  invitedUser,
+  ambassador,
+) {
+  try {
+    if (!invitedUser?.fcmToken?.length) {
+      console.log("⚠️ Invited user has no FCM tokens");
+      return;
+    }
+
+    await admin.messaging().sendEachForMulticast({
+      tokens: invitedUser.fcmToken,
+      notification: {
+        title: "🎉 Ambassador Invitation",
+        body: `${ambassador.name} has invited you to become a BeTogether Ambassador. Review and accept the Ambassador Agreement to continue.`,
+      },
+      data: {
+        type: "exclusive_ambassador_invitation",
+        pageType: "WebView",
+        agreementUrl:
+          "https://uat.api.betogetherapp.com/api/ambassador-terms",
+        ambassadorId: ambassador._id.toString(),
+        ambassadorName: ambassador.name,
+        userId: invitedUser._id.toString(),
+      },
+    });
+
+    console.log(
+      `✅ Exclusive Ambassador invitation notification sent to ${invitedUser.name}`,
+    );
+  } catch (err) {
+    console.error(
+      "❌ sendExclusiveAmbassadorInvitationNotification:",
+      err.message,
+    );
+  }
+}
 // async function notifyServiceOwnerOnSubscription({ buyerId, serviceId }) {
 //   try {
 //     const buyer = await User.findById(buyerId);
@@ -974,5 +1011,10 @@ module.exports.sendAmbassadorRemovedNotification =
   sendAmbassadorRemovedNotification;
 module.exports.sendAmbassadorRejectedNotification =
   sendAmbassadorRejectedNotification;
+  module.exports.sendExclusiveAmbassadorInvitationNotification =
+  sendExclusiveAmbassadorInvitationNotification;
+//module.exports.notifyOnServiceSubscription = notifyServiceOwnerOnSubscription;
+//module.exports.notifyServiceOwnerOnSubscription = notifyServiceOwnerOnSubscription;
+//notificaton addd
 //module.exports.notifyServiceOwnerOnSubscription = notifyServiceOwnerOnSubscription;
 //notificaton addd

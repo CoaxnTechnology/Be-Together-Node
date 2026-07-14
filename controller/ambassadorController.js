@@ -19,6 +19,9 @@ const {
   sendAmbassadorRejectedNotification,
 } = require("./notificationController");
 const AmbassadorWalletHistory = require("../model/AmbassadorWalletHistory");
+const {
+  sendExclusiveAmbassadorInvitationNotification,
+} = require("./notificationController");
 function generateTempPassword(length = 8) {
   const chars =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -226,39 +229,52 @@ exports.applyForAmbassador = async (req, res) => {
     // =====================================
     // EXCLUSIVE REQUEST
     // =====================================
+    // else {
+    //   application = await AmbassadorApplication.create({
+    //     applicationType: "exclusive_request",
+
+    //     user: requestedUser._id,
+
+    //     requestedUser: requestedUser._id,
+
+    //     requestedByExclusive: user._id,
+
+    //     name: requestedUser.name,
+
+    //     email: requestedUser.email,
+
+    //     phoneNumber: requestedUser.mobile || "",
+
+    //     city: requestedUser.city || "",
+
+    //     acceptedAgreement: true,
+
+    //     status: "pending",
+    //   });
+    // }
     else {
-      application = await AmbassadorApplication.create({
-        applicationType: "exclusive_request",
+      requestedUser.pendingAmbassadorInvitation = {
+        invitedBy: user._id,
+        invitedAt: new Date(),
+        invitationStatus: "pending",
+      };
 
-        user: requestedUser._id,
+      await requestedUser.save();
 
-        requestedUser: requestedUser._id,
-
-        requestedByExclusive: user._id,
-
-        name: requestedUser.name,
-
-        email: requestedUser.email,
-
-        phoneNumber: requestedUser.mobile || "",
-
-        city: requestedUser.city || "",
-
-        acceptedAgreement: true,
-
-        status: "pending",
+      await sendExclusiveAmbassadorInvitationNotification(requestedUser, user);
+    }
+    if (applicationType === "self") {
+      return res.status(201).json({
+        isSuccess: true,
+        message: "Ambassador application submitted successfully",
+        application,
       });
     }
 
-    return res.status(201).json({
+    return res.status(200).json({
       isSuccess: true,
-
-      message:
-        applicationType === "self"
-          ? "Ambassador application submitted successfully"
-          : "Standard ambassador request submitted successfully",
-
-      application,
+      message: "Invitation sent successfully.",
+      invitation: requestedUser.pendingAmbassadorInvitation,
     });
   } catch (err) {
     console.error("applyForAmbassador Error:", err);
@@ -3056,6 +3072,148 @@ exports.withdrawAmount = async (req, res) => {
   } finally {
     console.log("[withdrawAmount] Session ending", { ambassadorId });
     await session.endSession();
+  }
+};
+exports.acceptAmbassadorAgreement = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+
+    if (!user) {
+      return res.status(404).json({
+        isSuccess: false,
+        message: "User not found",
+      });
+    }
+
+    // =====================================
+    // FLOW 1 : User Created By Ambassador
+    // =====================================
+
+    if (user.registeredByAmbassador) {
+      if (
+        user.ambassadorUserAgreementAccepted &&
+        user.termsAccepted &&
+        user.privacyAccepted
+      ) {
+        return res.status(400).json({
+          isSuccess: false,
+          message: "Agreement already accepted.",
+        });
+      }
+
+      user.ambassadorUserAgreementAccepted = true;
+      user.ambassadorUserAgreementAcceptedAt = new Date();
+
+      user.termsAccepted = true;
+      user.privacyAccepted = true;
+
+      await user.save();
+
+      return res.status(200).json({
+        isSuccess: true,
+        message: "Ambassador Agreement accepted successfully.",
+        requiresAmbassadorAgreement: false,
+        agreement: {
+          ambassadorUserAgreementAccepted: user.ambassadorUserAgreementAccepted,
+          termsAccepted: user.termsAccepted,
+          privacyAccepted: user.privacyAccepted,
+        },
+      });
+    }
+
+    // =====================================
+    // FLOW 2 : Exclusive Ambassador Invitation
+    // =====================================
+
+    if (
+      user.pendingAmbassadorInvitation?.invitedBy &&
+      user.pendingAmbassadorInvitation.invitationStatus === "pending"
+    ) {
+      if (
+        user.ambassadorAgreementAccepted &&
+        user.termsAccepted &&
+        user.privacyAccepted
+      ) {
+        return res.status(400).json({
+          isSuccess: false,
+          message: "Agreement already accepted.",
+        });
+      }
+
+      // Agreement Accept
+      user.ambassadorAgreementAccepted = true;
+      user.ambassadorAgreementAcceptedAt = new Date();
+
+      user.termsAccepted = true;
+      user.privacyAccepted = true;
+
+      // Prevent duplicate application
+      const existingApplication = await AmbassadorApplication.findOne({
+        user: user._id,
+        applicationType: "exclusive_request",
+        status: {
+          $in: ["pending", "approved"],
+        },
+      });
+
+      let application = existingApplication;
+
+      if (!existingApplication) {
+        application = await AmbassadorApplication.create({
+          applicationType: "exclusive_request",
+
+          user: user._id,
+
+          requestedUser: user._id,
+
+          requestedByExclusive: user.pendingAmbassadorInvitation.invitedBy,
+
+          name: user.name,
+
+          email: user.email,
+
+          phoneNumber: user.mobile || "",
+
+          city: user.city || "",
+
+          acceptedAgreement: true,
+
+          status: "pending",
+        });
+      }
+
+      user.pendingAmbassadorInvitation.invitationStatus = "accepted";
+
+      await user.save();
+
+      return res.status(200).json({
+        isSuccess: true,
+        message:
+          "Agreement accepted successfully. Ambassador application submitted successfully.",
+
+        requiresAmbassadorAgreement: false,
+
+        agreement: {
+          ambassadorAgreementAccepted: user.ambassadorAgreementAccepted,
+          termsAccepted: user.termsAccepted,
+          privacyAccepted: user.privacyAccepted,
+        },
+
+        application,
+      });
+    }
+
+    return res.status(400).json({
+      isSuccess: false,
+      message: "No Ambassador invitation found.",
+    });
+  } catch (err) {
+    console.error("acceptAmbassadorAgreement:", err);
+
+    return res.status(500).json({
+      isSuccess: false,
+      message: err.message,
+    });
   }
 };
 exports.handlePayoutCreated = async (payout) => {

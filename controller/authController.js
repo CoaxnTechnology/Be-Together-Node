@@ -104,6 +104,8 @@ exports.register = async (req, res) => {
       // referral
       deviceId,
       referralCode,
+      // ambassador
+      ambassadorCode,
     } = req.body;
 
     console.log("🔵 STEP 4: Extracted fields:", {
@@ -351,15 +353,43 @@ exports.register = async (req, res) => {
     // =====================================
     // REFERRAL SYSTEM
     // =====================================
-
     let referredBy = null;
-
+    let registeredByAmbassador = null;
+    let registeredByAmbassadorAt = null;
+    let registeredAfterAmbassadorApproval = false;
     try {
       // ==========================
-      // 1. MANUAL REFERRAL CODE
+      // AMBASSADOR CODE
       // ==========================
 
-      if (referralCode) {
+      if (ambassadorCode) {
+        const ambassador = await User.findOne({
+          ambassadorCode: String(ambassadorCode).trim().toUpperCase(),
+          isAmbassador: true,
+          ambassadorStatus: "approved",
+        });
+
+        if (!ambassador) {
+          return res.status(400).json({
+            IsSucces: false,
+            message: "Invalid ambassador code.",
+          });
+        }
+
+        if (
+          ambassador.email.trim().toLowerCase() !== email.trim().toLowerCase()
+        ) {
+          registeredByAmbassador = ambassador._id;
+          registeredByAmbassadorAt = new Date();
+          registeredAfterAmbassadorApproval = true;
+
+          console.log("✅ Ambassador code applied");
+        }
+      } else if (referralCode) {
+        // ==========================
+        // 1. MANUAL REFERRAL CODE
+        // ==========================
+
         const referralUser = await User.findOne({
           referralCode: String(referralCode).trim().toUpperCase(),
         });
@@ -370,29 +400,6 @@ exports.register = async (req, res) => {
           console.log("✅ Manual referral applied");
         }
       }
-
-      // ==========================
-      // 2. AUTO REFERRAL
-      // ==========================
-      // else if (deviceId) {
-      //   const visit = await ReferralVisit.findOne({
-      //     deviceId,
-      //   }).sort({
-      //     created_at: -1,
-      //   });
-
-      //   if (visit?.referralCode) {
-      //     const referralUser = await User.findOne({
-      //       referralCode: visit.referralCode,
-      //     });
-
-      //     if (referralUser && referralUser.email !== email) {
-      //       referredBy = referralUser._id;
-
-      //       console.log("✅ Auto referral applied");
-      //     }
-      //   }
-      // }
     } catch (err) {
       console.log("Referral skipped:", err.message);
     }
@@ -411,6 +418,10 @@ exports.register = async (req, res) => {
       otp_expiry: expiry,
       profile_image: profileImageUrl,
       referredBy: referredBy || null,
+      // Ambassador
+      registeredByAmbassador,
+      registeredByAmbassadorAt,
+      registeredAfterAmbassadorApproval,
       provider_id: provider_id || null,
       provider_uid: provider_uid || null,
       fcmTokens: [],
@@ -711,7 +722,6 @@ exports.login = async (req, res) => {
           .json({ IsSucces: false, message: "Invalid password" });
       }
 
-
       // ✅ OTP LOGIC (STATIC + NORMAL)
       let otp, expiry;
 
@@ -735,6 +745,7 @@ exports.login = async (req, res) => {
 
       await user.save();
       await saveGdprData(user, req);
+      
       // ✅ SEND EMAIL (STATIC OTP bhi jayega)
       try {
         await sendOtpEmail(user.email, otp);
@@ -1105,6 +1116,13 @@ exports.verifyOtpLogin = async (req, res) => {
     console.log("🟦 STEP 16: Saving user after OTP verify");
     await user.save();
     await saveGdprData(user, req);
+    const requiresAmbassadorAgreement =
+  !!user.registeredByAmbassador &&
+  (
+    !user.ambassadorUserAgreementAccepted ||
+    !user.termsAccepted ||
+    !user.privacyAccepted
+  );
 
     console.log("🟦 STEP 17: OTP login success");
     return res.json({
@@ -1113,6 +1131,7 @@ exports.verifyOtpLogin = async (req, res) => {
       access_token,
       session_id,
       token_type: "bearer",
+      requiresAmbassadorAgreement,
       user: {
         id: user._id,
         name: user.name,

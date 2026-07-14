@@ -25,6 +25,7 @@ const {
   getAmbassadorAnalytics,
   withdrawAmount,
   getMyWallet,
+  acceptAmbassadorAgreement,
 } = require("../controller/ambassadorController");
 // USER
 
@@ -75,7 +76,7 @@ router.get("/admin/:id", adminAuth, getAmbassadorById);
 // =====================================
 
 router.post("/withdraw", auth, withdrawAmount);
-
+router.post("/accept-ambassador-agreement", auth, acceptAmbassadorAgreement);
 
 // =====================================
 // ADMIN WALLET HISTORY

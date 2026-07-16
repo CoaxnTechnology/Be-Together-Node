@@ -23,23 +23,37 @@ const AccountDeleteBackup = require("../model/AccountDeleteBackup");
 // =======================================
 exports.deleteAccount = async (req, res) => {
   try {
+    console.log("========== DELETE ACCOUNT START ==========");
+
     const userId = req.user.id;
+    console.log("User ID:", userId);
 
     // ===========================
     // FIND USER
     // ===========================
+    console.log("Finding user...");
+
     const user = await User.findById(userId).lean();
 
+    console.log("User found:", !!user);
+
     if (!user) {
+      console.log("User not found");
+
       return res.status(404).json({
         success: false,
         message: "User not found",
       });
     }
 
+    console.log("User Name:", user.name);
+    console.log("User Email:", user.email);
+
     // ===========================
     // CHECK ACTIVE SERVICE
     // ===========================
+    console.log("Checking active services...");
+
     const activeService = await Service.findOne({
       owner: userId,
       $or: [
@@ -49,7 +63,11 @@ exports.deleteAccount = async (req, res) => {
       ],
     });
 
+    console.log("Active Service Exists:", !!activeService);
+
     if (activeService) {
+      console.log("Active service ID:", activeService._id);
+
       return res.status(400).json({
         success: false,
         type: "ACTIVE_SERVICE",
@@ -58,9 +76,13 @@ exports.deleteAccount = async (req, res) => {
       });
     }
 
+    console.log("No active services.");
+
     // ===========================
     // CHECK ACTIVE BOOKINGS
     // ===========================
+    console.log("Checking active bookings...");
+
     const activeBooking = await Booking.findOne({
       $or: [{ customer: userId }, { provider: userId }],
       status: {
@@ -68,7 +90,11 @@ exports.deleteAccount = async (req, res) => {
       },
     });
 
+    console.log("Active Booking Exists:", !!activeBooking);
+
     if (activeBooking) {
+      console.log("Active Booking ID:", activeBooking._id);
+
       return res.status(400).json({
         success: false,
         type: "ACTIVE_BOOKING",
@@ -77,9 +103,13 @@ exports.deleteAccount = async (req, res) => {
       });
     }
 
+    console.log("No active bookings.");
+
     // ===========================
     // FETCH USER SERVICES
     // ===========================
+    console.log("Fetching user services...");
+
     const services = await Service.find({
       owner: userId,
     })
@@ -87,9 +117,13 @@ exports.deleteAccount = async (req, res) => {
       .populate("category", "name")
       .lean();
 
+    console.log("Services fetched:", services.length);
+
     // ===========================
     // FETCH BOOKINGS
     // ===========================
+    console.log("Fetching bookings...");
+
     const bookings = await Booking.find({
       $or: [{ customer: userId }, { provider: userId }],
     })
@@ -99,9 +133,13 @@ exports.deleteAccount = async (req, res) => {
       .populate("paymentId", "amount currency status paymentIntentId")
       .lean();
 
+    console.log("Bookings fetched:", bookings.length);
+
     // ===========================
     // FETCH PAYMENTS
     // ===========================
+    console.log("Fetching payments...");
+
     const payments = await Payment.find({
       $or: [{ user: userId }, { provider: userId }],
     })
@@ -110,7 +148,9 @@ exports.deleteAccount = async (req, res) => {
       .populate("service", "title price currency")
       .lean();
 
-    console.log({
+    console.log("Payments fetched:", payments.length);
+
+    console.log("Summary:", {
       services: services.length,
       bookings: bookings.length,
       payments: payments.length,
@@ -119,6 +159,8 @@ exports.deleteAccount = async (req, res) => {
     // ===========================
     // SAVE BACKUP
     // ===========================
+    console.log("Creating backup...");
+
     const backup = await AccountDeleteBackup.create({
       deletedUserId: userId,
 
@@ -139,47 +181,74 @@ exports.deleteAccount = async (req, res) => {
       generatedAt: new Date(),
     });
 
-    console.log("Backup saved:", backup._id);
+    console.log("Backup created successfully.");
+    console.log("Backup ID:", backup._id);
 
     // ===========================
     // DELETE USER RELATED DATA
     // ===========================
-    await Promise.all([
-      Wallet.deleteOne({ user: userId }),
+    console.log("Deleting Wallet...");
+    await Wallet.deleteOne({ user: userId });
+    console.log("Wallet deleted.");
 
-      WalletHistory.deleteMany({
-        user: userId,
-      }),
+    console.log("Deleting Wallet History...");
+    const walletHistoryResult = await WalletHistory.deleteMany({
+      user: userId,
+    });
+    console.log("Wallet History deleted:", walletHistoryResult.deletedCount);
 
-      Review.deleteMany({
-        $or: [{ user: userId }, { provider: userId }],
-      }),
+    console.log("Deleting Reviews...");
+    const reviewResult = await Review.deleteMany({
+      $or: [{ user: userId }, { provider: userId }],
+    });
+    console.log("Reviews deleted:", reviewResult.deletedCount);
 
-      ReferralTracking.deleteMany({
-        $or: [{ referrer: userId }, { referredUser: userId }],
-      }),
+    console.log("Deleting Referral Tracking...");
+    const referralTrackingResult = await ReferralTracking.deleteMany({
+      $or: [{ referrer: userId }, { referredUser: userId }],
+    });
+    console.log(
+      "Referral Tracking deleted:",
+      referralTrackingResult.deletedCount
+    );
 
-      ReferralHistory.deleteMany({
-        $or: [{ user: userId }, { receiver: userId }],
-      }),
+    console.log("Deleting Referral History...");
+    const referralHistoryResult = await ReferralHistory.deleteMany({
+      $or: [{ user: userId }, { receiver: userId }],
+    });
+    console.log(
+      "Referral History deleted:",
+      referralHistoryResult.deletedCount
+    );
 
-      Payment.deleteMany({
-        $or: [{ user: userId }, { provider: userId }],
-      }),
+    console.log("Deleting Payments...");
+    const paymentResult = await Payment.deleteMany({
+      $or: [{ user: userId }, { provider: userId }],
+    });
+    console.log("Payments deleted:", paymentResult.deletedCount);
 
-      Booking.deleteMany({
-        $or: [{ customer: userId }, { provider: userId }],
-      }),
+    console.log("Deleting Bookings...");
+    const bookingResult = await Booking.deleteMany({
+      $or: [{ customer: userId }, { provider: userId }],
+    });
+    console.log("Bookings deleted:", bookingResult.deletedCount);
 
-      Service.deleteMany({
-        owner: userId,
-      }),
-    ]);
+    console.log("Deleting Services...");
+    const serviceResult = await Service.deleteMany({
+      owner: userId,
+    });
+    console.log("Services deleted:", serviceResult.deletedCount);
 
     // ===========================
     // DELETE USER
     // ===========================
+    console.log("Deleting User...");
+
     await User.findByIdAndDelete(userId);
+
+    console.log("User deleted successfully.");
+
+    console.log("========== DELETE ACCOUNT SUCCESS ==========");
 
     // ===========================
     // RESPONSE
@@ -197,7 +266,9 @@ exports.deleteAccount = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Delete account error:", error);
+    console.error("========== DELETE ACCOUNT ERROR ==========");
+    console.error(error);
+    console.error("Stack:", error.stack);
 
     return res.status(500).json({
       success: false,

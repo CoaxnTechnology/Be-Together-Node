@@ -2,6 +2,8 @@ const User = require("../model/User");
 const Territory = require("../model/Territory");
 const AmbassadorWallet = require("../model/AmbassadorWallet");
 const AmbassadorWalletHistory = require("../model/AmbassadorWalletHistory");
+
+console.log("[AmbassadorCommission] module loaded");
 async function creditAmbassador({
   ambassador,
   amount,
@@ -202,227 +204,279 @@ async function processAmbassadorCommission({
     }
 
     console.log("[AmbassadorCommission] processing ambassador commissions");
+let territory = null;
+let territoryAmbassador = null;
 
+if (service?.city) {
+  console.log("[AmbassadorCommission] checking territory", {
+    serviceId: service._id,
+    city: service.city,
+  });
+
+  territory = await Territory.findOne({
+    city: {
+      $regex: new RegExp(`^${service.city.trim()}$`, "i"),
+    },
+    active: true,
+  }).populate("exclusiveAmbassador");
+
+  territoryAmbassador = territory?.exclusiveAmbassador || null;
+}
     // ==================================================
     // CUSTOMER AMBASSADOR
     // ==================================================
 
-    const customerAmbassadorId =
-      customer?.referredBy || customer?.registeredByAmbassador;
+const customerAmbassadorId =
+  customer?.referredBy || customer?.registeredByAmbassador;
 
-    if (customerAmbassadorId) {
-      console.log("[AmbassadorCommission] customer referral found", {
-        customerId: customer._id,
-        ambassadorId: customerAmbassadorId,
-        source: customer?.referredBy ? "referredBy" : "registeredByAmbassador",
-      });
+if (customerAmbassadorId) {
+  console.log("[AmbassadorCommission] customer referral found", {
+    customerId: customer._id,
+    ambassadorId: customerAmbassadorId,
+    source: customer?.referredBy ? "referredBy" : "registeredByAmbassador",
+  });
 
-      const customerAmbassador = await User.findById(customerAmbassadorId);
-      console.log("[AmbassadorCommission] customer ambassador lookup result", {
-        ambassadorId: customerAmbassador?._id,
-        isAmbassador: customerAmbassador?.isAmbassador,
-        ambassadorStatus: customerAmbassador?.ambassadorStatus,
-        commissionRate: customerAmbassador?.commissionRate,
-      });
+  const customerAmbassador = await User.findById(customerAmbassadorId);
 
-      if (
-        customerAmbassador &&
-        customerAmbassador.isAmbassador &&
-        customerAmbassador.ambassadorStatus === "approved"
-      ) {
-        const commission = Number(
-          (serviceAmount * (customerAmbassador.commissionRate / 100)).toFixed(
-            2,
-          ),
-        );
+  console.log("[AmbassadorCommission] customer ambassador lookup result", {
+    ambassadorId: customerAmbassador?._id,
+    isAmbassador: customerAmbassador?.isAmbassador,
+    ambassadorStatus: customerAmbassador?.ambassadorStatus,
+    commissionRate: customerAmbassador?.commissionRate,
+  });
 
-        await creditAmbassador({
-          ambassador: customerAmbassador,
-          amount: commission,
-          booking,
-          service,
-          commissionSource: "customer_side",
-          commissionRate: customerAmbassador.commissionRate,
-          referredUser: customer._id,
-        });
-      } else {
-        console.log("[AmbassadorCommission] customer ambassador skipped", {
-          reason: "not_found_or_not_approved",
-          ambassadorId: customerAmbassadorId,
-        });
-      }
+  const isCustomerExclusiveAmbassador =
+    territoryAmbassador &&
+    String(customerAmbassador?._id) ===
+      String(territoryAmbassador?._id);
+
+  if (
+    customerAmbassador &&
+    customerAmbassador.isAmbassador &&
+    customerAmbassador.ambassadorStatus === "approved"
+  ) {
+
+    // Exclusive Ambassador ko direct commission nahi dena
+    if (isCustomerExclusiveAmbassador) {
+
+      console.log(
+        "[AmbassadorCommission] customer direct commission skipped because ambassador is exclusive territory ambassador."
+      );
+
     } else {
-      console.log("[AmbassadorCommission] no customer referral", {
-        customerId: customer?._id,
+
+      // Existing Direct Commission Logic
+      const commission = Number(
+        (
+          serviceAmount *
+          (customerAmbassador.commissionRate / 100)
+        ).toFixed(2),
+      );
+
+      await creditAmbassador({
+        ambassador: customerAmbassador,
+        amount: commission,
+        booking,
+        service,
+        commissionSource: "customer_side",
+        commissionRate: customerAmbassador.commissionRate,
+        referredUser: customer._id,
       });
+
     }
 
+  } else {
+    console.log("[AmbassadorCommission] customer ambassador skipped", {
+      reason: "not_found_or_not_approved",
+      ambassadorId: customerAmbassadorId,
+    });
+  }
+
+} else {
+  console.log("[AmbassadorCommission] no customer referral", {
+    customerId: customer?._id,
+  });
+}
     // ==================================================
     // PROVIDER AMBASSADOR
     // ==================================================
 
-    const providerAmbassadorId =
-      provider?.referredBy || provider?.registeredByAmbassador;
+   const providerAmbassadorId =
+  provider?.referredBy || provider?.registeredByAmbassador;
 
-    const isSameDirectAmbassador =
-      customerAmbassadorId &&
-      providerAmbassadorId &&
-      String(customerAmbassadorId) === String(providerAmbassadorId);
+const isSameDirectAmbassador =
+  customerAmbassadorId &&
+  providerAmbassadorId &&
+  String(customerAmbassadorId) === String(providerAmbassadorId);
 
-    if (providerAmbassadorId) {
-      if (isSameDirectAmbassador) {
+if (providerAmbassadorId) {
+  if (isSameDirectAmbassador) {
+    console.log(
+      "[AmbassadorCommission] Same ambassador for customer & provider. Provider commission skipped.",
+    );
+  } else {
+    console.log("[AmbassadorCommission] provider referral found", {
+      providerId: provider._id,
+      ambassadorId: providerAmbassadorId,
+      source: provider?.referredBy
+        ? "referredBy"
+        : "registeredByAmbassador",
+    });
+
+    const providerAmbassador = await User.findById(providerAmbassadorId);
+
+    console.log(
+      "[AmbassadorCommission] provider ambassador lookup result",
+      {
+        ambassadorId: providerAmbassador?._id,
+        isAmbassador: providerAmbassador?.isAmbassador,
+        ambassadorStatus: providerAmbassador?.ambassadorStatus,
+        commissionRate: providerAmbassador?.commissionRate,
+      },
+    );
+
+    const isProviderExclusiveAmbassador =
+      territoryAmbassador &&
+      String(providerAmbassador?._id) ===
+        String(territoryAmbassador?._id);
+
+    if (
+      providerAmbassador &&
+      providerAmbassador.isAmbassador &&
+      providerAmbassador.ambassadorStatus === "approved"
+    ) {
+
+      // Exclusive Ambassador ko direct commission nahi dena
+      if (isProviderExclusiveAmbassador) {
+
         console.log(
-          "[AmbassadorCommission] Same ambassador for customer & provider. Provider commission skipped.",
+          "[AmbassadorCommission] provider direct commission skipped because ambassador is exclusive territory ambassador."
         );
+
       } else {
-        console.log("[AmbassadorCommission] provider referral found", {
-          providerId: provider._id,
-          ambassadorId: providerAmbassadorId,
-          source: provider?.referredBy
-            ? "referredBy"
-            : "registeredByAmbassador",
-        });
-
-        const providerAmbassador = await User.findById(providerAmbassadorId);
-
-        console.log(
-          "[AmbassadorCommission] provider ambassador lookup result",
-          {
-            ambassadorId: providerAmbassador?._id,
-            isAmbassador: providerAmbassador?.isAmbassador,
-            ambassadorStatus: providerAmbassador?.ambassadorStatus,
-            commissionRate: providerAmbassador?.commissionRate,
-          },
-        );
-
-        if (
-          providerAmbassador &&
-          providerAmbassador.isAmbassador &&
-          providerAmbassador.ambassadorStatus === "approved"
-        ) {
-          const commission = Number(
-            (serviceAmount * (providerAmbassador.commissionRate / 100)).toFixed(
-              2,
-            ),
-          );
-          console.log("[AmbassadorCommission] provider commission calculated", {
-            serviceAmount,
-            commissionRate: providerAmbassador.commissionRate,
-            commission,
-          });
-
-          await creditAmbassador({
-            ambassador: providerAmbassador,
-            amount: commission,
-            booking,
-            service,
-            commissionSource: "provider_side",
-            commissionRate: providerAmbassador.commissionRate,
-            referredUser: provider._id,
-          });
-        } else {
-          console.log("[AmbassadorCommission] provider ambassador skipped", {
-            reason: "not_found_or_not_approved",
-            ambassadorId: providerAmbassadorId,
-          });
-        }
-      }
-    } else {
-      console.log("[AmbassadorCommission] no provider referral", {
-        providerId: provider?._id,
-      });
-    }
-
-    // ==================================================
-    // TERRITORY AMBASSADOR
-    // ==================================================
-
-    if (service?.city) {
-      console.log("[AmbassadorCommission] checking territory", {
-        serviceId: service._id,
-        city: service.city,
-      });
-
-      const territory = await Territory.findOne({
-        city: {
-          $regex: new RegExp(`^${service.city.trim()}$`, "i"),
-        },
-        active: true,
-      }).populate("exclusiveAmbassador");
-
-      console.log("[AmbassadorCommission] territory lookup result", {
-        territoryId: territory?._id,
-        city: territory?.city,
-        exclusiveAmbassadorId: territory?.exclusiveAmbassador?._id,
-        isAmbassador: territory?.exclusiveAmbassador?.isAmbassador,
-        ambassadorStatus: territory?.exclusiveAmbassador?.ambassadorStatus,
-        commissionRate: territory?.exclusiveAmbassador?.commissionRate,
-      });
-
-      if (
-        territory &&
-        territory.exclusiveAmbassador &&
-        territory.exclusiveAmbassador.isAmbassador &&
-        territory.exclusiveAmbassador.ambassadorStatus === "approved"
-      ) {
-        const territoryAmbassador = territory.exclusiveAmbassador;
 
         const commission = Number(
-          (serviceAmount * (territoryAmbassador.commissionRate / 100)).toFixed(
-            2,
-          ),
+          (
+            serviceAmount *
+            (providerAmbassador.commissionRate / 100)
+          ).toFixed(2),
         );
+
         console.log(
-          "[AmbassadorCommission] territorial commission calculated",
+          "[AmbassadorCommission] provider commission calculated",
           {
             serviceAmount,
-            commissionRate: territoryAmbassador.commissionRate,
+            commissionRate: providerAmbassador.commissionRate,
             commission,
-            territoryId: territory._id,
           },
         );
+
         await creditAmbassador({
-          ambassador: territoryAmbassador,
+          ambassador: providerAmbassador,
           amount: commission,
           booking,
           service,
-          commissionSource: "territorial",
-          commissionRate: territoryAmbassador.commissionRate,
-          territory: territory._id,
+          commissionSource: "provider_side",
+          commissionRate: providerAmbassador.commissionRate,
+          referredUser: provider._id,
         });
-      } else {
-        console.log("[AmbassadorCommission] territorial ambassador skipped", {
-          reason: "territory_or_ambassador_not_found_or_not_approved",
-          city: service.city,
-        });
+
       }
+
     } else {
-      console.log(
-        "[AmbassadorCommission] no service city for territory check",
-        {
-          serviceId: service?._id,
-        },
-      );
+      console.log("[AmbassadorCommission] provider ambassador skipped", {
+        reason: "not_found_or_not_approved",
+        ambassadorId: providerAmbassadorId,
+      });
     }
-    booking.ambassadorCommissionProcessed = true;
-
-    booking.ambassadorCommissionProcessedAt = new Date();
-
-    await booking.save();
-
-    console.log("[AmbassadorCommission] processing completed", {
-      bookingId: booking?._id,
-      serviceAmount,
-    });
-
-    return true;
-  } catch (error) {
-    console.error("[AmbassadorCommission] process:error", error);
-
-    throw error;
   }
+} else {
+  console.log("[AmbassadorCommission] no provider referral", {
+    providerId: provider?._id,
+  });
+}
+    // ==================================================
+// TERRITORY AMBASSADOR
+// ==================================================
+
+if (territory) {
+  console.log("[AmbassadorCommission] territory lookup result", {
+    territoryId: territory?._id,
+    city: territory?.city,
+    exclusiveAmbassadorId: territoryAmbassador?._id,
+    isAmbassador: territoryAmbassador?.isAmbassador,
+    ambassadorStatus: territoryAmbassador?.ambassadorStatus,
+    commissionRate: territoryAmbassador?.commissionRate,
+  });
+
+  if (
+    territoryAmbassador &&
+    territoryAmbassador.isAmbassador &&
+    territoryAmbassador.ambassadorStatus === "approved"
+  ) {
+    const commission = Number(
+      (
+        serviceAmount *
+        (territoryAmbassador.commissionRate / 100)
+      ).toFixed(2),
+    );
+
+    console.log(
+      "[AmbassadorCommission] territorial commission calculated",
+      {
+        serviceAmount,
+        commissionRate: territoryAmbassador.commissionRate,
+        commission,
+        territoryId: territory._id,
+      },
+    );
+
+    await creditAmbassador({
+      ambassador: territoryAmbassador,
+      amount: commission,
+      booking,
+      service,
+      commissionSource: "territorial",
+      commissionRate: territoryAmbassador.commissionRate,
+      territory: territory._id,
+    });
+  } else {
+    console.log("[AmbassadorCommission] territorial ambassador skipped", {
+      reason: "territory_or_ambassador_not_found_or_not_approved",
+      city: territory?.city,
+    });
+  }
+} else {
+  console.log(
+    "[AmbassadorCommission] no territory found for service city",
+    {
+      serviceId: service?._id,
+      city: service?.city,
+    },
+  );
 }
 
+console.log("[AmbassadorCommission] marking booking as ambassadorCommissionProcessed", { bookingId: booking?._id });
+
+booking.ambassadorCommissionProcessed = true;
+
+booking.ambassadorCommissionProcessedAt = new Date();
+
+await booking.save();
+
+console.log("[AmbassadorCommission] processing completed", {
+  bookingId: booking?._id,
+  serviceAmount,
+});
+
+return true;
+  } catch (error) {
+  console.error("[AmbassadorCommission] process:error", error);
+
+  throw error;
+}
+
+}
 module.exports = {
   processAmbassadorCommission,
   creditAmbassador,

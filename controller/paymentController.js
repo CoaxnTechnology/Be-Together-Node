@@ -494,10 +494,42 @@ exports.bookService = async (req, res) => {
         capture_method: "manual",
 
         metadata: {
-          userId,
-          providerId,
-          serviceId,
-        },
+  event: "service_booking",
+
+  paymentId: payment?._id?.toString() || "",
+
+  bookingId: "",
+
+  serviceId: serviceDetails._id.toString(),
+  serviceTitle: serviceDetails.title,
+
+  customerId: customer._id.toString(),
+  customerName: customer.name,
+  customerEmail: customer.email,
+
+  providerId: provider._id.toString(),
+  providerName: provider.name,
+  providerEmail: provider.email,
+
+  currency,
+  serviceAmount: amount.toString(),
+
+  providerAmount: providerAmount.toString(),
+
+  providerCommission:
+    providerCommissionAmount.toString(),
+
+  customerCommission:
+    customerCommissionAmount.toString(),
+
+  useWallet: String(useWallet),
+
+  walletCoinsUsed:
+    walletCoinsUsed.toString(),
+
+  walletAmountUsed:
+    walletAmountUsed.toString(),
+},
       },
       success_url: `https://yourflutterapp.com/payment-success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `https://yourflutterapp.com/payment-cancel`,
@@ -1125,11 +1157,31 @@ exports.completeService = async (req, res) => {
         currency: payment.currency,
         destination: provider.stripeAccountId,
         transfer_group: booking._id.toString(),
-        metadata: {
-          paymentId: payment._id.toString(),
-          bookingId: booking._id.toString(),
-          providerId: provider._id.toString(),
-        },
+       metadata: {
+    event: "provider_payout",
+
+    paymentId: payment._id.toString(),
+
+    bookingId: booking._id.toString(),
+
+    serviceId: service._id.toString(),
+    serviceTitle: service.title,
+
+    customerId: customer._id.toString(),
+    customerName: customer.name,
+
+    providerId: provider._id.toString(),
+    providerName: provider.name,
+
+    transferReason:
+        "Service completed",
+
+    amount:
+        payment.providerAmount.toString(),
+
+    currency:
+        payment.currency,
+},
       });
 
       transferStatus = "completed";
@@ -1726,14 +1778,31 @@ exports.refundBooking = async (req, res) => {
       reason: stripeRefundReason,
 
       metadata: {
-        bookingId: booking._id.toString(),
-        paymentId: payment._id.toString(),
-        customerId: booking.customer._id.toString(),
-        providerId: booking.provider._id.toString(),
-        serviceId: booking.service._id.toString(),
-        cancelledBy,
-        cancellationReason: reason || "",
-      },
+    event: "booking_refund",
+
+    paymentId: payment._id.toString(),
+
+    bookingId: booking._id.toString(),
+
+    serviceId: booking.service._id.toString(),
+    serviceTitle: booking.service.title,
+
+    customerId: booking.customer._id.toString(),
+    customerName: booking.customer.name,
+
+    providerId: booking.provider._id.toString(),
+    providerName: booking.provider.name,
+
+    
+
+    cancellationReason: reason || "No Reason",
+
+    refundAmount:
+        refundAmount.toString(),
+
+    cancellationFee:
+        cancellationFee.toString(),
+},
     });
     console.log("🔁 Stripe Refund ID:", refund.id);
     if (refund.status !== "succeeded") {

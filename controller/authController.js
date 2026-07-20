@@ -85,11 +85,11 @@ const verifyAppleToken = async (identityToken) => {
 
 // ---------------- REGISTER ----------------
 exports.register = async (req, res) => {
-  logStep(1, "register() called");
+  console.log(1, "register() called");
 
   try {
-    logStep(2, "Request body received", req.body);
-    logStep(3, "File upload present", !!req.file);
+    console.log(2, "Request body received", req.body);
+    console.log(3, "File upload present", !!req.file);
 
     let {
       name,
@@ -108,7 +108,7 @@ exports.register = async (req, res) => {
       ambassadorCode,
     } = req.body;
 
-    logStep(4, "Extracted input fields", {
+    console.log(4, "Extracted input fields", {
       name,
       email,
       mobile,
@@ -146,20 +146,20 @@ exports.register = async (req, res) => {
     }
 
     if (!["manual", "google_auth", "apple_auth"].includes(register_type)) {
-      logErrorStep(5, "Invalid register_type");
+      console.log(5, "Invalid register_type");
       return res
         .status(400)
         .json({ IsSucces: false, message: "Invalid register_type." });
     }
 
     if (!email && register_type !== "apple_auth") {
-      logErrorStep(6, "Email missing");
+      console.log(6, "Email missing");
       return res
         .status(400)
         .json({ IsSucces: false, message: "Email required." });
     }
 
-    logStep(7, "Checking for an existing user");
+    console.log(7, "Checking for an existing user");
     let existing = null;
 
     // 🔥 FIRST check provider_uid (Apple main identity)
@@ -171,7 +171,7 @@ exports.register = async (req, res) => {
     if (!existing && email) {
       existing = await User.findOne({ email });
     }
-    logStep(8, "Existing user lookup result", !!existing);
+    console.log(8, "Existing user lookup result", !!existing);
 
     // GOOGLE: If already exists → login
     if (existing && register_type === "google_auth") {

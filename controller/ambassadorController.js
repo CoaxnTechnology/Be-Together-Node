@@ -1315,6 +1315,21 @@ exports.removeAmbassador = async (req, res) => {
     // user.ambassadorCode
 
     await user.save();
+      // =====================================
+// UPDATE LATEST AMBASSADOR APPLICATION
+// =====================================
+
+await AmbassadorApplication.findOneAndUpdate(
+  { user: user._id },
+  {
+    $set: {
+      status: "disabled",
+    },
+  },
+  {
+    sort: { created_at: -1 },
+  }
+);
 
     // =====================================
     // SEND NOTIFICATION

@@ -493,7 +493,7 @@ exports.bookService = async (req, res) => {
       payment_intent_data: {
         capture_method: "manual",
 
-       metadata: {
+   metadata: {
   event: "service_booking",
 
   // IDs
@@ -691,7 +691,7 @@ exports.updateBookingStatus = async (req, res) => {
     // =============================================
     // 📌 Metadata
     // =============================================
-    const { userId, providerId, serviceId } = paymentIntent.metadata;
+const { userId, providerId, serviceId } = paymentIntent.metadata;
     console.log("🔐 Metadata:", session.metadata);
     logPaymentFlow("updateBookingStatus:metadataRead", {
       userId,
@@ -708,10 +708,9 @@ exports.updateBookingStatus = async (req, res) => {
       serviceId,
     });
 
-    const customer = await User.findById(userId);
-    const provider = await User.findById(providerId);
-    const service = await Service.findById(serviceId);
-
+const customer = await User.findById(userId);
+const provider = await User.findById(providerId);
+const service = await Service.findById(serviceId);
     console.log("👤 Customer:", customer ? "FOUND" : "NOT FOUND");
     console.log("🧑‍🔧 Provider:", provider ? "FOUND" : "NOT FOUND");
     console.log("🛠 Service:", service ? "FOUND" : "NOT FOUND");
@@ -745,7 +744,7 @@ exports.updateBookingStatus = async (req, res) => {
       currency: payment.currency,
     });
     const booking = await Booking.create({
-      customer: userId,
+      customer: customerId,
       provider: providerId,
       service: serviceId,
       amount: payment.originalAmount,
@@ -2198,18 +2197,20 @@ exports.stripeWebhook = async (req, res) => {
           break;
         }
 
-        const { userId, providerId, serviceId } = paymentIntent.metadata;
-        const customer = await User.findById(userId);
-        const provider = await User.findById(providerId);
-        const service = await Service.findById(serviceId);
+const { customerId, providerId, serviceId } = paymentIntent.metadata;
 
+console.log("PaymentIntent Metadata:", paymentIntent.metadata);
+
+const customer = await User.findById(customerId);
+const provider = await User.findById(providerId);
+const service = await Service.findById(serviceId);
         if (!customer || !provider || !service) {
           console.log("Invalid customer/provider/service");
           break;
         }
 
         const booking = await Booking.create({
-          customer: userId,
+          customer: customerId,
           provider: providerId,
           service: serviceId,
 

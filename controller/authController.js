@@ -85,11 +85,11 @@ const verifyAppleToken = async (identityToken) => {
 
 // ---------------- REGISTER ----------------
 exports.register = async (req, res) => {
-  console.log("🔵 STEP 1: register() called");
+  logStep(1, "register() called");
 
   try {
-    console.log("🔵 STEP 2: Raw body:", req.body);
-    console.log("🔵 STEP 3: File present:", !!req.file);
+    logStep(2, "Request body received", req.body);
+    logStep(3, "File upload present", !!req.file);
 
     let {
       name,
@@ -108,7 +108,7 @@ exports.register = async (req, res) => {
       ambassadorCode,
     } = req.body;
 
-    console.log("🔵 STEP 4: Extracted fields:", {
+    logStep(4, "Extracted input fields", {
       name,
       email,
       mobile,
@@ -146,20 +146,20 @@ exports.register = async (req, res) => {
     }
 
     if (!["manual", "google_auth", "apple_auth"].includes(register_type)) {
-      console.log("❌ STEP 5: Invalid register_type");
+      logErrorStep(5, "Invalid register_type");
       return res
         .status(400)
         .json({ IsSucces: false, message: "Invalid register_type." });
     }
 
     if (!email && register_type !== "apple_auth") {
-      console.log("❌ STEP 6: Email missing");
+      logErrorStep(6, "Email missing");
       return res
         .status(400)
         .json({ IsSucces: false, message: "Email required." });
     }
 
-    console.log("🔵 STEP 7: Checking existing user…");
+    logStep(7, "Checking for an existing user");
     let existing = null;
 
     // 🔥 FIRST check provider_uid (Apple main identity)
@@ -171,7 +171,7 @@ exports.register = async (req, res) => {
     if (!existing && email) {
       existing = await User.findOne({ email });
     }
-    console.log("🔵 STEP 8: Existing user:", existing ? true : false);
+    logStep(8, "Existing user lookup result", !!existing);
 
     // GOOGLE: If already exists → login
     if (existing && register_type === "google_auth") {
@@ -302,6 +302,22 @@ exports.register = async (req, res) => {
     // =====================================
 
     if (existing && register_type === "manual") {
+       // Google/Apple user
+    if (existing.register_type !== "manual") {
+        return res.status(409).json({
+            IsSucces: false,
+            message:
+                `This email is already registered using ${existing.register_type}. Please login using that method.`,
+        });
+    }
+
+    // Completed account
+    if (existing.otp_verified) {
+        return res.status(409).json({
+            IsSucces: false,
+            message: "Email already registered.",
+        });
+    }
       console.log(
         "🔵 MANUAL RESUME: Existing user found for manual registration",
         {
@@ -310,14 +326,6 @@ exports.register = async (req, res) => {
           hasPassword: !!existing.hashed_password,
         },
       );
-
-      // Registration already completed
-      if (existing.otp_verified && existing.hashed_password) {
-        return res.status(409).json({
-          IsSucces: false,
-          message: "Email already registered.",
-        });
-      }
 
       // Password required
       if (!password) {
@@ -337,10 +345,10 @@ exports.register = async (req, res) => {
 
       existing.otp_code = otpObj.otp;
       existing.otp_expiry = otpObj.expiry;
-      existing.otp_verified = false;
+     // existing.otp_verified = false;
 
       // Optional
-      existing.lastResendAt = new Date();
+     // existing.lastResendAt = new Date();
 
       await existing.save();
 
@@ -609,7 +617,6 @@ exports.register = async (req, res) => {
     return res.status(500).json({ IsSucces: false, message: "Server error" });
   }
 };
-
 // ---------------- VERIFY OTP (REGISTER) ----------------
 exports.verifyOtpRegister = async (req, res) => {
   try {

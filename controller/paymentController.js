@@ -493,42 +493,35 @@ exports.bookService = async (req, res) => {
       payment_intent_data: {
         capture_method: "manual",
 
-        metadata: {
+       metadata: {
   event: "service_booking",
 
-  paymentId: payment?._id?.toString() || "",
-
-  bookingId: "",
-
-  serviceId: serviceDetails._id.toString(),
-  serviceTitle: serviceDetails.title,
-
+  // IDs
   customerId: customer._id.toString(),
-  customerName: customer.name,
-  customerEmail: customer.email,
-
   providerId: provider._id.toString(),
-  providerName: provider.name,
-  providerEmail: provider.email,
+  serviceId: serviceDetails._id.toString(),
 
+  // Names
+  customerName: customer.name || "",
+  providerName: provider.name || "",
+  serviceTitle: serviceDetails.title || "",
+
+  // Emails
+  customerEmail: customer.email || "",
+  providerEmail: provider.email || "",
+
+  // Amounts
   currency,
   serviceAmount: amount.toString(),
-
   providerAmount: providerAmount.toString(),
+  providerCommission: providerCommissionAmount.toString(),
+  customerCommission: customerCommissionAmount.toString(),
+  totalPaidByCustomer: customerPayable.toString(),
 
-  providerCommission:
-    providerCommissionAmount.toString(),
-
-  customerCommission:
-    customerCommissionAmount.toString(),
-
+  // Wallet
   useWallet: String(useWallet),
-
-  walletCoinsUsed:
-    walletCoinsUsed.toString(),
-
-  walletAmountUsed:
-    walletAmountUsed.toString(),
+  walletCoinsUsed: walletCoinsUsed.toString(),
+  walletAmountUsed: walletAmountUsed.toString(),
 },
       },
       success_url: `https://yourflutterapp.com/payment-success?session_id={CHECKOUT_SESSION_ID}`,

@@ -158,6 +158,12 @@ app.get("/api/community-guidelines", (req, res) => {
     path.join(__dirname, "templates", "community-guidelines.html")
   );
 });
+app.get("/api/trust-safety", (req, res) => {
+  res.sendFile(
+    path.join(__dirname, "templates", "Trust & Safety Policy.html")
+  );
+});
+
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 app.use(express.static(path.join(__dirname, "public")));
 

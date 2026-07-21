@@ -149,7 +149,7 @@ app.get("/api/disclaimer", (req, res) => {
     path.join(
       __dirname,
       "templates",
-      "disclaimer_and_limitation_of_liability.html",
+      "disclaimer-and-limitation-of-liability.html",
     ),
   );
 });

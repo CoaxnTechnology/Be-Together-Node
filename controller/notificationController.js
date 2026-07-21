@@ -4,7 +4,7 @@ const admin = require("../utils/firebase"); // ✅ use initialized admin
 const User = require("../model/User");
 const Service = require("../model/Service");
 const Category = require("../model/Category");
-
+const BASE_URL = process.env.BASE_URL;
 const notifiedMap = {}; // To avoid duplicate notifications
 
 // Helper: distance calculation
@@ -827,6 +827,145 @@ async function notifyOnServicePromoted(service) {
     console.error("❌ Error in notifyOnServicePromoted:", err.message);
   }
 }
+async function sendAmbassadorApprovedNotification(user) {
+  try {
+    if (!user.fcmToken?.length) {
+      console.log("⚠️ User has no FCM token");
+      return;
+    }
+
+    await admin.messaging().sendEachForMulticast({
+      tokens: user.fcmToken,
+      notification: {
+        title: "🎉 Ambassador Approved",
+        body: "Congratulations! You have been approved as an Ambassador.",
+      },
+      data: {
+        type: "ambassador_approved",
+        isAmbassador: "true",
+        ambassadorStatus: "approved",
+        userId: user._id.toString(),
+      },
+    });
+
+    console.log("✅ Ambassador approval notification sent");
+  } catch (err) {
+    console.error("❌ Ambassador notification error:", err.message);
+  }
+}
+async function sendAmbassadorRemovedNotification(user) {
+  try {
+    if (!user?.fcmToken?.length) {
+      console.log("⚠️ User has no FCM tokens");
+      return;
+    }
+
+    await admin.messaging().sendEachForMulticast({
+      tokens: user.fcmToken,
+      notification: {
+        title: "⚠️ Ambassador Access Removed",
+        body: "Your Ambassador access has been removed by admin.",
+      },
+      data: {
+        type: "ambassador_removed",
+        isAmbassador: "false",
+        ambassadorStatus: "disabled",
+        userId: user._id.toString(),
+      },
+    });
+
+    console.log(`✅ Ambassador removal notification sent to ${user.name}`);
+  } catch (err) {
+    console.error("❌ sendAmbassadorRemovedNotification:", err.message);
+  }
+}
+async function sendAmbassadorRejectedNotification(user, reason) {
+  try {
+    if (!user?.fcmToken?.length) {
+      console.log("⚠️ User has no FCM tokens");
+      return;
+    }
+
+    await admin.messaging().sendEachForMulticast({
+      tokens: user.fcmToken,
+
+      notification: {
+        title: "❌ Ambassador Application Rejected",
+        body:
+          reason || "Your ambassador application has been rejected by admin.",
+      },
+
+      data: {
+        type: "ambassador_rejected",
+        ambassadorStatus: "rejected",
+        userId: user._id.toString(),
+        rejectionReason:
+          reason || "Your ambassador application has been rejected.",
+      },
+    });
+
+    console.log(`✅ Ambassador rejection notification sent to ${user.name}`);
+  } catch (err) {
+    console.error("❌ sendAmbassadorRejectedNotification:", err.message);
+  }
+}
+async function sendExclusiveAmbassadorInvitationNotification(
+  invitedUser,
+  ambassador,
+) {
+  try {
+    console.log("[sendExclusiveAmbassadorInvitationNotification] Starting", {
+      invitedUserId: invitedUser?._id?.toString(),
+      invitedUserName: invitedUser?.name,
+      ambassadorId: ambassador?._id?.toString(),
+      ambassadorName: ambassador?.name,
+      fcmTokens: invitedUser?.fcmToken || [],
+    });
+
+    if (!invitedUser?.fcmToken?.length) {
+      console.log("⚠️ Invited user has no FCM tokens");
+      return;
+    }
+
+    const payload = {
+      tokens: invitedUser.fcmToken,
+      notification: {
+        title: "🎉 Ambassador Invitation",
+        body: `${ambassador.name} has invited you to become a BeTogether Ambassador. Review and accept the Ambassador Agreement to continue.`,
+      },
+      data: {
+        type: "exclusive_ambassador_invitation",
+        pageType: "WebView",
+        agreementUrl: `${process.env.BASE_URL}/api/ambassador-terms`,
+        ambassadorId: ambassador._id.toString(),
+        ambassadorName: ambassador.name,
+        userId: invitedUser._id.toString(),
+      },
+    };
+
+    console.log(
+      "[sendExclusiveAmbassadorInvitationNotification] Sending payload",
+      payload,
+    );
+
+    const response = await admin.messaging().sendEachForMulticast(payload);
+
+    console.log("[sendExclusiveAmbassadorInvitationNotification] Result", {
+      successCount: response.successCount,
+      failureCount: response.failureCount,
+      responses: response.responses,
+    });
+
+    console.log(
+      `✅ Exclusive Ambassador invitation notification sent to ${invitedUser.name}`,
+    );
+  } catch (err) {
+    console.error(
+      "❌ sendExclusiveAmbassadorInvitationNotification:",
+      err.message,
+    );
+  }
+}
 // async function notifyServiceOwnerOnSubscription({ buyerId, serviceId }) {
 //   try {
 //     const buyer = await User.findById(buyerId);
@@ -880,5 +1019,16 @@ module.exports.notifyOnServiceDeleteApproved = notifyOnServiceDeleteApproved;
 module.exports.sendServiceForceDeletedNotification =
   sendServiceForceDeletedNotification;
 module.exports.notifyOnServicePromoted = notifyOnServicePromoted;
+module.exports.sendAmbassadorApprovedNotification =
+  sendAmbassadorApprovedNotification;
+module.exports.sendAmbassadorRemovedNotification =
+  sendAmbassadorRemovedNotification;
+module.exports.sendAmbassadorRejectedNotification =
+  sendAmbassadorRejectedNotification;
+module.exports.sendExclusiveAmbassadorInvitationNotification =
+  sendExclusiveAmbassadorInvitationNotification;
+//module.exports.notifyOnServiceSubscription = notifyServiceOwnerOnSubscription;
+//module.exports.notifyServiceOwnerOnSubscription = notifyServiceOwnerOnSubscription;
+//notificaton addd
 //module.exports.notifyServiceOwnerOnSubscription = notifyServiceOwnerOnSubscription;
 //notificaton addd

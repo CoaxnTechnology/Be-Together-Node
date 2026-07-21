@@ -16,6 +16,9 @@ const Booking = require("../model/Booking");
 const { sendServiceDeleteApprovedEmail } = require("../utils/email");
 const Payment = require("../model/Payment");
 const { notifyOnServiceDeleteApproved } = require("./notificationController");
+const Wallet = require("../model/Wallet");
+
+const WalletHistory = require("../model/WalletHistory");
 // Helper to parse JSON safely
 function tryParse(val) {
   if (val === undefined || val === null) return val;
@@ -126,7 +129,7 @@ exports.createService = async (req, res) => {
       }
     }
     const location = tryParse(body.location);
-    // const city = body.city;
+    const city = body.city;
     const isDoorstepService =
       body.isDoorstepService === true || body.isDoorstepService === "true";
     const service_type = body.service_type || "one_time";
@@ -157,10 +160,10 @@ exports.createService = async (req, res) => {
       return res
         .status(400)
         .json({ isSuccess: false, message: "Location is required" });
-    // if (!city)
-    //   return res
-    //     .status(400)
-    //     .json({ isSuccess: false, message: "City is required" });
+    if (!city)
+      return res
+        .status(400)
+        .json({ isSuccess: false, message: "City is required" });
     if (!categoryId)
       return res
         .status(400)
@@ -266,6 +269,7 @@ exports.createService = async (req, res) => {
       image: serviceImage,
 
       location_name: location.name,
+      city,
       isDoorstepService,
       location: {
         type: "Point",
@@ -290,7 +294,50 @@ exports.createService = async (req, res) => {
     // ===============================
     const createdService = new Service(servicePayload);
     await createdService.save();
+    // =====================================
+    // REFERRAL SERVICE BONUS
+    // =====================================
 
+    if (user.referredBy) {
+      const totalServices = await Service.countDocuments({
+        owner: user._id,
+      });
+
+      // first service only
+      if (totalServices === 1) {
+        const referralOwner = await User.findById(user.referredBy);
+
+        if (referralOwner) {
+          const wallet = await Wallet.findOne({
+            user: referralOwner._id,
+          });
+
+          wallet.points += 30;
+
+          wallet.totalEarned += 30;
+
+          await wallet.save();
+
+          await WalletHistory.create({
+            user: referralOwner._id,
+
+            points: 30,
+
+            type: "referral_service_bonus",
+
+            referralUser: user._id,
+
+            service: createdService._id,
+
+            note: "Referral service create bonus",
+          });
+
+          referralOwner.totalReferralEarned += 30;
+
+          await referralOwner.save();
+        }
+      }
+    }
     user.services.push(createdService._id);
     await user.save();
 
@@ -1126,7 +1173,9 @@ exports.updateService = async (req, res) => {
     }
 
     // City
-    //if (body.city) updatePayload.city = body.city;
+    if (body.city) updatePayload.city = body.city;
+    console.log(req.body.city);
+    console.log(req.body);
 
     // Category (optional now)
     if (body.categoryId) {
@@ -1204,6 +1253,9 @@ exports.updateService = async (req, res) => {
       { $set: updatePayload },
       { new: true },
     );
+    console.log("✅ Service updated successfully:", updatedService);
+    console.log(updatedService.city);
+
     console.log("Sending notification...");
     const notifiedCount =
       await notificationController.notifyOnUpdate(updatedService);

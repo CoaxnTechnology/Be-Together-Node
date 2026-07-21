@@ -43,6 +43,15 @@ const bookingSchema = new mongoose.Schema(
       ],
       default: "pending_payment",
     },
+    ambassadorCommissionProcessed: {
+      type: Boolean,
+      default: false,
+    },
+
+    ambassadorCommissionProcessedAt: {
+      type: Date,
+      default: null,
+    },
     paymentId: { type: mongoose.Schema.Types.ObjectId, ref: "Payment" },
     otp: { type: Number },
     otpExpiry: { type: Date },
@@ -51,6 +60,7 @@ const bookingSchema = new mongoose.Schema(
     cancellationFee: Number,
     refundAmount: Number,
   },
+
   { timestamps: true },
 );
 module.exports = mongoose.model("Booking", bookingSchema);

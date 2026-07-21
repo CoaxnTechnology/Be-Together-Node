@@ -20,8 +20,7 @@ async function sendOtpEmail(to, otp) {
 
 // ---------------- RESET PASSWORD EMAIL ----------------
 async function sendResetEmail(to, token) {
-  const FRONTEND_RESET_URL =
-    process.env.FRONTEND_RESET_URL
+  const FRONTEND_RESET_URL = process.env.FRONTEND_RESET_URL;
 
   const templatePath = path.join(__dirname, "../templates/email_reset.html");
   let html = fs.readFileSync(templatePath, "utf-8");
@@ -499,6 +498,31 @@ async function sendServiceForceDeletedEmail(
     console.log("📧 ===============================");
   }
 }
+async function sendCredentialsEmail(to, email, token) {
+  const FRONTEND_RESET_URL = process.env.FRONTEND_RESET_URL;
+
+  const templatePath = path.join(
+    __dirname,
+    "../templates/ambassador_credentials.html",
+  );
+
+  let html = fs.readFileSync(templatePath, "utf-8");
+
+  const resetLink =
+    `${FRONTEND_RESET_URL}` +
+    `?email=${encodeURIComponent(email)}` +
+    `&token=${encodeURIComponent(token)}`;
+
+  html = html.replace("{{email}}", email);
+  html = html.replace("{{reset_link}}", resetLink);
+  html = html.replace("{{date}}", new Date().toLocaleDateString());
+
+  await sendEmail({
+    to,
+    subject: "Welcome to BeTogether",
+    html,
+  });
+}
 
 module.exports = {
   sendOtpEmail,
@@ -509,4 +533,5 @@ module.exports = {
   sendServiceCancelledEmail,
   sendServiceDeleteApprovedEmail,
   sendServiceForceDeletedEmail,
+  sendCredentialsEmail,
 };

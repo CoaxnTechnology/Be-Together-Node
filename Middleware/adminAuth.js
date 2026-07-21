@@ -5,7 +5,7 @@ async function adminAuth(req, res, next) {
   //console.log("🔐 adminAuth MIDDLEWARE START");
 
   try {
-   // console.log("📥 Incoming headers:", req.headers);
+    // console.log("📥 Incoming headers:", req.headers);
 
     const authHeader = req.headers.authorization;
     //console.log("🔑 Authorization header:", authHeader);
@@ -31,8 +31,6 @@ async function adminAuth(req, res, next) {
         message: "Invalid or expired token",
       });
     }
-
-    
 
     //console.log("🆔 Decoded admin ID:", decoded.id);
 

@@ -485,18 +485,36 @@ exports.getUserById = async (req, res) => {
 exports.getAllUsers = async (req, res) => {
   try {
     const users = await User.find({
-      $or: [
-        { is_fake: false },
-        { is_fake: { $exists: false } }, // include users without the field
-      ],
-    }).select("name email mobile city age profile_image created_at status");
-    res.json({ success: true, data: users });
-    //  console.log("Get all users called",users);
+      $or: [{ is_fake: false }, { is_fake: { $exists: false } }],
+    }).select(`
+      name
+      email
+      mobile
+      city
+      age
+      profile_image
+      created_at
+      status
+      is_active
+      isAmbassador
+      ambassadorStatus
+      ambassadorType
+      commissionRate
+      ambassadorCode
+    `);
+
+    return res.json({
+      success: true,
+      data: users,
+    });
   } catch (err) {
     console.error("Error fetching users:", err);
-    res
-      .status(500)
-      .json({ success: false, message: "Server error", error: err.message });
+
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: err.message,
+    });
   }
 };
 //--------------------ALL SERVICES----------

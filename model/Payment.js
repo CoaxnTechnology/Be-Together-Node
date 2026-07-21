@@ -36,17 +36,134 @@ const paymentSchema = new mongoose.Schema(
 
     appCommission: { type: Number, default: 0 },
     providerAmount: { type: Number, default: 0 },
-    currency: { type: String, default: null },
+    providerCommissionPercentage: {
+      type: Number,
+      default: 0,
+    },
 
+    customerCommissionPercentage: {
+      type: Number,
+      default: 0,
+    },
+
+    providerCommissionAmount: {
+      type: Number,
+      default: 0,
+    },
+
+    customerCommissionAmount: {
+      type: Number,
+      default: 0,
+    },
+
+    totalPaidByCustomer: {
+      type: Number,
+      default: 0,
+    },
+    walletCoinsUsed: {
+      type: Number,
+      default: 0,
+    },
+
+    walletAmountUsed: {
+      type: Number,
+      default: 0,
+    },
+
+    customerPaidAmount: {
+      type: Number,
+      default: 0,
+    },
+
+    platformContribution: {
+      type: Number,
+      default: 0,
+    },
+
+    originalAmount: {
+      type: Number,
+      default: 0,
+    },
+
+    usedWallet: {
+      type: Boolean,
+      default: false,
+    },
+    currency: { type: String, default: null },
+    transferStatus: {
+      type: String,
+      enum: ["pending", "completed", "failed", "reversed"],
+      default: null,
+    },
+    transferAmount: {
+      type: Number,
+      default: 0,
+    },
+    transferDestination: {
+      type: String,
+      default: null,
+    },
+    transferCreatedAt: {
+      type: Date,
+      default: null,
+    },
+
+    transferId: {
+      type: String,
+      default: null,
+    },
     status: {
       type: String,
       enum: ["pending", "completed", "held", "failed", "refunded", "canceled"],
       default: "pending",
     },
+    captureStatus: {
+      type: String,
+      default: null,
+    },
+    capturedAt: {
+      type: Date,
+      default: null,
+    },
     refundId: { type: String, default: null },
     refundReason: { type: String, default: null },
     completedAt: { type: Date, default: null },
     refundedAt: { type: Date, default: null },
+    refundStatus: {
+      type: String,
+      default: null,
+    },
+
+    refundedAmount: {
+      type: Number,
+      default: 0,
+    },
+
+    cancellationFee: {
+      type: Number,
+      default: 0,
+    },
+    heldAt: {
+      type: Date,
+      default: null,
+    },
+    platformRetainedAmount: {
+      type: Number,
+      default: 0,
+    },
+
+    transferFailureReason: {
+      type: String,
+      default: null,
+    },
+    failureReason: {
+      type: String,
+      default: null,
+    },
+    transferFailureCode: {
+      type: String,
+      default: null,
+    },
   },
   { timestamps: true },
 );

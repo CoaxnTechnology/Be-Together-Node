@@ -61,6 +61,31 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    // GDPR Compliance
+    termsAccepted: {
+      type: Boolean,
+      default: false,
+    },
+
+    privacyAccepted: {
+      type: Boolean,
+      default: false,
+    },
+
+    accepted_at: {
+      type: Date,
+      default: null,
+    },
+
+    ip_address: {
+      type: String,
+      default: null,
+    },
+
+    cookie_preferences: {
+      type: String,
+      default: null,
+    },
     provider_uid: {
       type: String,
       default: null,
@@ -79,6 +104,139 @@ const userSchema = new mongoose.Schema(
       recordedAt: { type: Date, default: null },
       updatedAt: { type: Date, default: Date.now },
     },
+    isAmbassador: {
+      type: Boolean,
+      default: false,
+    },
+
+    ambassadorStatus: {
+      type: String,
+      enum: ["pending", "approved", "rejected", "disabled"],
+      default: null,
+    },
+
+    ambassadorApprovedAt: {
+      type: Date,
+      default: null,
+    },
+
+    ambassadorApprovedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Admin",
+      default: null,
+    },
+    registeredByAmbassador: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+
+    registeredByAmbassadorAt: {
+      type: Date,
+      default: null,
+    },
+    // =====================================
+    // AMBASSADOR SYSTEM
+    // =====================================
+    registeredAfterAmbassadorApproval: {
+      type: Boolean,
+      default: false,
+    },
+    ambassadorType: {
+      type: String,
+      enum: ["standard", "exclusive"],
+      default: null,
+    },
+
+    commissionRate: {
+      type: Number,
+      default: 3, // 3% initially
+    },
+
+    completedPaidServices: {
+      type: Number,
+      default: 0,
+    },
+
+    parentAmbassador: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+
+    territory: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Territory",
+      default: null,
+    },
+    ambassadorAgreementAccepted: {
+      type: Boolean,
+      default: false,
+    },
+
+    ambassadorAgreementAcceptedAt: {
+      type: Date,
+      default: null,
+    },
+    ambassadorReviewDueAt: {
+      type: Date,
+      default: null,
+    },
+    ambassadorCode: {
+      type: String,
+      unique: true,
+      sparse: true,
+    },
+    referralCode: {
+      type: String,
+      unique: true,
+      sparse: true,
+    },
+
+    referredBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    ambassadorUserAgreementAccepted: {
+      type: Boolean,
+      default: false,
+    },
+
+    ambassadorUserAgreementAcceptedAt: {
+      type: Date,
+      default: null,
+    },
+
+    totalReferralUsers: {
+      type: Number,
+      default: 0,
+    },
+
+    totalReferralEarned: {
+      type: Number,
+      default: 0,
+    },
+    referralRewardProcessed: {
+      type: Boolean,
+      default: false,
+    },
+    pendingAmbassadorInvitation: {
+      invitedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+        default: null,
+      },
+      invitedAt: {
+        type: Date,
+        default: null,
+      },
+      invitationStatus: {
+        type: String,
+        enum: ["pending", "accepted", "declined"],
+        default: "pending",
+      },
+    },
     stripeCustomerId: { type: String, default: null },
     stripeAccountId: { type: String, default: null },
     performancePoints: { type: Number, default: 0 },
@@ -93,6 +251,15 @@ const userSchema = new mongoose.Schema(
     created_at: { type: Date, default: Date.now },
     updated_at: { type: Date, default: Date.now },
     last_login: { type: Date, default: null },
+    failedLoginAttempts: {
+      type: Number,
+      default: 0,
+    },
+
+    passwordChangedByUser: {
+      type: Boolean,
+      default: false,
+    },
   },
   {
     toJSON: {
@@ -109,6 +276,7 @@ userSchema.pre("save", function (next) {
   this.updated_at = Date.now();
   next();
 });
+
 userSchema.methods.addFcmToken = async function (token) {
   if (!token || typeof token !== "string") return;
 
@@ -122,5 +290,8 @@ userSchema.methods.addFcmToken = async function (token) {
 };
 // ✅ Add geospatial index here
 userSchema.index({ "lastLocation.coords": "2dsphere" });
-
+// referral lookup index
+userSchema.index({
+  referredBy: 1,
+});
 module.exports = mongoose.model("User", userSchema);

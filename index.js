@@ -144,6 +144,15 @@ app.get("/api/ambassador-terms", (req, res) => {
     path.join(__dirname, "templates", "ambassador-terms-condition.html"),
   );
 });
+app.get("/api/disclaimer", (req, res) => {
+  res.sendFile(
+    path.join(
+      __dirname,
+      "templates",
+      "disclaimer_and_limitation_of_liability.html",
+    ),
+  );
+});
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 app.use(express.static(path.join(__dirname, "public")));
 

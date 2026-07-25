@@ -1315,7 +1315,7 @@ exports.removeAmbassador = async (req, res) => {
     // user.ambassadorCode
 
     await user.save();
-      // =====================================
+    // =====================================
 // UPDATE LATEST AMBASSADOR APPLICATION
 // =====================================
 
@@ -3322,6 +3322,28 @@ exports.acceptAmbassadorAgreement = async (req, res) => {
       message: err.message,
     });
   }
+};
+exports.declineAmbassadorInvitation = async (req, res) => {
+    const user = await User.findById(req.user.id);
+
+    if (
+        !user.pendingAmbassadorInvitation?.invitedBy ||
+        user.pendingAmbassadorInvitation.invitationStatus !== "pending"
+    ) {
+        return res.status(400).json({
+            isSuccess: false,
+            message: "No pending invitation found."
+        });
+    }
+
+    user.pendingAmbassadorInvitation.invitationStatus = "declined";
+
+    await user.save();
+
+    return res.json({
+        isSuccess: true,
+        message: "Invitation declined successfully."
+    });
 };
 exports.handlePayoutCreated = async (payout) => {
   try {

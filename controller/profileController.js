@@ -384,6 +384,13 @@ exports.getUserProfileByEmail = async (req, res) => {
         offeredTags: user.offeredTags || [],
         currency: user.currency || "EUR",
       ambassadorStatus: user.ambassadorStatus || "pending",
+       ambassadorInvitationStatus:
+    user.pendingAmbassadorInvitation?.invitationStatus || null,
+    ambassadorInvitedBy:
+    user.pendingAmbassadorInvitation?.invitedBy || null,
+
+  ambassadorInvitedAt:
+    user.pendingAmbassadorInvitation?.invitedAt || null,
         ambassadorRejectionReason:
           ambassadorApplication?.rejectionReason || null,
         ambassadorCooldownUntil:
@@ -401,6 +408,7 @@ exports.getUserProfileByEmail = async (req, res) => {
     });
   }
 };
+
 exports.getProfileById = async (req, res) => {
   try {
     const { userId } = req.body;

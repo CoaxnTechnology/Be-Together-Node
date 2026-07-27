@@ -769,51 +769,64 @@ exports.makeAmbassador = async (req, res) => {
     // remark: directly convert a user into an ambassador with optional territory or parent assignment
     const { ambassadorType, territoryId, parentAmbassadorId, commissionRate } =
       req.body;
+
     const user = await User.findById(userId);
+    console.log("[makeAmbassador] User lookup complete", { userId, userExists: !!user });
 
     if (!user) {
+      console.log("[makeAmbassador] User not found", { userId });
       return res.status(404).json({
         isSuccess: false,
         message: "User not found",
       });
     }
+
     if (user.isAmbassador) {
+      console.log("[makeAmbassador] User already ambassador", { userId });
       return res.status(400).json({
         isSuccess: false,
         message: "User is already ambassador",
       });
     }
+
     // =====================================
-// CHECK EXISTING PENDING INVITATION
-// =====================================
+    // CHECK EXISTING PENDING INVITATION
+    // =====================================
 
-const existingPendingAssignment =
-  await PendingAmbassadorAssignment.findOne({
-    user: user._id,
-    status: "pending",
-  });
+    const existingPendingAssignment = await PendingAmbassadorAssignment.findOne({
+      user: user._id,
+      status: "pending",
+    });
+    console.log("[makeAmbassador] Pending assignment check complete", {
+      userId,
+      pendingAssignmentExists: !!existingPendingAssignment,
+    });
 
-if (existingPendingAssignment) {
-  return res.status(400).json({
-    isSuccess: false,
-    message:
-      "User already has a pending ambassador invitation.",
-  });
-}
-    if (
-      !ambassadorType ||
-      !["standard", "exclusive"].includes(ambassadorType)
-    ) {
+    if (existingPendingAssignment) {
+      console.log("[makeAmbassador] Existing pending assignment found", {
+        userId,
+        pendingAssignmentId: existingPendingAssignment._id,
+      });
+      return res.status(400).json({
+        isSuccess: false,
+        message: "User already has a pending ambassador invitation.",
+      });
+    }
+
+    if (!ambassadorType || !["standard", "exclusive"].includes(ambassadorType)) {
+      console.log("[makeAmbassador] Invalid ambassadorType", {
+        ambassadorType,
+      });
       return res.status(400).json({
         isSuccess: false,
         message: "ambassadorType must be standard or exclusive",
       });
     }
-    if (
-      commissionRate === undefined ||
-      commissionRate === null ||
-      isNaN(commissionRate)
-    ) {
+
+    if (commissionRate === undefined || commissionRate === null || isNaN(commissionRate)) {
+      console.log("[makeAmbassador] Missing or invalid commissionRate", {
+        commissionRate,
+      });
       return res.status(400).json({
         isSuccess: false,
         message: "commissionRate is required",
@@ -821,6 +834,9 @@ if (existingPendingAssignment) {
     }
 
     if (Number(commissionRate) < 0 || Number(commissionRate) > 12) {
+      console.log("[makeAmbassador] commissionRate out of range", {
+        commissionRate,
+      });
       return res.status(400).json({
         isSuccess: false,
         message: "commissionRate must be between 0 and 12",
@@ -828,126 +844,167 @@ if (existingPendingAssignment) {
     }
 
     const parsedCommissionRate = Number(commissionRate);
+    console.log("[makeAmbassador] commissionRate parsed", {
+      commissionRate,
+      parsedCommissionRate,
+    });
 
     // =====================================
-// STANDARD AMBASSADOR VALIDATION
-// =====================================
+    // STANDARD AMBASSADOR VALIDATION
+    // =====================================
 
-if (ambassadorType === "standard") {
-  if (!parentAmbassadorId) {
-    return res.status(400).json({
-      isSuccess: false,
-      message: "parentAmbassadorId is required for standard ambassador",
-    });
-  }
+    let parent = null;
+    if (ambassadorType === "standard") {
+      console.log("[makeAmbassador] Standard ambassador validation start", {
+        parentAmbassadorId,
+      });
 
-  const parent = await User.findById(parentAmbassadorId).populate("territory");
+      if (!parentAmbassadorId) {
+        console.log("[makeAmbassador] parentAmbassadorId missing for standard ambassador");
+        return res.status(400).json({
+          isSuccess: false,
+          message: "parentAmbassadorId is required for standard ambassador",
+        });
+      }
 
-  if (!parent || !parent.isAmbassador) {
-    return res.status(400).json({
-      isSuccess: false,
-      message: "Parent ambassador not found",
-    });
-  }
+      parent = await User.findById(parentAmbassadorId).populate("territory");
+      console.log("[makeAmbassador] Parent ambassador lookup complete", {
+        parentAmbassadorId,
+        parentExists: !!parent,
+      });
 
-  if (parent.ambassadorType !== "exclusive") {
-    return res.status(400).json({
-      isSuccess: false,
-      message: "Parent ambassador must be an exclusive ambassador",
-    });
-  }
-}
+      if (!parent || !parent.isAmbassador) {
+        console.log("[makeAmbassador] Parent ambassador not found or inactive", {
+          parentAmbassadorId,
+          parentExists: !!parent,
+          parentIsAmbassador: parent?.isAmbassador,
+        });
+        return res.status(400).json({
+          isSuccess: false,
+          message: "Parent ambassador not found",
+        });
+      }
+
+      if (parent.ambassadorType !== "exclusive") {
+        console.log("[makeAmbassador] Parent ambassador not exclusive", {
+          parentAmbassadorId,
+          parentAmbassadorType: parent.ambassadorType,
+        });
+        return res.status(400).json({
+          isSuccess: false,
+          message: "Parent ambassador must be an exclusive ambassador",
+        });
+      }
+    }
 
     // =====================================
-// EXCLUSIVE AMBASSADOR VALIDATION
-// =====================================
+    // EXCLUSIVE AMBASSADOR VALIDATION
+    // =====================================
 
-if (ambassadorType === "exclusive") {
-  if (!territoryId) {
-    return res.status(400).json({
-      isSuccess: false,
-      message: "territoryId is required for exclusive ambassador",
+    let territory = null;
+    if (ambassadorType === "exclusive") {
+      console.log("[makeAmbassador] Exclusive ambassador validation start", {
+        territoryId,
+      });
+
+      if (!territoryId) {
+        console.log("[makeAmbassador] territoryId missing for exclusive ambassador");
+        return res.status(400).json({
+          isSuccess: false,
+          message: "territoryId is required for exclusive ambassador",
+        });
+      }
+
+      territory = await Territory.findById(territoryId);
+      console.log("[makeAmbassador] Territory lookup complete", {
+        territoryId,
+        territoryExists: !!territory,
+      });
+
+      if (!territory) {
+        console.log("[makeAmbassador] Territory not found", { territoryId });
+        return res.status(404).json({
+          isSuccess: false,
+          message: "Territory not found",
+        });
+      }
+
+      if (
+        territory.exclusiveAmbassador &&
+        territory.exclusiveAmbassador.toString() !== user._id.toString()
+      ) {
+        console.log("[makeAmbassador] Territory already assigned", {
+          territoryId,
+          existingAmbassador: territory.exclusiveAmbassador.toString(),
+          currentUser: user._id.toString(),
+        });
+        return res.status(400).json({
+          isSuccess: false,
+          message: "Territory already assigned to another ambassador",
+        });
+      }
+    }
+
+    // =====================================
+    // CREATE PENDING ASSIGNMENT
+    // =====================================
+
+    const pendingAssignment = await PendingAmbassadorAssignment.create({
+      user: user._id,
+      ambassadorType,
+      commissionRate: parsedCommissionRate,
+      parentAmbassador: ambassadorType === "standard" ? parentAmbassadorId : null,
+      territory: ambassadorType === "exclusive" ? territoryId : parent?.territory?._id || null,
+      createdByAdmin: req.admin.id,
     });
-  }
-
-  const territory = await Territory.findById(territoryId);
-
-  if (!territory) {
-    return res.status(404).json({
-      isSuccess: false,
-      message: "Territory not found",
+    console.log("[makeAmbassador] Pending assignment created", {
+      pendingAssignmentId: pendingAssignment._id,
+      ambassadorType,
+      parsedCommissionRate,
+      parentAmbassadorId,
+      territoryId,
     });
-  }
-
-  if (
-    territory.exclusiveAmbassador &&
-    territory.exclusiveAmbassador.toString() !== user._id.toString()
-  ) {
-    return res.status(400).json({
-      isSuccess: false,
-      message: "Territory already assigned to another ambassador",
-    });
-  }
-}
-// =====================================
-// CREATE PENDING ASSIGNMENT
-// =====================================
-
-const pendingAssignment =
-  await PendingAmbassadorAssignment.create({
-    user: user._id,
-
-    ambassadorType,
-
-    commissionRate: parsedCommissionRate,
-
-    parentAmbassador:
-      ambassadorType === "standard"
-        ? parentAmbassadorId
-        : null,
-
-   territory:
-  ambassadorType === "exclusive"
-    ? territoryId
-    : parent.territory?._id || null,
-
-    createdByAdmin: req.admin.id,
-  });
-    // await user.save();
 
     // =====================================
     // NOTIFICATION
     // =====================================
 
-try {
-  await sendAmbassadorInvitationNotification(user);
-} catch (notificationError) {
-  console.error(
-    "Failed to send ambassador invitation notification:",
-    notificationError,
-  );
-}
-return res.json({
-  isSuccess: true,
-  message:
-    "Ambassador invitation sent successfully. User must accept the agreement before becoming an ambassador.",
+    try {
+      await sendAmbassadorInvitationNotification(user);
+      console.log("[makeAmbassador] Invitation notification sent", {
+        userId: user._id,
+      });
+    } catch (notificationError) {
+      console.error(
+        "[makeAmbassador] Failed to send ambassador invitation notification",
+        notificationError,
+      );
+    }
 
-  pendingAssignment: {
-    user: user._id,
-    ambassadorType,
-    commissionRate: parsedCommissionRate,
-    parentAmbassador:
-      ambassadorType === "standard"
-        ? parentAmbassadorId
-        : null,
-    territory:
-      ambassadorType === "exclusive"
-        ? territoryId
-        : null,
-    status: "pending",
-  },
-});
+    console.log("[makeAmbassador] Returning success response", {
+      userId: user._id,
+      pendingAssignmentId: pendingAssignment._id,
+    });
+    return res.json({
+      isSuccess: true,
+      message:
+        "Ambassador invitation sent successfully. User must accept the agreement before becoming an ambassador.",
+      pendingAssignment: {
+        user: user._id,
+        ambassadorType,
+        commissionRate: parsedCommissionRate,
+        parentAmbassador: ambassadorType === "standard" ? parentAmbassadorId : null,
+        territory: ambassadorType === "exclusive" ? territoryId : null,
+        status: "pending",
+      },
+    });
   } catch (err) {
+    console.error("[makeAmbassador] Error", {
+      error: err.message,
+      stack: err.stack,
+      params: req.params,
+      body: req.body,
+    });
     return res.status(500).json({
       isSuccess: false,
       message: err.message,

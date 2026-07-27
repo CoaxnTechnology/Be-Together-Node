@@ -37,7 +37,7 @@ router.get("/dashboard", auth, dashboard);
 router.get("/wallet-history", auth, walletHistory);
 router.get("/wallet", auth, getMyWallet);
 router.put(
-  "/ambassador/decline-invitation",
+  "/decline-invitation",
   auth,
   declineAmbassadorInvitation,
 );

@@ -351,6 +351,10 @@ exports.getUserProfileByEmail = async (req, res) => {
     })
       .sort({ created_at: -1 })
       .select("status rejectionReason rejectionCooldownUntil");
+      const pendingAssignment = await PendingAmbassadorAssignment.findOne({
+  user: user._id,
+  status: "pending",
+}).select("status ambassadorType commissionRate createdByAdmin");
 
     // ✅ Compute avg rating for each service
     const servicesWithRating = user.services.map((service) => {
@@ -366,39 +370,82 @@ exports.getUserProfileByEmail = async (req, res) => {
       };
     });
 
-    res.json({
-      isSuccess: true,
-      message: "Profile fetched successfully",
-      data: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        // ✅ ADD THIS LINE
-        mobile: user.mobile || "",
-        profile_image: getFullImageUrl(user.profile_image),
-        bio: user.bio || "",
-        city: user.city || "",
-        languages: user.languages || [],
-        age: user.age || null,
-        interests: user.interests || [],
-        offeredTags: user.offeredTags || [],
-        currency: user.currency || "EUR",
-      ambassadorStatus: user.ambassadorStatus || "pending",
-       ambassadorInvitationStatus:
-    user.pendingAmbassadorInvitation?.invitationStatus || null,
-    ambassadorInvitedBy:
-    user.pendingAmbassadorInvitation?.invitedBy || null,
+    return res.json({
+  isSuccess: true,
+  message: "Profile fetched successfully",
+  data: {
+    id: user._id,
+    name: user.name,
+    email: user.email,
+    mobile: user.mobile || "",
 
-  ambassadorInvitedAt:
-    user.pendingAmbassadorInvitation?.invitedAt || null,
-        ambassadorRejectionReason:
-          ambassadorApplication?.rejectionReason || null,
-        ambassadorCooldownUntil:
-          ambassadorApplication?.rejectionCooldownUntil || null,
-        servicesCount: servicesWithRating.length, // total services
-        services: servicesWithRating, // full service details with avg rating
-      },
-    });
+    profile_image: getFullImageUrl(user.profile_image),
+
+    bio: user.bio || "",
+    city: user.city || "",
+    languages: user.languages || [],
+    age: user.age || null,
+    interests: user.interests || [],
+    offeredTags: user.offeredTags || [],
+    currency: user.currency || "EUR",
+
+    // =====================================
+    // Ambassador Status
+    // =====================================
+
+    ambassadorStatus: user.isAmbassador
+      ? user.ambassadorStatus
+      : pendingAssignment
+        ? pendingAssignment.status
+        : user.pendingAmbassadorInvitation?.invitationStatus === "pending"
+          ? "pending"
+          : ambassadorApplication?.status || null,
+
+    // =====================================
+    // Exclusive Invitation
+    // =====================================
+
+    ambassadorInvitationStatus:
+      user.pendingAmbassadorInvitation?.invitationStatus || null,
+
+    ambassadorInvitedBy:
+      user.pendingAmbassadorInvitation?.invitedBy || null,
+
+    ambassadorInvitedAt:
+      user.pendingAmbassadorInvitation?.invitedAt || null,
+
+    // =====================================
+    // Admin Pending Assignment
+    // =====================================
+
+    pendingAmbassadorAssignment: pendingAssignment
+      ? {
+          status: pendingAssignment.status,
+          ambassadorType: pendingAssignment.ambassadorType,
+          commissionRate: pendingAssignment.commissionRate,
+          createdByAdmin: pendingAssignment.createdByAdmin,
+        }
+      : null,
+
+    // =====================================
+    // Self Application
+    // =====================================
+
+    ambassadorRejectionReason:
+      ambassadorApplication?.rejectionReason || null,
+
+    ambassadorCooldownUntil:
+      ambassadorApplication?.rejectionCooldownUntil || null,
+
+    // =====================================
+    // Services
+    // =====================================
+
+    servicesCount: servicesWithRating.length,
+
+    services: servicesWithRating,
+  },
+});
   } catch (err) {
     console.error("getUserProfileByEmail error:", err);
     res.status(500).json({
@@ -408,7 +455,6 @@ exports.getUserProfileByEmail = async (req, res) => {
     });
   }
 };
-
 exports.getProfileById = async (req, res) => {
   try {
     const { userId } = req.body;

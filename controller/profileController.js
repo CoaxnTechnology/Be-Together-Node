@@ -8,6 +8,7 @@ const path = require("path");
 const fs = require("fs");
 const BASE_URL = process.env.BASE_URL;
 const AmbassadorApplication = require("../model/AmbassadorApplication");
+const PendingAmbassadorAssignment = require("../model/PendingAmbassadorAssignment");
 // ---------------- UPDATE Profile ----------------
 exports.editProfile = async (req, res) => {
   try {

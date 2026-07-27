@@ -47,6 +47,7 @@ function generateTempPassword(length = 8) {
 exports.applyForAmbassador = async (req, res) => {
   try {
     console.log("[applyForAmbassador] Starting ambassador application request");
+    // remark: handle ambassador application submission from self or exclusive requests
 
     const userId = req.user.id;
     console.log("[applyForAmbassador] userId:", userId);
@@ -344,6 +345,8 @@ exports.applyForAmbassador = async (req, res) => {
 
 exports.getMyApplication = async (req, res) => {
   try {
+    console.log("[getMyApplication] Start", { userId: req.user?.id });
+    // remark: retrieve the current user's ambassador application details
     const userId = req.user.id;
 
     const user = await User.findById(userId);
@@ -420,7 +423,11 @@ exports.getMyApplication = async (req, res) => {
 exports.approveApplication = async (req, res) => {
   try {
     const { applicationId } = req.params;
-
+    console.log("[approveApplication] Start", {
+      applicationId,
+      body: req.body,
+    });
+    // remark: approve an ambassador application and update user/wallet/territory state
     const { ambassadorType, territoryId, parentAmbassadorId, commissionRate } =
       req.body;
     const application = await AmbassadorApplication.findById(
@@ -684,7 +691,11 @@ exports.rejectApplication = async (req, res) => {
   try {
     const { applicationId } = req.params;
     const { reason } = req.body;
-
+    console.log("[rejectApplication] Start", {
+      applicationId,
+      reason,
+    });
+    // remark: reject ambassador application and notify user
     const application = await AmbassadorApplication.findById(applicationId);
 
     if (!application) {
@@ -749,10 +760,13 @@ exports.rejectApplication = async (req, res) => {
 // =====================================
 
 exports.makeAmbassador = async (req, res) => {
-  console.log("====make ambssador called")
   try {
     const { userId } = req.params;
-
+    console.log("[makeAmbassador] Start", {
+      userId,
+      body: req.body,
+    });
+    // remark: directly convert a user into an ambassador with optional territory or parent assignment
     const { ambassadorType, territoryId, parentAmbassadorId, commissionRate } =
       req.body;
     const user = await User.findById(userId);
@@ -946,6 +960,8 @@ return res.json({
 
 exports.getAllApplications = async (req, res) => {
   try {
+    console.log("[getAllApplications] Start");
+    // remark: return all ambassador applications formatted for admin overview
     const applications = await AmbassadorApplication.find()
       .populate({
         path: "user",
@@ -1114,6 +1130,8 @@ exports.getAllApplications = async (req, res) => {
 
 exports.getAllAmbassadors = async (req, res) => {
   try {
+    console.log("[getAllAmbassadors] Start");
+    // remark: list all ambassadors with wallet and parent/sub counts
     const ambassadors = await User.find({
       isAmbassador: true,
     })
@@ -1247,7 +1265,8 @@ exports.getAllAmbassadors = async (req, res) => {
 exports.removeAmbassador = async (req, res) => {
   try {
     const { userId } = req.params;
-
+    console.log("[removeAmbassador] Start", { userId });
+    // remark: remove ambassador status and cleanup associated territory and application state
     const user = await User.findById(userId);
 
     if (!user) {
@@ -1377,7 +1396,11 @@ await AmbassadorApplication.findOneAndUpdate(
 exports.createUserByAmbassador = async (req, res) => {
   try {
     const ambassadorId = req.user.id;
-
+    console.log("[createUserByAmbassador] Start", {
+      ambassadorId,
+      body: req.body,
+    });
+    // remark: ambassador creates a new user account by sending OTP for verification
     const { name, email, mobile } = req.body;
 
     if (!name || !email || !mobile) {
@@ -1521,7 +1544,11 @@ exports.createUserByAmbassador = async (req, res) => {
 exports.verifyUserOtpByAmbassador = async (req, res) => {
   try {
     const ambassadorId = req.user.id;
-
+    console.log("[verifyUserOtpByAmbassador] Start", {
+      ambassadorId,
+      body: req.body,
+    });
+    // remark: ambassador verifies OTP for a created user and sends password setup email
     const { userId, otp } = req.body;
 
     if (!userId || !otp) {
@@ -1635,7 +1662,8 @@ exports.verifyUserOtpByAmbassador = async (req, res) => {
 exports.getMyWallet = async (req, res) => {
   try {
     const ambassadorId = req.user.id;
-
+    console.log("[getMyWallet] Start", { ambassadorId });
+    // remark: retrieve current ambassador wallet and latest history entries
     let wallet = await AmbassadorWallet.findOne({
       ambassador: ambassadorId,
     });
@@ -1676,8 +1704,12 @@ exports.getMyWallet = async (req, res) => {
 exports.assignParentAmbassador = async (req, res) => {
   try {
     const { userId } = req.params;
-
     const { parentAmbassadorId } = req.body;
+    console.log("[assignParentAmbassador] Start", {
+      userId,
+      parentAmbassadorId,
+    });
+    // remark: assign a parent ambassador to a standard ambassador
 
     const user = await User.findById(userId);
 
@@ -1735,7 +1767,8 @@ await user.save();
 exports.dashboard = async (req, res) => {
   try {
     const ambassadorId = req.user.id;
-
+    console.log("[dashboard] Start", { ambassadorId });
+    // remark: build ambassador dashboard metrics and summary
     const ambassadorObjectId = new mongoose.Types.ObjectId(ambassadorId);
 
     const ambassador = await User.findById(ambassadorId).populate("territory");
@@ -2112,6 +2145,11 @@ exports.dashboard = async (req, res) => {
 exports.walletHistory = async (req, res) => {
   try {
     const ambassadorId = req.user.id;
+    console.log("[walletHistory] Start", {
+      ambassadorId,
+      query: req.query,
+    });
+    // remark: return paginated ambassador wallet transaction history
 
     const page = Number(req.query.page || 1);
     const limit = Number(req.query.limit || 20);
@@ -2172,6 +2210,8 @@ exports.walletHistory = async (req, res) => {
 exports.getAmbassadorById = async (req, res) => {
   try {
     const { id } = req.params;
+    console.log("[getAmbassadorById] Start", { id });
+    // remark: retrieve ambassador details by id
 
     const ambassador = await User.findById(id)
       .populate("territory")
@@ -2243,6 +2283,11 @@ exports.getAmbassadorById = async (req, res) => {
 exports.getAmbassadorWalletHistory = async (req, res) => {
   try {
     const ambassadorId = req.params.id;
+    console.log("[getAmbassadorWalletHistory] Start", {
+      ambassadorId,
+      query: req.query,
+    });
+    // remark: return paginated wallet history for a specified ambassador
 
     const page = Number(req.query.page || 1);
 
@@ -2289,6 +2334,8 @@ exports.getAmbassadorWalletHistory = async (req, res) => {
 exports.getAmbassadorAnalytics = async (req, res) => {
   try {
     const { id } = req.params;
+    console.log("[getAmbassadorAnalytics] Start", { id });
+    // remark: compute analytics for a specific ambassador
 
     const ambassadorObjectId = new mongoose.Types.ObjectId(id);
 
@@ -2577,6 +2624,8 @@ exports.getAmbassadorAnalytics = async (req, res) => {
   }
 };
 exports.withdrawAmount = async (req, res) => {
+  console.log("[withdrawAmount] Start", { body: req.body, userId: req.user?.id });
+  // remark: process a withdrawal request, create Stripe transfer/payout, and update wallet state
   const session = await mongoose.startSession();
 
   let withdrawalDoc = null;
@@ -3154,7 +3203,9 @@ exports.acceptAmbassadorAgreement = async (req, res) => {
   let session;
   try {
     const session = await mongoose.startSession();
-  session.startTransaction();
+    console.log("[acceptAmbassadorAgreement] Start", { userId: req.user?.id });
+    // remark: accept ambassador agreement and complete appropriate onboarding flow
+    session.startTransaction();
     console.log(
       "[acceptAmbassadorAgreement] Starting agreement acceptance flow",
     );
@@ -3497,6 +3548,8 @@ return res.status(200).json({
   }
 };
 exports.declineAmbassadorInvitation = async (req, res) => {
+    console.log("[declineAmbassadorInvitation] Start", { userId: req.user?.id });
+    // remark: decline a pending ambassador invitation
     const user = await User.findById(req.user.id);
 
     if (
@@ -3524,6 +3577,7 @@ exports.handlePayoutCreated = async (payout) => {
       payoutId: payout?.id,
       metadata: payout?.metadata,
     });
+    // remark: handle Stripe payout created webhook event and update withdrawal record
 
     const withdrawalId = payout.metadata?.withdrawalId;
 
@@ -3583,6 +3637,7 @@ exports.handlePayoutUpdated = async (payout) => {
       status: payout?.status,
       metadata: payout?.metadata,
     });
+    // remark: handle Stripe payout status updates and reflect them in withdrawal records
 
     const withdrawalId = payout.metadata?.withdrawalId;
 
@@ -3642,6 +3697,8 @@ exports.handlePayoutUpdated = async (payout) => {
 exports.handlePayoutPaid = async (payout) => {
   const session = await mongoose.startSession();
 
+  console.log("[handlePayoutPaid] Start", { payoutId: payout?.id });
+  // remark: finalize payout and update ambassador wallet history
   try {
     console.log("[handlePayoutPaid] Start", {
       payoutId: payout?.id,
@@ -3782,6 +3839,7 @@ exports.handlePayoutFailed = async (payout) => {
       status: payout?.status,
       metadata: payout?.metadata,
     });
+    // remark: handle failed Stripe payout and restore ambassador wallet/reservation state
     session.startTransaction();
 
     const withdrawalId = payout.metadata?.withdrawalId;

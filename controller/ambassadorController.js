@@ -9,6 +9,7 @@ const Territory = require("../model/Territory");
 const fs = require("fs");
 const crypto = require("crypto");
 const AmbassadorWithdrawal = require("../model/AmbassadorWithdrawal");
+const PendingAmbassadorAssignment = require("../model/PendingAmbassadorAssignment");
 const path = require("path");
 const mongoose = require("mongoose");
 const AmbassadorWallet = require("../model/AmbassadorWallet");
@@ -17,11 +18,16 @@ const {
   sendAmbassadorApprovedNotification,
   sendAmbassadorRemovedNotification,
   sendAmbassadorRejectedNotification,
+  sendAmbassadorInvitationNotification,
 } = require("./notificationController");
 const AmbassadorWalletHistory = require("../model/AmbassadorWalletHistory");
 const {
   sendExclusiveAmbassadorInvitationNotification,
 } = require("./notificationController");
+
+
+
+
 function generateTempPassword(length = 8) {
   const chars =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -761,6 +767,23 @@ exports.makeAmbassador = async (req, res) => {
         message: "User is already ambassador",
       });
     }
+    // =====================================
+// CHECK EXISTING PENDING INVITATION
+// =====================================
+
+const existingPendingAssignment =
+  await PendingAmbassadorAssignment.findOne({
+    user: user._id,
+    status: "pending",
+  });
+
+if (existingPendingAssignment) {
+  return res.status(400).json({
+    isSuccess: false,
+    message:
+      "User already has a pending ambassador invitation.",
+  });
+}
     if (
       !ambassadorType ||
       !["standard", "exclusive"].includes(ambassadorType)
@@ -788,143 +811,129 @@ exports.makeAmbassador = async (req, res) => {
       });
     }
 
-    // =====================================
-    // BASIC AMBASSADOR DATA
-    // =====================================
-
-    user.isAmbassador = true;
-
-    user.ambassadorStatus = "approved";
-
-    user.ambassadorApprovedAt = new Date();
-
-    user.ambassadorApprovedBy = req.admin.id;
-
-    user.ambassadorReviewDueAt = new Date(
-      Date.now() + 180 * 24 * 60 * 60 * 1000,
-    );
-
-    user.ambassadorType = ambassadorType;
-
-    user.commissionRate = Number(commissionRate);
-
-    user.completedPaidServices = 0;
-
-    if (!user.ambassadorCode) {
-      user.ambassadorCode = `AMB${Date.now()}`;
-    }
-
+    const parsedCommissionRate = Number(commissionRate);
     // =====================================
     // STANDARD AMBASSADOR
     // =====================================
 
-    if (ambassadorType === "standard") {
-      user.territory = null;
-      if (parentAmbassadorId) {
-        const parent = await User.findById(parentAmbassadorId);
-
-        if (!parent || !parent.isAmbassador) {
-          return res.status(400).json({
-            isSuccess: false,
-            message: "Parent ambassador not found",
-          });
-        }
-        if (parent.ambassadorType !== "exclusive") {
-          return res.status(400).json({
-            isSuccess: false,
-            message: "Parent ambassador must be an exclusive ambassador",
-          });
-        }
-        user.parentAmbassador = parentAmbassadorId;
-      }
-    }
-
     // =====================================
-    // EXCLUSIVE AMBASSADOR
-    // =====================================
+// STANDARD AMBASSADOR VALIDATION
+// =====================================
 
-    if (ambassadorType === "exclusive") {
-      user.parentAmbassador = null;
-      if (!territoryId) {
-        return res.status(400).json({
-          isSuccess: false,
-          message: "territoryId is required for exclusive ambassador",
-        });
-      }
-
-      const territory = await Territory.findById(territoryId);
-
-      if (!territory) {
-        return res.status(404).json({
-          isSuccess: false,
-          message: "Territory not found",
-        });
-      }
-
-      // territory already assigned?
-      if (
-        territory.exclusiveAmbassador &&
-        territory.exclusiveAmbassador.toString() !== user._id.toString()
-      ) {
-        return res.status(400).json({
-          isSuccess: false,
-          message: "Territory already assigned to another ambassador",
-        });
-      }
-
-      territory.exclusiveAmbassador = user._id;
-
-      territory.assignedAt = new Date();
-
-      territory.reviewDueAt = new Date(Date.now() + 180 * 24 * 60 * 60 * 1000);
-
-      await territory.save();
-
-      user.territory = territory._id;
-    }
-
-    await user.save();
-
-    // =====================================
-    // CREATE WALLET
-    // =====================================
-
-    const existingWallet = await AmbassadorWallet.findOne({
-      ambassador: user._id,
+if (ambassadorType === "standard") {
+  if (!parentAmbassadorId) {
+    return res.status(400).json({
+      isSuccess: false,
+      message: "parentAmbassadorId is required for standard ambassador",
     });
+  }
 
-    if (!existingWallet) {
-      await AmbassadorWallet.create({
-        ambassador: user._id,
-      });
-    }
+  const parent = await User.findById(parentAmbassadorId);
+
+  if (!parent || !parent.isAmbassador) {
+    return res.status(400).json({
+      isSuccess: false,
+      message: "Parent ambassador not found",
+    });
+  }
+
+  if (parent.ambassadorType !== "exclusive") {
+    return res.status(400).json({
+      isSuccess: false,
+      message: "Parent ambassador must be an exclusive ambassador",
+    });
+  }
+}
+
+    // =====================================
+// EXCLUSIVE AMBASSADOR VALIDATION
+// =====================================
+
+if (ambassadorType === "exclusive") {
+  if (!territoryId) {
+    return res.status(400).json({
+      isSuccess: false,
+      message: "territoryId is required for exclusive ambassador",
+    });
+  }
+
+  const territory = await Territory.findById(territoryId);
+
+  if (!territory) {
+    return res.status(404).json({
+      isSuccess: false,
+      message: "Territory not found",
+    });
+  }
+
+  if (
+    territory.exclusiveAmbassador &&
+    territory.exclusiveAmbassador.toString() !== user._id.toString()
+  ) {
+    return res.status(400).json({
+      isSuccess: false,
+      message: "Territory already assigned to another ambassador",
+    });
+  }
+}
+// =====================================
+// CREATE PENDING ASSIGNMENT
+// =====================================
+
+const pendingAssignment =
+  await PendingAmbassadorAssignment.create({
+    user: user._id,
+
+    ambassadorType,
+
+    commissionRate: parsedCommissionRate,
+
+    parentAmbassador:
+      ambassadorType === "standard"
+        ? parentAmbassadorId
+        : null,
+
+    territory:
+      ambassadorType === "exclusive"
+        ? territoryId
+        : null,
+
+    createdByAdmin: req.admin.id,
+  });
+    // await user.save();
 
     // =====================================
     // NOTIFICATION
     // =====================================
 
-    await sendAmbassadorApprovedNotification(user);
+try {
+  await sendAmbassadorInvitationNotification(user);
+} catch (notificationError) {
+  console.error(
+    "Failed to send ambassador invitation notification:",
+    notificationError,
+  );
+}
+return res.json({
+  isSuccess: true,
+  message:
+    "Ambassador invitation sent successfully. User must accept the agreement before becoming an ambassador.",
 
-    return res.json({
-      isSuccess: true,
-      message: "User promoted to Ambassador successfully",
-      user: {
-        _id: user._id,
-        name: user.name,
-
-        ambassadorType: user.ambassadorType,
-
-        commissionRate: user.commissionRate,
-
-        ambassadorCode: user.ambassadorCode,
-
-        ambassadorStatus: user.ambassadorStatus,
-
-        territory: user.territory,
-
-        parentAmbassador: user.parentAmbassador,
-      },
-    });
+  pendingAssignment: {
+    user: user._id,
+    ambassadorType,
+    commissionRate: parsedCommissionRate,
+    parentAmbassador:
+      ambassadorType === "standard"
+        ? parentAmbassadorId
+        : null,
+    territory:
+      ambassadorType === "exclusive"
+        ? territoryId
+        : null,
+    status: "pending",
+  },
+});
   } catch (err) {
     return res.status(500).json({
       isSuccess: false,
@@ -3136,12 +3145,15 @@ exports.withdrawAmount = async (req, res) => {
   }
 };
 exports.acceptAmbassadorAgreement = async (req, res) => {
+  let session;
   try {
+    const session = await mongoose.startSession();
+  session.startTransaction();
     console.log(
       "[acceptAmbassadorAgreement] Starting agreement acceptance flow",
     );
 
-    const user = await User.findById(req.user.id);
+    const user = await User.findById(req.user.id).session(session);
     console.log("[acceptAmbassadorAgreement] Loaded user", {
       userId: user?._id,
       registeredByAmbassador: user?.registeredByAmbassador,
@@ -3190,8 +3202,9 @@ exports.acceptAmbassadorAgreement = async (req, res) => {
       user.termsAccepted = true;
       user.privacyAccepted = true;
 
-      await user.save();
-
+      await user.save({ session });
+await session.commitTransaction();
+await session.endSession();
       console.log(
         "[acceptAmbassadorAgreement] Agreement accepted successfully for ambassador-created user",
       );
@@ -3250,7 +3263,7 @@ exports.acceptAmbassadorAgreement = async (req, res) => {
         status: {
           $in: ["pending", "approved"],
         },
-      });
+      }).session(session);;
 
       console.log("[acceptAmbassadorAgreement] Existing application check", {
         found: !!existingApplication,
@@ -3262,7 +3275,7 @@ exports.acceptAmbassadorAgreement = async (req, res) => {
         console.log(
           "[acceptAmbassadorAgreement] Creating exclusive ambassador application",
         );
-        application = await AmbassadorApplication.create({
+        application = await AmbassadorApplication.create([{
           applicationType: "exclusive_request",
 
           user: user._id,
@@ -3282,16 +3295,17 @@ exports.acceptAmbassadorAgreement = async (req, res) => {
           acceptedAgreement: true,
 
           status: "pending",
-        });
+        }], { session });
       }
 
       user.pendingAmbassadorInvitation.invitationStatus = "accepted";
 
-      await user.save();
+    await user.save({ session });
       console.log(
         "[acceptAmbassadorAgreement] Invitation status updated to accepted",
       );
-
+await session.commitTransaction();
+await session.endSession();
       return res.status(200).json({
         isSuccess: true,
         message:
@@ -3308,6 +3322,149 @@ exports.acceptAmbassadorAgreement = async (req, res) => {
         application,
       });
     }
+    // =====================================
+// FLOW 3 : Pending Ambassador Assignment
+// =====================================
+
+const pendingAssignment =
+  await PendingAmbassadorAssignment.findOne({
+    user: user._id,
+    status: "pending",
+  }).session(session);
+if (pendingAssignment) {
+  console.log(
+    "[acceptAmbassadorAgreement] Flow 3: Pending ambassador assignment found",
+  );
+
+  // Remaining implementation will be added step by step
+  if (
+  user.ambassadorAgreementAccepted &&
+  user.termsAccepted &&
+  user.privacyAccepted
+) {
+  return res.status(400).json({
+    isSuccess: false,
+    message: "Agreement already accepted.",
+  });
+}
+user.ambassadorAgreementAccepted = true;
+user.ambassadorAgreementAcceptedAt = new Date();
+
+user.termsAccepted = true;
+user.privacyAccepted = true;
+// =====================================
+// ACTIVATE AMBASSADOR
+// =====================================
+
+user.isAmbassador = true;
+
+user.ambassadorStatus = "approved";
+
+user.ambassadorApprovedAt = new Date();
+
+user.ambassadorApprovedBy = pendingAssignment.createdByAdmin;
+
+user.ambassadorReviewDueAt = new Date(
+  Date.now() + 180 * 24 * 60 * 60 * 1000,
+);
+
+user.ambassadorType = pendingAssignment.ambassadorType;
+
+user.commissionRate = pendingAssignment.commissionRate;
+
+user.completedPaidServices = 0;
+
+user.parentAmbassador = pendingAssignment.parentAmbassador || null;
+
+user.territory = pendingAssignment.territory || null;
+if (!user.ambassadorCode) {
+  user.ambassadorCode = `AMB${Date.now()}`;
+}
+// =====================================
+// ASSIGN TERRITORY (EXCLUSIVE ONLY)
+// =====================================
+
+if (
+  pendingAssignment.ambassadorType === "exclusive" &&
+  pendingAssignment.territory
+) {
+const territory = await Territory.findById(
+  pendingAssignment.territory,
+).session(session);
+  if (!territory) {
+    return res.status(404).json({
+      isSuccess: false,
+      message: "Assigned territory not found.",
+    });
+  }
+
+  if (
+    territory.exclusiveAmbassador &&
+    territory.exclusiveAmbassador.toString() !== user._id.toString()
+  ) {
+    return res.status(400).json({
+      isSuccess: false,
+      message: "Territory is already assigned to another ambassador.",
+    });
+  }
+
+  territory.exclusiveAmbassador = user._id;
+  territory.assignedAt = new Date();
+  territory.reviewDueAt = user.ambassadorReviewDueAt;
+
+  await territory.save({ session });
+}
+await user.save({ session });
+// =====================================
+// CREATE AMBASSADOR WALLET
+// =====================================
+
+const existingWallet = await AmbassadorWallet.findOne({
+  ambassador: user._id,
+}).session(session);
+
+if (!existingWallet) {
+  await AmbassadorWallet.create(
+  [
+    {
+      ambassador: user._id,
+    },
+  ],
+  { session }
+);
+}
+// =====================================
+// SEND APPROVED NOTIFICATION
+// =====================================
+
+try {
+  await sendAmbassadorApprovedNotification(user);
+} catch (notificationError) {
+  console.error(
+    `Failed to send ambassador approved notification for user ${user._id}:`,
+    notificationError,
+  );
+}
+// =====================================
+// DELETE PENDING ASSIGNMENT
+// =====================================
+
+await pendingAssignment.deleteOne({ session });
+await session.commitTransaction();
+await session.endSession();
+return res.status(200).json({
+  isSuccess: true,
+  message: "Congratulations! You are now a BeTogether Ambassador.",
+
+  ambassador: {
+    id: user._id,
+    ambassadorType: user.ambassadorType,
+    commissionRate: user.commissionRate,
+    ambassadorCode: user.ambassadorCode,
+    ambassadorStatus: user.ambassadorStatus,
+  },
+});
+}
 
     console.log("[acceptAmbassadorAgreement] No ambassador invitation found");
     return res.status(400).json({

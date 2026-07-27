@@ -749,6 +749,7 @@ exports.rejectApplication = async (req, res) => {
 // =====================================
 
 exports.makeAmbassador = async (req, res) => {
+  console.log("====make ambssador called")
   try {
     const { userId } = req.params;
 

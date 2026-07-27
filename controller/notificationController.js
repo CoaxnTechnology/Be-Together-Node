@@ -990,7 +990,7 @@ async function sendAmbassadorInvitationNotification(invitedUser) {
       },
 
       data: {
-        type: "ambassador_invitation",
+        type: "exclusive_ambassador_invitation",
         pageType: "WebView",
         agreementUrl: agreementUrl,
         userId: invitedUser._id.toString(),

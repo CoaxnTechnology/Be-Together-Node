@@ -430,15 +430,7 @@ exports.approveApplication = async (req, res) => {
     // remark: approve an ambassador application and update user/wallet/territory state
     const { ambassadorType, territoryId, parentAmbassadorId, commissionRate } =
       req.body;
-    const application = await AmbassadorApplication.findById(
-      applicationId,
-    ).populate({
-      path: "requestedByExclusive",
-      select: "_id territory isAmbassador ambassadorStatus ambassadorType",
-      populate: {
-        path: "territory",
-      },
-    });
+    const application = await AmbassadorApplication.findById(applicationId);
     if (!application) {
       return res.status(404).json({
         isSuccess: false,
@@ -466,16 +458,7 @@ exports.approveApplication = async (req, res) => {
         message: "User is already ambassador",
       });
     }
-    // =====================================
-    // FORCE STANDARD FOR EXCLUSIVE REQUEST
-    // =====================================
-
-    let finalAmbassadorType = ambassadorType;
-
-    if (application.applicationType === "exclusive_request") {
-      finalAmbassadorType = "standard";
-    }
-
+let finalAmbassadorType = ambassadorType;
     if (!["standard", "exclusive"].includes(finalAmbassadorType)) {
       return res.status(400).json({
         isSuccess: false,
@@ -532,34 +515,13 @@ exports.approveApplication = async (req, res) => {
 
     if (finalAmbassadorType === "standard") {
       user.territory = null;
+          user.parentAmbassador = null;
       // =====================================
       // EXCLUSIVE REQUEST
       // =====================================
 
-      if (application.applicationType === "exclusive_request") {
-        const exclusive = application.requestedByExclusive;
-
-        if (!exclusive) {
-          return res.status(404).json({
-            isSuccess: false,
-            message: "Exclusive ambassador not found",
-          });
-        }
-        if (
-          !exclusive.isAmbassador ||
-          exclusive.ambassadorStatus !== "approved" ||
-          exclusive.ambassadorType !== "exclusive"
-        ) {
-          return res.status(400).json({
-            isSuccess: false,
-            message: "Exclusive ambassador is no longer active",
-          });
-        }
-
-        user.parentAmbassador = exclusive._id;
-
-        user.territory = exclusive.territory;
-      } else if (parentAmbassadorId) {
+      
+       if (parentAmbassadorId) {
 const parent = await User.findById(parentAmbassadorId)
   .populate("territory");
         if (!parent) {
@@ -3259,7 +3221,7 @@ exports.withdrawAmount = async (req, res) => {
 exports.acceptAmbassadorAgreement = async (req, res) => {
   let session;
   try {
-    const session = await mongoose.startSession();
+     session = await mongoose.startSession();
     console.log("[acceptAmbassadorAgreement] Start", { userId: req.user?.id });
     // remark: accept ambassador agreement and complete appropriate onboarding flow
     session.startTransaction();
@@ -3369,72 +3331,96 @@ await session.endSession();
 
       user.termsAccepted = true;
       user.privacyAccepted = true;
+const exclusive = await User.findById(
+  user.pendingAmbassadorInvitation.invitedBy
+)
+.populate("territory")
+.session(session);
 
-      // Prevent duplicate application
-      const existingApplication = await AmbassadorApplication.findOne({
-        user: user._id,
-        applicationType: "exclusive_request",
-        status: {
-          $in: ["pending", "approved"],
-        },
-      }).session(session);;
+if (!exclusive) {
+  return res.status(404).json({
+    isSuccess: false,
+    message: "Exclusive ambassador not found",
+  });
+}
 
-      console.log("[acceptAmbassadorAgreement] Existing application check", {
-        found: !!existingApplication,
-      });
+if (
+  !exclusive.isAmbassador ||
+  exclusive.ambassadorStatus !== "approved" ||
+  exclusive.ambassadorType !== "exclusive"
+) {
+  return res.status(400).json({
+    isSuccess: false,
+    message: "Exclusive ambassador is no longer active",
+  });
+}
 
-      let application = existingApplication;
+      // NEW CODE
 
-      if (!existingApplication) {
-        console.log(
-          "[acceptAmbassadorAgreement] Creating exclusive ambassador application",
-        );
-        application = await AmbassadorApplication.create([{
-          applicationType: "exclusive_request",
+user.isAmbassador = true;
 
-          user: user._id,
+user.ambassadorStatus = "approved";
 
-          requestedUser: user._id,
+user.ambassadorApprovedAt = new Date();
 
-          requestedByExclusive: user.pendingAmbassadorInvitation.invitedBy,
+user.ambassadorApprovedBy = null;
 
-          name: user.name,
+user.ambassadorReviewDueAt = new Date(
+  Date.now() + 180 * 24 * 60 * 60 * 1000
+);
 
-          email: user.email,
+user.ambassadorType = "standard";
 
-          phoneNumber: user.mobile || "",
+user.commissionRate = 3;
 
-          city: user.city || "",
+user.completedPaidServices = 0;
 
-          acceptedAgreement: true,
+user.parentAmbassador = exclusive._id;
 
-          status: "pending",
-        }], { session });
-      }
+user.territory = exclusive.territory
+  ? exclusive.territory._id
+  : null;
+
+if (!user.ambassadorCode) {
+  user.ambassadorCode = `AMB${Date.now()}`;
+}
 
       user.pendingAmbassadorInvitation.invitationStatus = "accepted";
 
     await user.save({ session });
+    await AmbassadorWallet.findOneAndUpdate(
+    { ambassador: user._id },
+    {},
+    {
+        upsert: true,
+        new: true,
+        session,
+    }
+);
       console.log(
         "[acceptAmbassadorAgreement] Invitation status updated to accepted",
       );
 await session.commitTransaction();
 await session.endSession();
+try {
+    await sendAmbassadorApprovedNotification(user);
+} catch (err) {
+    console.error("Notification failed:", err);
+}
+
+
       return res.status(200).json({
-        isSuccess: true,
-        message:
-          "Agreement accepted successfully. Ambassador application submitted successfully.",
+  isSuccess: true,
+  message: "Congratulations! You are now a BeTogether Ambassador.",
 
-        requiresAmbassadorAgreement: false,
-
-        agreement: {
-          ambassadorAgreementAccepted: user.ambassadorAgreementAccepted,
-          termsAccepted: user.termsAccepted,
-          privacyAccepted: user.privacyAccepted,
-        },
-
-        application,
-      });
+  ambassador: {
+    id: user._id,
+    ambassadorType: user.ambassadorType,
+    commissionRate: user.commissionRate,
+    ambassadorCode: user.ambassadorCode,
+    ambassadorStatus: user.ambassadorStatus,
+  },
+});
     }
     // =====================================
 // FLOW 3 : Pending Ambassador Assignment
@@ -3596,6 +3582,12 @@ return res.status(200).json({
       message: "No Ambassador invitation found.",
     });
   } catch (err) {
+   if (session?.inTransaction()) {
+    await session.abortTransaction();
+}
+if (session) {
+    await session.endSession();
+}
     console.error("[acceptAmbassadorAgreement] Error:", err);
 
     return res.status(500).json({

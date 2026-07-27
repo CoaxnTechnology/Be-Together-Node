@@ -553,8 +553,8 @@ exports.approveApplication = async (req, res) => {
 
         user.territory = exclusive.territory;
       } else if (parentAmbassadorId) {
-        const parent = await User.findById(parentAmbassadorId);
-
+const parent = await User.findById(parentAmbassadorId)
+  .populate("territory");
         if (!parent) {
           return res.status(404).json({
             isSuccess: false,
@@ -577,6 +577,7 @@ exports.approveApplication = async (req, res) => {
         }
 
         user.parentAmbassador = parent._id;
+        user.territory = parent.territory ? parent.territory._id : null;
       }
     }
 
@@ -812,9 +813,6 @@ if (existingPendingAssignment) {
     }
 
     const parsedCommissionRate = Number(commissionRate);
-    // =====================================
-    // STANDARD AMBASSADOR
-    // =====================================
 
     // =====================================
 // STANDARD AMBASSADOR VALIDATION
@@ -828,7 +826,7 @@ if (ambassadorType === "standard") {
     });
   }
 
-  const parent = await User.findById(parentAmbassadorId);
+  const parent = await User.findById(parentAmbassadorId).populate("territory");
 
   if (!parent || !parent.isAmbassador) {
     return res.status(400).json({
@@ -893,10 +891,10 @@ const pendingAssignment =
         ? parentAmbassadorId
         : null,
 
-    territory:
-      ambassadorType === "exclusive"
-        ? territoryId
-        : null,
+   territory:
+  ambassadorType === "exclusive"
+    ? territoryId
+    : parent.territory?._id || null,
 
     createdByAdmin: req.admin.id,
   });
@@ -1281,17 +1279,22 @@ exports.removeAmbassador = async (req, res) => {
       });
     }
 
-    // =====================================
-    // TERRITORY CLEANUP
-    // =====================================
+   // =====================================
+// TERRITORY CLEANUP (Exclusive Only)
+// =====================================
 
-    if (user.territory) {
-      await Territory.findByIdAndUpdate(user.territory, {
-        $set: {
-          exclusiveAmbassador: null,
-        },
-      });
-    }
+if (
+  user.ambassadorType === "exclusive" &&
+  user.territory
+) {
+  await Territory.findByIdAndUpdate(user.territory, {
+    $set: {
+      exclusiveAmbassador: null,
+      assignedAt: null,
+      reviewDueAt: null,
+    },
+  });
+}
 
     // =====================================
     // DISABLE AMBASSADOR
@@ -1684,8 +1687,8 @@ exports.assignParentAmbassador = async (req, res) => {
       });
     }
 
-    const parent = await User.findById(parentAmbassadorId);
-
+const parent = await User.findById(parentAmbassadorId)
+  .populate("territory");
     if (!parent) {
       return res.status(404).json({
         isSuccess: false,
@@ -1710,10 +1713,12 @@ exports.assignParentAmbassador = async (req, res) => {
         message: "Parent must be an exclusive ambassador",
       });
     }
+user.parentAmbassador = parent._id;
 
-    user.parentAmbassador = parent._id;
+// Parent ki territory automatically assign hogi
+user.territory = parent.territory ? parent.territory._id : null;
 
-    await user.save();
+await user.save();
 
     return res.json({
       isSuccess: true,
@@ -3376,7 +3381,17 @@ user.completedPaidServices = 0;
 
 user.parentAmbassador = pendingAssignment.parentAmbassador || null;
 
-user.territory = pendingAssignment.territory || null;
+if (pendingAssignment.territory) {
+  user.territory = pendingAssignment.territory;
+} else if (pendingAssignment.parentAmbassador) {
+  const parent = await User.findById(
+    pendingAssignment.parentAmbassador
+  ).select("territory");
+
+  user.territory = parent?.territory || null;
+} else {
+  user.territory = null;
+}
 if (!user.ambassadorCode) {
   user.ambassadorCode = `AMB${Date.now()}`;
 }

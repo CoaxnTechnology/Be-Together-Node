@@ -966,6 +966,60 @@ async function sendExclusiveAmbassadorInvitationNotification(
     );
   }
 }
+async function sendAmbassadorInvitationNotification(invitedUser) {
+  try {
+    console.log("[sendAmbassadorInvitationNotification] Starting", {
+      invitedUserId: invitedUser?._id?.toString(),
+      invitedUserName: invitedUser?.name,
+      fcmTokens: invitedUser?.fcmToken || [],
+    });
+
+    if (!invitedUser?.fcmToken?.length) {
+      console.log("⚠️ Invited user has no FCM tokens");
+      return;
+    }
+
+    const agreementUrl = `${process.env.BASE_URL}/api/ambassador-terms`;
+
+    const payload = {
+      tokens: invitedUser.fcmToken,
+
+      notification: {
+        title: "🎉 Ambassador Invitation",
+        body: "BeTogether has invited you to become a BeTogether Ambassador. Please review and accept the Ambassador Agreement to continue.",
+      },
+
+      data: {
+        type: "ambassador_invitation",
+        pageType: "WebView",
+        agreementUrl: agreementUrl,
+        userId: invitedUser._id.toString(),
+      },
+    };
+
+    console.log(
+      "[sendAmbassadorInvitationNotification] Sending payload",
+      payload,
+    );
+
+    const response = await admin.messaging().sendEachForMulticast(payload);
+
+    console.log("[sendAmbassadorInvitationNotification] Result", {
+      successCount: response.successCount,
+      failureCount: response.failureCount,
+      responses: response.responses,
+    });
+
+    console.log(
+      `✅ Ambassador invitation notification sent to ${invitedUser.name}`,
+    );
+  } catch (err) {
+    console.error(
+      "❌ sendAmbassadorInvitationNotification:",
+      err.message,
+    );
+  }
+}
 // async function notifyServiceOwnerOnSubscription({ buyerId, serviceId }) {
 //   try {
 //     const buyer = await User.findById(buyerId);
@@ -1027,6 +1081,7 @@ module.exports.sendAmbassadorRejectedNotification =
   sendAmbassadorRejectedNotification;
 module.exports.sendExclusiveAmbassadorInvitationNotification =
   sendExclusiveAmbassadorInvitationNotification;
+  module.exports.sendAmbassadorInvitationNotification=sendAmbassadorInvitationNotification
 //module.exports.notifyOnServiceSubscription = notifyServiceOwnerOnSubscription;
 //module.exports.notifyServiceOwnerOnSubscription = notifyServiceOwnerOnSubscription;
 //notificaton addd

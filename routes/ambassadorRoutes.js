@@ -26,6 +26,7 @@ const {
   withdrawAmount,
   getMyWallet,
   acceptAmbassadorAgreement,
+  declineAmbassadorInvitation,
 } = require("../controller/ambassadorController");
 // USER
 
@@ -35,6 +36,11 @@ router.get("/my-application", auth, getMyApplication);
 router.get("/dashboard", auth, dashboard);
 router.get("/wallet-history", auth, walletHistory);
 router.get("/wallet", auth, getMyWallet);
+router.put(
+  "/decline-invitation",
+  auth,
+  declineAmbassadorInvitation,
+);
 // ADMIN
 
 router.post("/admin/approve/:applicationId", adminAuth, approveApplication);

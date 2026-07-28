@@ -1988,7 +1988,45 @@ exports.bookingPreview = async (req, res) => {
         message: "Service not found",
       });
     }
+// ======================
+// Free Service Preview
+// ======================
+if (service.isFree) {
+  return res.json({
+    isSuccess: true,
 
+    serviceAmount: 0,
+
+    currency: service.currency || "EUR",
+
+    walletBalance: 0,
+    reservedCoins: 0,
+    availableCoins: 0,
+    remainingCoins: 0,
+
+    coinValue: 0,
+    redeemPercent: 0,
+    maxRedeemableCoins: 0,
+
+    coinsUsed: 0,
+    walletDiscount: 0,
+
+    eligibleDiscountPercent: 0,
+
+    finalPayable: 0,
+
+    canRedeem: false,
+
+    isOwnService: String(service.user) === String(userId),
+
+    providerCommissionPercent: 0,
+    customerCommissionPercent: 0,
+    customerCommissionAmount: 0,
+
+    useWallet: false,
+    walletEligibleCoins: 0,
+  });
+}
     logPaymentFlow("bookingPreview:fetchingWallet", { userId });
     const wallet = await Wallet.findOne({
       user: userId,

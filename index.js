@@ -94,7 +94,7 @@ app.post("/webhook/frontend", (req, res) => {
 app.post("/webhook/frontend-prod", (req, res) => {
   console.log("🔥 FRONTEND PROD DEPLOY HIT testing");
 
-  exec("bash /var/www/frontend-prod-admin/deploy.sh > /dev/null 2>&1 &");
+  exec("bash /var/www/frontend-prod-admin/deploy-prod.sh > /dev/null 2>&1 &");
 
   res.status(200).send("received");
 });

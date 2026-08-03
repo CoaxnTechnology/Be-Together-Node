@@ -62,6 +62,16 @@ exports.applyForAmbassador = async (req, res) => {
       acceptedAgreement,
     } = req.body;
 
+    console.log("[applyForAmbassador] Start", {
+      userId,
+      applicationType,
+      requestedUserId,
+      nameProvided: Boolean(name),
+      emailProvided: Boolean(email),
+      phoneProvided: Boolean(phoneNumber),
+      cityProvided: Boolean(city),
+    });
+
     // =====================================
     // SELF APPLICATION VALIDATION
     // =====================================
@@ -86,6 +96,13 @@ exports.applyForAmbassador = async (req, res) => {
     // User Check
     // ==========================
     const user = await User.findById(userId);
+
+    console.log("[applyForAmbassador] Loaded user", {
+      userId,
+      exists: Boolean(user),
+      isAmbassador: user?.isAmbassador,
+      ambassadorStatus: user?.ambassadorStatus,
+    });
 
     if (!user) {
       return res.status(404).json({
@@ -130,6 +147,7 @@ exports.applyForAmbassador = async (req, res) => {
 
     if (applicationType === "exclusive_invitation") {
       if (!requestedUserId) {
+        console.log("[applyForAmbassador] exclusive_invitation missing requestedUserId");
         return res.status(400).json({
           isSuccess: false,
           message: "requestedUserId is required",
@@ -137,6 +155,12 @@ exports.applyForAmbassador = async (req, res) => {
       }
 
       requestedUser = await User.findById(requestedUserId);
+
+      console.log("[applyForAmbassador] Loaded requestedUser", {
+        requestedUserId,
+        exists: Boolean(requestedUser),
+        isAmbassador: requestedUser?.isAmbassador,
+      });
 
       if (!requestedUser) {
         return res.status(404).json({
@@ -165,6 +189,10 @@ exports.applyForAmbassador = async (req, res) => {
       });
 
       if (pendingInvitation) {
+        console.log("[applyForAmbassador] Pending invitation exists", {
+          requestedUserId,
+          createdByUser: user._id,
+        });
         return res.status(400).json({
           isSuccess: false,
           message: "This invitation is still pending.",
@@ -181,6 +209,10 @@ exports.applyForAmbassador = async (req, res) => {
         );
 
         if (new Date() < nextAllowedTime) {
+          console.log("[applyForAmbassador] Invitation cooldown active", {
+            requestedUserId,
+            nextAllowedTime: nextAllowedTime.toISOString(),
+          });
           return res.status(400).json({
             isSuccess: false,
             message: `You can send another invitation after ${nextAllowedTime.toLocaleString()}.`,
@@ -210,6 +242,10 @@ exports.applyForAmbassador = async (req, res) => {
     }
 
     if (existingApplication) {
+      console.log("[applyForAmbassador] Existing pending application found", {
+        userId,
+        applicationId: existingApplication._id,
+      });
       return res.status(400).json({
         isSuccess: false,
         message: "You already have a pending ambassador application",
@@ -273,6 +309,10 @@ exports.applyForAmbassador = async (req, res) => {
         acceptedAgreement: true,
         status: "pending",
       });
+      console.log("[applyForAmbassador] Created application", {
+        applicationId: application._id,
+        userId,
+      });
     }
 
     // =====================================
@@ -297,6 +337,11 @@ exports.applyForAmbassador = async (req, res) => {
         status: "pending",
         expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
       });
+      console.log("[applyForAmbassador] Created exclusive invitation", {
+        invitationId: invitation._id,
+        requestedUser: requestedUser._id,
+        createdBy: user._id,
+      });
       await sendExclusiveAmbassadorInvitationNotification(requestedUser, user);
     }
 
@@ -308,6 +353,10 @@ exports.applyForAmbassador = async (req, res) => {
       });
     }
 
+    console.log("[applyForAmbassador] Invitation flow completed", {
+      invitationId: invitation?._id,
+      requestedUserId,
+    });
     return res.status(200).json({
       isSuccess: true,
       message: "Invitation sent successfully.",
@@ -323,7 +372,6 @@ exports.applyForAmbassador = async (req, res) => {
     });
   }
 };
-
 // =====================================
 // GET MY APPLICATION
 // =====================================

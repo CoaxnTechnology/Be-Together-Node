@@ -2231,23 +2231,25 @@ exports.searchUsers = async (req, res) => {
     const trimmedKeyword = keyword.trim();
 
     const conditions = [
-      // Name start match (flexible)
+      // Name starts with
       { name: { $regex: `^${trimmedKeyword}`, $options: "i" } },
 
       // Email contains
       { email: { $regex: trimmedKeyword, $options: "i" } },
 
-      // City start match
+      // City starts with
       { city: { $regex: `^${trimmedKeyword}`, $options: "i" } },
 
       // Mobile exact match
       { mobile: trimmedKeyword },
     ];
 
-    // If numeric → check age exact
+    // Numeric → Age search
     if (!isNaN(trimmedKeyword)) {
       conditions.push({ age: Number(trimmedKeyword) });
     }
+
+    console.log("🔎 Mongo Filter:", JSON.stringify({ $or: conditions }, null, 2));
 
     const users = await User.find({
       $or: conditions,
@@ -2255,15 +2257,43 @@ exports.searchUsers = async (req, res) => {
 
     console.log("✅ Users found:", users.length);
 
-    res.json({
+    // ===== DEBUG START =====
+    users.forEach((user) => {
+      console.log("========================================");
+      console.log("User:", user.email);
+      console.log("ID:", user._id.toString());
+      console.log("isAmbassador:", user.isAmbassador);
+      console.log("ambassadorStatus:", user.ambassadorStatus);
+      console.log("ambassadorType:", user.ambassadorType);
+      console.log("commissionRate:", user.commissionRate);
+      console.log(
+        "pendingAmbassadorInvitation:",
+        user.pendingAmbassadorInvitation
+      );
+      console.log(
+        "Document Keys:",
+        Object.keys(user.toObject())
+      );
+      console.log("========================================");
+    });
+
+    console.log(
+      "📦 Response Preview:",
+      JSON.stringify(users, null, 2)
+    );
+    // ===== DEBUG END =====
+
+    return res.json({
       success: true,
       data: users,
     });
   } catch (error) {
     console.error("🔥 User search error:", error);
-    res.status(500).json({
+
+    return res.status(500).json({
       success: false,
       message: "Search failed",
+      error: error.message,
     });
   }
 };

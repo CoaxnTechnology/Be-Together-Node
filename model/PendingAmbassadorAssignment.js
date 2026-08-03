@@ -26,11 +26,12 @@ const pendingAmbassadorAssignmentSchema = new mongoose.Schema(
       default: null,
     },
 
-    territory: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Territory",
-      default: null,
-    },
+    territories: [
+  {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Territory",
+  },
+],
 
     createdByAdmin: {
       type: mongoose.Schema.Types.ObjectId,

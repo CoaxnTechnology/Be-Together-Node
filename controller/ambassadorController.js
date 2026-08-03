@@ -263,11 +263,21 @@ exports.applyForAmbassador = async (req, res) => {
         created_at: -1,
       });
     }
+    console.log("Last rejected application:", lastRejectedApplication);
+
+if (lastRejectedApplication) {
+  console.log(
+    "Cooldown Until:",
+    lastRejectedApplication.rejectionCooldownUntil
+  );
+  console.log("Current Time:", new Date());
+}
     if (
       lastRejectedApplication &&
       lastRejectedApplication.rejectionCooldownUntil &&
       new Date() < lastRejectedApplication.rejectionCooldownUntil
     ) {
+        console.log("❌ Cooldown Active");
       return res.status(400).json({
         isSuccess: false,
         message: `You can reapply after ${lastRejectedApplication.rejectionCooldownUntil.toDateString()}`,

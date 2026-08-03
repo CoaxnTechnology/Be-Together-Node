@@ -348,15 +348,23 @@ exports.getUserProfileByEmail = async (req, res) => {
         .json({ isSuccess: false, message: "User not found" });
     }
     const ambassadorApplication = await AmbassadorApplication.findOne({
-      user: user._id,
-    })
-      .sort({ created_at: -1 })
-      .select("status rejectionReason rejectionCooldownUntil");
-      const pendingAssignment = await PendingAmbassadorAssignment.findOne({
+  user: user._id,
+  applicationType: "self",
+})
+  .sort({ created_at: -1 })
+  .select("status rejectionReason rejectionCooldownUntil");
+const pendingAssignment = await PendingAmbassadorAssignment.findOne({
   user: user._id,
   status: "pending",
-}).select("status ambassadorType commissionRate createdByAdmin");
-
+}).select(`
+  status
+  ambassadorType
+  commissionRate
+  assignmentSource
+  createdByAdmin
+  createdByUser
+  expiresAt
+`);
     // ✅ Compute avg rating for each service
     const servicesWithRating = user.services.map((service) => {
       let avgRating = 0;
@@ -393,40 +401,34 @@ exports.getUserProfileByEmail = async (req, res) => {
     // =====================================
     // Ambassador Status
     // =====================================
+isAmbassador: user.isAmbassador,
+ambassadorStatus: user.isAmbassador
+  ? user.ambassadorStatus
+  : pendingAssignment
+    ? pendingAssignment.status
+    : ambassadorApplication?.status || null,
 
-    ambassadorStatus: user.isAmbassador
-      ? user.ambassadorStatus
-      : pendingAssignment
-        ? pendingAssignment.status
-        : user.pendingAmbassadorInvitation?.invitationStatus === "pending"
-          ? "pending"
-          : ambassadorApplication?.status || null,
-
+ ambassadorType: user.ambassadorType,   
     // =====================================
     // Exclusive Invitation
     // =====================================
 
-    ambassadorInvitationStatus:
-      user.pendingAmbassadorInvitation?.invitationStatus || null,
-
-    ambassadorInvitedBy:
-      user.pendingAmbassadorInvitation?.invitedBy || null,
-
-    ambassadorInvitedAt:
-      user.pendingAmbassadorInvitation?.invitedAt || null,
 
     // =====================================
     // Admin Pending Assignment
     // =====================================
 
     pendingAmbassadorAssignment: pendingAssignment
-      ? {
-          status: pendingAssignment.status,
-          ambassadorType: pendingAssignment.ambassadorType,
-          commissionRate: pendingAssignment.commissionRate,
-          createdByAdmin: pendingAssignment.createdByAdmin,
-        }
-      : null,
+  ? {
+      status: pendingAssignment.status,
+      ambassadorType: pendingAssignment.ambassadorType,
+      commissionRate: pendingAssignment.commissionRate,
+      assignmentSource: pendingAssignment.assignmentSource,
+      createdByAdmin: pendingAssignment.createdByAdmin,
+      createdByUser: pendingAssignment.createdByUser,
+      expiresAt: pendingAssignment.expiresAt,
+    }
+  : null,
 
     // =====================================
     // Self Application
@@ -456,6 +458,7 @@ exports.getUserProfileByEmail = async (req, res) => {
     });
   }
 };
+
 exports.getProfileById = async (req, res) => {
   try {
     const { userId } = req.body;

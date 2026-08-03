@@ -168,19 +168,20 @@ exports.applyForAmbassador = async (req, res) => {
           message: "Requested user not found",
         });
       }
-
+if (requestedUser.isAmbassador) {
+  return res.status(400).json({
+    isSuccess: false,
+    message:
+      "This user has already accepted the invitation and is now an ambassador. You cannot send another invitation.",
+  });
+}
       if (String(requestedUser._id) === String(user._id)) {
         return res.status(400).json({
           isSuccess: false,
           message: "You cannot invite yourself.",
         });
       }
-      if (!requestedUser) {
-        return res.status(404).json({
-          isSuccess: false,
-          message: "Requested user not found",
-        });
-      }
+      
 
       const pendingInvitation = await PendingAmbassadorAssignment.findOne({
         user: requestedUser._id,
@@ -220,12 +221,7 @@ exports.applyForAmbassador = async (req, res) => {
         }
       }
 
-      if (requestedUser.isAmbassador) {
-        return res.status(400).json({
-          isSuccess: false,
-          message: "User is already an ambassador",
-        });
-      }
+     
     }
 
     // ==========================
@@ -278,6 +274,7 @@ if (lastRejectedApplication) {
       new Date() < lastRejectedApplication.rejectionCooldownUntil
     ) {
         console.log("❌ Cooldown Active");
+
       return res.status(400).json({
         isSuccess: false,
         message: `You can reapply after ${lastRejectedApplication.rejectionCooldownUntil.toDateString()}`,
@@ -381,8 +378,7 @@ if (lastRejectedApplication) {
       message: err.message,
     });
   }
-};
-// =====================================
+};// =====================================
 // GET MY APPLICATION
 // =====================================
 

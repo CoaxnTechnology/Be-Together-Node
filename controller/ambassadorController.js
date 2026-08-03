@@ -771,7 +771,7 @@ exports.rejectApplication = async (req, res) => {
 
     application.rejectionReason = reason || "Rejected by admin";
     application.rejectionCooldownUntil = new Date(
-      Date.now() + 7 * 24 * 60 * 60 * 1000,
+      Date.now() + 24 * 60 * 60 * 1000,
     );
 
     await application.save();
@@ -1045,7 +1045,7 @@ exports.makeAmbassador = async (req, res) => {
 
       status: "pending",
 
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // optional
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // optional
     });
 
     console.log("[makeAmbassador] Pending assignment created", {

@@ -17,6 +17,7 @@ const csv = require("csv-parser");
 const Booking = require("../model/Booking");
 const Payment = require("../model/Payment");
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
+const PendingAmbassadorAssignment = require("../model/PendingAmbassadorAssignment");
 // ------------------ Cloudinary Config ------------------
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -507,13 +508,28 @@ exports.getAllUsers = async (req, res) => {
       commissionRate
       ambassadorCode
     `);
+    const userIds = users.map((u) => u._id);
+
+const pendingAssignments = await PendingAmbassadorAssignment.find({
+  user: { $in: userIds },
+  status: "pending",
+}).select("user");
+
+const pendingMap = new Set(
+  pendingAssignments.map((p) => p.user.toString())
+);
 
     console.log("✅ getAllUsers fetched users count:", users.length);
 
-    return res.json({
-      success: true,
-      data: users,
-    });
+    const response = users.map((user) => ({
+  ...user.toObject(),
+  hasPendingInvitation: pendingMap.has(user._id.toString()),
+}));
+
+return res.json({
+  success: true,
+  data: response,
+});
   } catch (err) {
     console.error("❌ getAllUsers error:", err);
 
@@ -2256,6 +2272,16 @@ exports.searchUsers = async (req, res) => {
     });
 
     console.log("✅ Users found:", users.length);
+    const userIds = users.map((u) => u._id);
+
+const pendingAssignments = await PendingAmbassadorAssignment.find({
+  user: { $in: userIds },
+  status: "pending",
+}).select("user");
+
+const pendingMap = new Set(
+  pendingAssignments.map((p) => p.user.toString())
+);
 
     // ===== DEBUG START =====
     users.forEach((user) => {
@@ -2282,11 +2308,15 @@ exports.searchUsers = async (req, res) => {
       JSON.stringify(users, null, 2)
     );
     // ===== DEBUG END =====
+const response = users.map((user) => ({
+  ...user.toObject(),
+  hasPendingInvitation: pendingMap.has(user._id.toString()),
+}));
 
-    return res.json({
-      success: true,
-      data: users,
-    });
+return res.json({
+  success: true,
+  data: response,
+});
   } catch (error) {
     console.error("🔥 User search error:", error);
 

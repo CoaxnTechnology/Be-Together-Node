@@ -164,11 +164,6 @@ const userSchema = new mongoose.Schema(
       default: null,
     },
 
-    territory: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Territory",
-      default: null,
-    },
     ambassadorAgreementAccepted: {
       type: Boolean,
       default: false,
@@ -234,7 +229,7 @@ const userSchema = new mongoose.Schema(
       invitationStatus: {
         type: String,
         enum: ["pending", "accepted", "declined"],
-        default: "pending",
+        default: "null",
       },
     },
     stripeCustomerId: { type: String, default: null },

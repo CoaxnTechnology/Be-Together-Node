@@ -13,22 +13,30 @@ const ambassadorApplicationSchema = new mongoose.Schema(
     // =====================================
 
     applicationType: {
-      type: String,
-      enum: ["self", "exclusive_request"],
-      default: "self",
-    },
+  type: String,
+  enum: [
+    "self",
+    "admin_invitation",
+    "exclusive_invitation",
+  ],
+  required: true,
+},
 
-    requestedByExclusive: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      default: null,
-    },
-
-    requestedUser: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      default: null,
-    },
+    createdByUser: {
+  type: mongoose.Schema.Types.ObjectId,
+  ref: "User",
+  default: null,
+},
+createdByAdmin: {
+  type: mongoose.Schema.Types.ObjectId,
+  ref: "Admin",
+  default: null,
+},
+    sourceAssignment: {
+  type: mongoose.Schema.Types.ObjectId,
+  ref: "PendingAmbassadorAssignment",
+  default: null,
+},
 
     // =====================================
     // SELF APPLICATION FIELDS
@@ -110,7 +118,7 @@ const ambassadorApplicationSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ["pending", "approved", "rejected", "canceld"],
+      enum: ["pending", "approved", "rejected", "cancelled"],
       default: "pending",
     },
 

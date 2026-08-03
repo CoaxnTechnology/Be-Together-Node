@@ -484,9 +484,14 @@ exports.getUserById = async (req, res) => {
 //--------------------ALL REAL  USER----------
 exports.getAllUsers = async (req, res) => {
   try {
-    const users = await User.find({
+    console.log("🚀 getAllUsers API called");
+
+    const filter = {
       $or: [{ is_fake: false }, { is_fake: { $exists: false } }],
-    }).select(`
+    };
+    console.log("🔎 getAllUsers filter:", filter);
+
+    const users = await User.find(filter).select(`
       name
       email
       mobile
@@ -503,12 +508,14 @@ exports.getAllUsers = async (req, res) => {
       ambassadorCode
     `);
 
+    console.log("✅ getAllUsers fetched users count:", users.length);
+
     return res.json({
       success: true,
       data: users,
     });
   } catch (err) {
-    console.error("Error fetching users:", err);
+    console.error("❌ getAllUsers error:", err);
 
     return res.status(500).json({
       success: false,
@@ -1434,7 +1441,6 @@ exports.updateService = async (req, res) => {
     });
   }
 };
-
 // Admin Login
 const { createAccessToken } = require("../utils/jwt");
 const { sendServiceForceDeletedEmail } = require("../utils/email");

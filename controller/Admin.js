@@ -485,12 +485,9 @@ exports.getUserById = async (req, res) => {
 //--------------------ALL REAL  USER----------
 exports.getAllUsers = async (req, res) => {
   try {
-    console.log("🚀 getAllUsers API called");
-
     const filter = {
       $or: [{ is_fake: false }, { is_fake: { $exists: false } }],
     };
-    console.log("🔎 getAllUsers filter:", filter);
 
     const users = await User.find(filter).select(`
       name
@@ -519,17 +516,15 @@ const pendingMap = new Set(
   pendingAssignments.map((p) => p.user.toString())
 );
 
-    console.log("✅ getAllUsers fetched users count:", users.length);
-
     const response = users.map((user) => ({
-  ...user.toObject(),
-  hasPendingInvitation: pendingMap.has(user._id.toString()),
-}));
+      ...user.toObject(),
+      hasPendingInvitation: pendingMap.has(user._id.toString()),
+    }));
 
-return res.json({
-  success: true,
-  data: response,
-});
+    return res.json({
+      success: true,
+      data: response,
+    });
   } catch (err) {
     console.error("❌ getAllUsers error:", err);
 
@@ -2232,10 +2227,7 @@ exports.searchServices = async (req, res) => {
 };
 exports.searchUsers = async (req, res) => {
   try {
-    console.log("🔍 User Search API Hit");
-
     const { keyword } = req.query;
-    console.log("👉 Keyword:", keyword);
 
     if (!keyword) {
       return res.status(400).json({
@@ -2265,13 +2257,10 @@ exports.searchUsers = async (req, res) => {
       conditions.push({ age: Number(trimmedKeyword) });
     }
 
-    console.log("🔎 Mongo Filter:", JSON.stringify({ $or: conditions }, null, 2));
-
     const users = await User.find({
       $or: conditions,
     });
 
-    console.log("✅ Users found:", users.length);
     const userIds = users.map((u) => u._id);
 
 const pendingAssignments = await PendingAmbassadorAssignment.find({
@@ -2284,29 +2273,6 @@ const pendingMap = new Set(
 );
 
     // ===== DEBUG START =====
-    users.forEach((user) => {
-      console.log("========================================");
-      console.log("User:", user.email);
-      console.log("ID:", user._id.toString());
-      console.log("isAmbassador:", user.isAmbassador);
-      console.log("ambassadorStatus:", user.ambassadorStatus);
-      console.log("ambassadorType:", user.ambassadorType);
-      console.log("commissionRate:", user.commissionRate);
-      console.log(
-        "pendingAmbassadorInvitation:",
-        user.pendingAmbassadorInvitation
-      );
-      console.log(
-        "Document Keys:",
-        Object.keys(user.toObject())
-      );
-      console.log("========================================");
-    });
-
-    console.log(
-      "📦 Response Preview:",
-      JSON.stringify(users, null, 2)
-    );
     // ===== DEBUG END =====
 const response = users.map((user) => ({
   ...user.toObject(),

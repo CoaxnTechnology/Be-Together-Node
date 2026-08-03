@@ -216,22 +216,7 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
-    pendingAmbassadorInvitation: {
-      invitedBy: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "User",
-        default: null,
-      },
-      invitedAt: {
-        type: Date,
-        default: null,
-      },
-      invitationStatus: {
-        type: String,
-        enum: ["pending", "accepted", "declined"],
-        default: "null",
-      },
-    },
+    
     stripeCustomerId: { type: String, default: null },
     stripeAccountId: { type: String, default: null },
     performancePoints: { type: Number, default: 0 },

@@ -3498,10 +3498,14 @@ exports.acceptAmbassadorAgreement = async (req, res) => {
     // ====================================================
     // SAVE AGREEMENT ACCEPTANCE
     // ====================================================
-
-    user.ambassadorAgreementAccepted = true;
-    user.ambassadorAgreementAcceptedAt = new Date();
-
+const isRegisteredByAmbassador =
+  !!user.registeredByAmbassador &&
+  user.registeredAfterAmbassadorApproval &&
+  !user.isAmbassador;
+if (!isRegisteredByAmbassador) {
+  user.ambassadorAgreementAccepted = true;
+  user.ambassadorAgreementAcceptedAt = new Date();
+}
     // ====================================================
     // CHECK SELF APPLICATION
     // ====================================================
@@ -3766,8 +3770,6 @@ if (!selfApplication && pendingAssignment) {
       user.ambassadorUserAgreementAccepted = true;
 
   user.ambassadorUserAgreementAcceptedAt = new Date();
-
-  await user.save({ session });
     } else {
       pendingAssignment.status = "accepted";
 

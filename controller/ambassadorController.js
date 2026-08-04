@@ -3515,10 +3515,7 @@ if (!isRegisteredByAmbassador) {
       applicationType: "self",
       status: "pending",
     }).session(session);
-const isRegisteredByAmbassador =
-  !!user.registeredByAmbassador &&
-  user.registeredAfterAmbassadorApproval &&
-  !user.isAmbassador;
+
     // ====================================================
     // CHECK PENDING INVITATION
     // ====================================================

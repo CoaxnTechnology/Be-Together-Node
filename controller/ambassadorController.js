@@ -3511,24 +3511,63 @@ exports.acceptAmbassadorAgreement = async (req, res) => {
     // CHECK PENDING INVITATION
     // ====================================================
 
-    const pendingAssignment = await PendingAmbassadorAssignment.findOne({
-      user: user._id,
-      status: "pending",
-    }).session(session);
-
+const pendingAssignment = await PendingAmbassadorAssignment.findOne({
+  user: user._id,
+})
+  .sort({ createdAt: -1 })
+  .session(session);
     // ====================================================
     // NOTHING FOUND
     // ====================================================
 
-    if (!selfApplication && !pendingAssignment) {
-      await session.abortTransaction();
+// =====================================
+// NOTHING FOUND
+// =====================================
 
-      return res.status(400).json({
-        isSuccess: false,
-        message: "No pending ambassador request found.",
-      });
-    }
+if (!selfApplication && !pendingAssignment) {
+  await session.abortTransaction();
 
+  return res.status(400).json({
+    isSuccess: false,
+    message: "No ambassador request or invitation found.",
+  });
+}
+
+// =====================================
+// INVITATION STATUS CHECK
+// =====================================
+
+if (!selfApplication && pendingAssignment) {
+  if (pendingAssignment.status === "accepted") {
+    await session.abortTransaction();
+
+    return res.status(400).json({
+      isSuccess: false,
+      message:
+        "You have already accepted this invitation and are now an ambassador.",
+    });
+  }
+
+  if (pendingAssignment.status === "declined") {
+    await session.abortTransaction();
+
+    return res.status(400).json({
+      isSuccess: false,
+      message:
+        "You have already declined this invitation. Please wait for a new invitation from the administrator.",
+    });
+  }
+
+  if (pendingAssignment.status === "expired") {
+    await session.abortTransaction();
+
+    return res.status(400).json({
+      isSuccess: false,
+      message:
+        "This invitation has expired. Please wait for a new invitation from the administrator.",
+    });
+  }
+}
     // ====================================================
     // DETERMINE FLOW
     // ====================================================

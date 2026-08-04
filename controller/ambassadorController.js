@@ -378,7 +378,9 @@ if (lastRejectedApplication) {
       message: err.message,
     });
   }
-};// =====================================
+};
+
+// =====================================
 // GET MY APPLICATION
 // =====================================
 
@@ -3819,11 +3821,11 @@ exports.declineAmbassadorInvitation = async (req, res) => {
     // FIND PENDING INVITATION
     // =====================================
 
-    const assignment = await PendingAmbassadorAssignment.findOne({
-      user: userId,
-      status: "pending",
-    }).session(session);
-
+const assignment = await PendingAmbassadorAssignment.findOne({
+  user: userId,
+})
+  .sort({ createdAt: -1 })
+  .session(session);
     if (!assignment) {
       await session.abortTransaction();
 
@@ -3832,6 +3834,44 @@ exports.declineAmbassadorInvitation = async (req, res) => {
         message: "No pending invitation found.",
       });
     }
+    if (assignment.status === "declined") {
+  await session.abortTransaction();
+
+  return res.status(400).json({
+    isSuccess: false,
+    message:
+      "You have already declined this invitation. Please wait for a new invitation from the administrator.",
+  });
+}
+
+if (assignment.status === "accepted") {
+  await session.abortTransaction();
+
+  return res.status(400).json({
+    isSuccess: false,
+    message:
+      "You have already accepted this invitation and are now an ambassador.",
+  });
+}
+
+if (assignment.status === "expired") {
+  await session.abortTransaction();
+
+  return res.status(400).json({
+    isSuccess: false,
+    message:
+      "This invitation has expired. Please wait for a new invitation from the administrator.",
+  });
+}
+
+if (assignment.status !== "pending") {
+  await session.abortTransaction();
+
+  return res.status(400).json({
+    isSuccess: false,
+    message: "No active invitation found.",
+  });
+}
 
     // =====================================
     // CHECK INVITATION EXPIRY
@@ -3890,6 +3930,204 @@ exports.declineAmbassadorInvitation = async (req, res) => {
     session.endSession();
   }
 };
+// exports.updateAmbassador = async (req, res) => {
+//   try {
+//     const { userId } = req.params;
+//     const { commissionRate, territoryIds } = req.body;
+
+//     console.log("[updateAmbassador] Request", {
+//       userId,
+//       commissionRate,
+//       territoryIds,
+//     });
+
+//     // =====================================
+//     // GET USER
+//     // =====================================
+
+//     const user = await User.findById(userId);
+
+//     if (!user) {
+//       return res.status(404).json({
+//         isSuccess: false,
+//         message: "Ambassador not found",
+//       });
+//     }
+
+//     if (!user.isAmbassador) {
+//       return res.status(400).json({
+//         isSuccess: false,
+//         message: "User is not an ambassador",
+//       });
+//     }
+
+//     if (user.ambassadorStatus !== "approved") {
+//       return res.status(400).json({
+//         isSuccess: false,
+//         message: "Only approved ambassadors can be updated",
+//       });
+//     }
+
+//     // =====================================
+//     // VALIDATE COMMISSION
+//     // =====================================
+
+//     if (
+//       commissionRate === undefined ||
+//       commissionRate === null ||
+//       isNaN(commissionRate)
+//     ) {
+//       return res.status(400).json({
+//         isSuccess: false,
+//         message: "commissionRate is required",
+//       });
+//     }
+
+//     if (
+//       Number(commissionRate) < 0 ||
+//       Number(commissionRate) > 12
+//     ) {
+//       return res.status(400).json({
+//         isSuccess: false,
+//         message: "commissionRate must be between 0 and 12",
+//       });
+//     }
+
+//     user.commissionRate = Number(commissionRate);
+
+//     // =====================================
+//     // STANDARD AMBASSADOR
+//     // =====================================
+
+//     if (user.ambassadorType === "standard") {
+//       await user.save();
+
+//       return res.json({
+//         isSuccess: true,
+//         message: "Standard ambassador updated successfully",
+//         user,
+//       });
+//     }
+
+//     // =====================================
+//     // EXCLUSIVE AMBASSADOR
+//     // =====================================
+
+//     if (user.ambassadorType === "exclusive") {
+
+//       if (
+//         !territoryIds ||
+//         !Array.isArray(territoryIds) ||
+//         territoryIds.length === 0
+//       ) {
+//         return res.status(400).json({
+//           isSuccess: false,
+//           message: "territoryIds is required",
+//         });
+//       }
+
+//       const uniqueTerritoryIds = [...new Set(territoryIds)];
+
+//       const territories = await Territory.find({
+//         _id: {
+//           $in: uniqueTerritoryIds,
+//         },
+//         active: true,
+//       });
+
+//       if (territories.length !== uniqueTerritoryIds.length) {
+//         return res.status(404).json({
+//           isSuccess: false,
+//           message: "One or more territories not found",
+//         });
+//       }
+
+//       // =====================================
+//       // CHECK TERRITORY ALREADY ASSIGNED
+//       // =====================================
+
+//       for (const territory of territories) {
+//         if (
+//           territory.exclusiveAmbassador &&
+//           territory.exclusiveAmbassador.toString() !== user._id.toString()
+//         ) {
+//           return res.status(400).json({
+//             isSuccess: false,
+//             message: `${territory.city}, ${territory.country} is already assigned to another ambassador`,
+//           });
+//         }
+//       }
+
+//       // =====================================
+//       // REMOVE OLD TERRITORIES
+//       // =====================================
+
+//       await Territory.updateMany(
+//         {
+//           exclusiveAmbassador: user._id,
+//         },
+//         {
+//           $set: {
+//             exclusiveAmbassador: null,
+//             assignedAt: null,
+//             reviewDueAt: null,
+//           },
+//         }
+//       );
+
+//       // =====================================
+//       // ASSIGN NEW TERRITORIES
+//       // =====================================
+
+//       await Territory.updateMany(
+//         {
+//           _id: {
+//             $in: uniqueTerritoryIds,
+//           },
+//         },
+//         {
+//           $set: {
+//             exclusiveAmbassador: user._id,
+//             assignedAt: new Date(),
+//             reviewDueAt: new Date(
+//               Date.now() + 180 * 24 * 60 * 60 * 1000
+//             ),
+//           },
+//         }
+//       );
+
+//       await user.save();
+
+//       const updatedTerritories = await Territory.find({
+//         exclusiveAmbassador: user._id,
+//       }).select("city country");
+
+//       return res.json({
+//         isSuccess: true,
+//         message: "Exclusive ambassador updated successfully",
+//         user,
+//         territories: updatedTerritories,
+//       });
+//     }
+
+//     // =====================================
+//     // INVALID TYPE
+//     // =====================================
+
+//     return res.status(400).json({
+//       isSuccess: false,
+//       message: "Invalid ambassador type",
+//     });
+
+//   } catch (err) {
+//     console.error("[updateAmbassador]", err);
+
+//     return res.status(500).json({
+//       isSuccess: false,
+//       message: err.message,
+//     });
+//   }
+// };
 exports.handlePayoutCreated = async (payout) => {
   try {
     console.log("[handlePayoutCreated] Start", {

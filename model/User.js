@@ -33,10 +33,15 @@ const userSchema = new mongoose.Schema(
       default: "manual",
     },
     status: {
-      type: String,
-      enum: ["active", "inactive", "banned"],
-      default: "active",
-    },
+  type: String,
+  enum: [
+    "pending_verification",
+    "active",
+    "inactive",
+    "banned",
+  ],
+  default: "pending_verification",
+},
     is_active: { type: Boolean, default: true },
 
     otp_code: { type: String, default: null },

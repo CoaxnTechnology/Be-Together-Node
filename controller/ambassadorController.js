@@ -3466,6 +3466,11 @@ exports.acceptAmbassadorAgreement = async (req, res) => {
 
     const userId = req.user.id;
 
+    console.log("[acceptAmbassadorAgreement] Start", {
+      userId,
+      body: req.body,
+    });
+
     // ====================================================
     // USER
     // ====================================================
@@ -3506,7 +3511,10 @@ exports.acceptAmbassadorAgreement = async (req, res) => {
       applicationType: "self",
       status: "pending",
     }).session(session);
-
+const isRegisteredByAmbassador =
+  !!user.registeredByAmbassador &&
+  user.registeredAfterAmbassadorApproval &&
+  !user.isAmbassador;
     // ====================================================
     // CHECK PENDING INVITATION
     // ====================================================
@@ -3524,7 +3532,11 @@ const pendingAssignment = await PendingAmbassadorAssignment.findOne({
 // NOTHING FOUND
 // =====================================
 
-if (!selfApplication && !pendingAssignment) {
+if (
+  !selfApplication &&
+  !pendingAssignment &&
+  !isRegisteredByAmbassador
+) {
   await session.abortTransaction();
 
   return res.status(400).json({
@@ -3637,7 +3649,7 @@ if (!selfApplication && pendingAssignment) {
     // AUTO APPROVAL (ADMIN / EXCLUSIVE)
     // ====================================================
 
-    if (!isSelfApplication) {
+    if (!isSelfApplication && !isRegisteredByAmbassador) {
       user.isAmbassador = true;
 
       user.ambassadorStatus = "approved";
@@ -3749,6 +3761,13 @@ if (!selfApplication && pendingAssignment) {
       // User has only accepted the agreement.
       // Admin will approve/reject later.
       //  await selfApplication.save({ session });
+    } else if (isRegisteredByAmbassador) {
+      // Handle the case where the user was registered by an ambassador
+      user.ambassadorUserAgreementAccepted = true;
+
+  user.ambassadorUserAgreementAcceptedAt = new Date();
+
+  await user.save({ session });
     } else {
       pendingAssignment.status = "accepted";
 
@@ -3791,7 +3810,7 @@ if (!selfApplication && pendingAssignment) {
     // ====================================================
 
     try {
-      if (!isSelfApplication) {
+if (!isSelfApplication && !isRegisteredByAmbassador) {
         await sendAmbassadorApprovedNotification(user);
       }
     } catch (err) {
@@ -3805,13 +3824,21 @@ if (!selfApplication && pendingAssignment) {
     // RESPONSE
     // ====================================================
 
+    console.log("[acceptAmbassadorAgreement] Completed", {
+      userId: user._id,
+      isAmbassador: user.isAmbassador,
+      ambassadorType: user.ambassadorType,
+      ambassadorStatus: user.ambassadorStatus,
+    });
+
     return res.json({
       isSuccess: true,
 
-      message: isSelfApplication
-        ? "Agreement accepted successfully. Your application is pending admin approval."
-        : "Invitation accepted successfully. You are now an ambassador.",
-
+message: isRegisteredByAmbassador
+  ? "Agreement accepted successfully."
+  : isSelfApplication
+  ? "Agreement accepted successfully. Your application is pending admin approval."
+  : "Invitation accepted successfully. You are now an ambassador.",
       user: {
         _id: user._id,
 

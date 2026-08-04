@@ -19,6 +19,25 @@ const multer = require("multer"); // for MulterError checks
 const TEST_EMAIL = "mansuria.hannan09@gmail.com";
 const STATIC_OTP = "1234";
 const appleSigninAuth = require("apple-signin-auth");
+
+const logStep = (step, message, data) => {
+  if (typeof data === "undefined") {
+    console.log(`🔵 STEP ${step}: ${message}`);
+    return;
+  }
+
+  console.log(`🔵 STEP ${step}: ${message}`, data);
+};
+
+const logErrorStep = (step, message, data) => {
+  if (typeof data === "undefined") {
+    console.log(`❌ STEP ${step}: ${message}`);
+    return;
+  }
+
+  console.log(`❌ STEP ${step}: ${message}`, data);
+};
+
 // =====================================
 // GDPR SAVE HELPER
 // =====================================
@@ -85,11 +104,11 @@ const verifyAppleToken = async (identityToken) => {
 
 // ---------------- REGISTER ----------------
 exports.register = async (req, res) => {
-  console.log(1, "register() called");
+  logStep(1, "register() called");
 
   try {
-    console.log(2, "Request body received", req.body);
-    console.log(3, "File upload present", !!req.file);
+    logStep(2, "Request body received", req.body);
+    logStep(3, "File upload present", !!req.file);
 
     let {
       name,
@@ -108,7 +127,7 @@ exports.register = async (req, res) => {
       ambassadorCode,
     } = req.body;
 
-    console.log(4, "Extracted input fields", {
+    logStep(4, "Extracted input fields", {
       name,
       email,
       mobile,
@@ -146,20 +165,20 @@ exports.register = async (req, res) => {
     }
 
     if (!["manual", "google_auth", "apple_auth"].includes(register_type)) {
-      console.log(5, "Invalid register_type");
+      logErrorStep(5, "Invalid register_type");
       return res
         .status(400)
         .json({ IsSucces: false, message: "Invalid register_type." });
     }
 
     if (!email && register_type !== "apple_auth") {
-      console.log(6, "Email missing");
+      logErrorStep(6, "Email missing");
       return res
         .status(400)
         .json({ IsSucces: false, message: "Email required." });
     }
 
-    console.log(7, "Checking for an existing user");
+    logStep(7, "Checking for an existing user");
     let existing = null;
 
     // 🔥 FIRST check provider_uid (Apple main identity)
@@ -171,7 +190,7 @@ exports.register = async (req, res) => {
     if (!existing && email) {
       existing = await User.findOne({ email });
     }
-    console.log(8, "Existing user lookup result", !!existing);
+    logStep(8, "Existing user lookup result", !!existing);
 
     // GOOGLE: If already exists → login
     if (existing && register_type === "google_auth") {
@@ -474,8 +493,13 @@ exports.register = async (req, res) => {
       name: name || null,
       email,
       mobile: mobile || null,
+          status:
+  register_type === "manual"
+    ? "pending_verification"
+    : "active",
       hashed_password: hashedPassword,
       register_type,
+  
       login_type: register_type, // ✅ ADD THIS
       otp_verified,
       otp_code: otp,
@@ -617,7 +641,8 @@ exports.register = async (req, res) => {
     return res.status(500).json({ IsSucces: false, message: "Server error" });
   }
 };
-// ---------------- VERIFY OTP (REGISTER) ----------------
+
+// ---------------- VERIFY OTP (REGISTER) ----------------      
 exports.verifyOtpRegister = async (req, res) => {
   try {
     let { email, otp } = req.body;
@@ -780,6 +805,28 @@ exports.login = async (req, res) => {
           .status(401)
           .json({ IsSucces: false, message: "Invalid password" });
       }
+      if (user.status === "pending_verification") {
+  const otpObj = generateOTP();
+
+  user.otp_code = otpObj.otp;
+  user.otp_expiry = otpObj.expiry;
+  user.otp_verified = false;
+
+ await user.save();
+await saveGdprData(user, req);
+
+try {
+    await sendOtpEmail(user.email, otpObj.otp);
+} catch (err) {
+    console.log("Email error:", err);
+}
+
+return res.json({
+    IsSucces: true,
+    require_otp: true,
+    message: "Please verify your account.",
+});
+}
 
       // ✅ OTP LOGIC (STATIC + NORMAL)
       let otp, expiry;
@@ -1143,6 +1190,7 @@ exports.verifyOtpLogin = async (req, res) => {
     console.log("🟦 STEP 14: OTP matched successfully");
 
     user.otp_verified = true;
+    user.status = "active";
     user.otp_code = null;
     user.otp_expiry = null;
     // =====================================

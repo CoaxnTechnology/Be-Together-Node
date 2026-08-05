@@ -19,7 +19,6 @@ const stripeRoutes = require("./routes/stripeConnectRoutes");
 const paymentRoutes = require("./routes/paymentRoutes");
 const paymentViolationRoutes = require("./routes/paymentViolationRoutes");
 const deleteAccountRoutes = require("./routes/deleteaccountRoutes");
-const apiLogger = require("./Middleware/apiLogger");
 const connectDB = require("./utils/connect");
 const app = express();
 const crypto = require("crypto");
@@ -114,7 +113,7 @@ app.post(
 // Middleware
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
-app.use(apiLogger);
+
 app.use(
   cors({
     origin: [

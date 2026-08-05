@@ -581,48 +581,65 @@ exports.approveApplication = async (req, res) => {
     }
 
     // =====================================
-    // STANDARD AMBASSADOR
-    // =====================================
-    if (ambassadorType === "standard") {
-      console.log("[approveApplication] Standard ambassador path", {
-        parentAmbassadorId,
-      });
-      user.parentAmbassador = null;
+// STANDARD AMBASSADOR
+// =====================================
+if (ambassadorType === "standard") {
+  console.log("[approveApplication] Standard ambassador validation start", {
+    parentAmbassadorId,
+  });
 
-      if (parentAmbassadorId) {
-        const parent = await User.findById(parentAmbassadorId).session(session);
+  if (!parentAmbassadorId) {
+    await session.abortTransaction();
 
-        if (!parent) {
-          await session.abortTransaction();
-          return res.status(404).json({
-            isSuccess: false,
-            message: "Parent ambassador not found",
-          });
-        }
+    return res.status(400).json({
+      isSuccess: false,
+      message: "parentAmbassador is required for standard ambassador",
+    });
+  }
 
-        if (!parent.isAmbassador || parent.ambassadorStatus !== "approved") {
-          await session.abortTransaction();
-          return res.status(400).json({
-            isSuccess: false,
-            message: "Parent ambassador is not active",
-          });
-        }
+  const parent = await User.findById(parentAmbassadorId).session(session);
 
-        if (parent.ambassadorType !== "exclusive") {
-          await session.abortTransaction();
-          return res.status(400).json({
-            isSuccess: false,
-            message: "Parent ambassador must be an exclusive ambassador",
-          });
-        }
+  console.log("[approveApplication] Parent ambassador lookup result", {
+    parentAmbassadorId,
+    parentExists: Boolean(parent),
+    parentAmbassadorType: parent?.ambassadorType,
+    parentAmbassadorStatus: parent?.ambassadorStatus,
+  });
 
-        user.parentAmbassador = parent._id;
-        console.log("[approveApplication] Parent ambassador assigned", {
-          parentAmbassadorId,
-          parentAmbassador: parent._id.toString(),
-        });
-      }
-    }
+  if (!parent || !parent.isAmbassador) {
+    await session.abortTransaction();
+
+    return res.status(400).json({
+      isSuccess: false,
+      message: "Parent ambassador not found",
+    });
+  }
+
+  if (parent.ambassadorStatus !== "approved") {
+    await session.abortTransaction();
+
+    return res.status(400).json({
+      isSuccess: false,
+      message: "Parent ambassador is not active",
+    });
+  }
+
+  if (parent.ambassadorType !== "exclusive") {
+    await session.abortTransaction();
+
+    return res.status(400).json({
+      isSuccess: false,
+      message: "Parent ambassador must be an exclusive ambassador",
+    });
+  }
+
+  user.parentAmbassador = parent._id;
+
+  console.log("[approveApplication] Parent ambassador assigned", {
+    parentAmbassadorId,
+    parentAmbassador: parent._id.toString(),
+  });
+}
 
     // =====================================
     // EXCLUSIVE AMBASSADOR

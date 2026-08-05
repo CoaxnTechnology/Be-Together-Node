@@ -5,11 +5,18 @@ module.exports = (req, res, next) => {
   // SKIP WEBHOOKS & STATIC FILES
   // =====================================
 
+  const ignoredEndpoints = [
+    "/api/admin/pending-delete-count",
+  ];
+
   if (
     req.originalUrl.startsWith("/webhook") ||
     req.originalUrl.includes("/stripe/webhook") ||
     req.originalUrl.startsWith("/uploads") ||
-    req.originalUrl.startsWith("/public")
+    req.originalUrl.startsWith("/public") ||
+    ignoredEndpoints.some((endpoint) =>
+      req.originalUrl.startsWith(endpoint),
+    )
   ) {
     return next();
   }
@@ -46,21 +53,12 @@ module.exports = (req, res, next) => {
         method: req.method,
         endpoint: req.originalUrl,
         statusCode: res.statusCode,
-
         success: res.statusCode < 400,
-
-        message:
-          res.statusCode < 400
-            ? message || "Success"
-            : null,
-
+        message: res.statusCode < 400 ? message || "Success" : null,
         error,
-
         userId: req.user?.id || null,
         adminId: req.admin?.id || null,
-
         ip: req.ip,
-
         duration,
       });
     } catch (err) {
@@ -68,18 +66,10 @@ module.exports = (req, res, next) => {
     }
   };
 
-  // =====================================
-  // OVERRIDE JSON
-  // =====================================
-
   res.json = function (body) {
     saveLog(body);
     return originalJson.call(this, body);
   };
-
-  // =====================================
-  // OVERRIDE SEND
-  // =====================================
 
   res.send = function (body) {
     saveLog(body);

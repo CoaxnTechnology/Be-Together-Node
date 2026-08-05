@@ -1677,66 +1677,99 @@ exports.refundBooking = async (req, res) => {
       });
     }
 
-    let discountedServiceAmount =
-      payment.originalAmount - (payment.walletAmountUsed || 0);
+const serviceAmount = payment.originalAmount;
 
-    let cancellationFee = 0;
-    let refundAmount = 0;
-    let platformRetainedAmount = 0;
+const walletUsed = payment.walletAmountUsed || 0;
 
-    if (cancelledBy === "provider") {
-      // Provider ki galti
-      refundAmount = payment.customerPaidAmount;
+// Stripe se sirf service ke liye kitna pay hua
+const stripeServicePaid = serviceAmount - walletUsed;
 
-      cancellationFee = 0;
+// Stripe se total kitna pay hua
+// (service + customer commission)
+const stripePaid = payment.customerPaidAmount;
 
-      platformRetainedAmount = 0;
-    } else {
-      cancellationFee = Number(
-        ((discountedServiceAmount * cancellationPercent) / 100).toFixed(2),
-      );
+// Customer commission
+const customerCommission = payment.customerCommissionAmount || 0;
 
-      refundAmount = Number(
-        (discountedServiceAmount - cancellationFee).toFixed(2),
-      );
+let cancellationFee = 0;
 
-      platformRetainedAmount = Number(
-        (cancellationFee + (payment.customerCommissionAmount || 0)).toFixed(2),
-      );
-    }
+let refundAmount = 0;
+
+let walletRefund = 0;
+
+let stripeRefund = 0;
+
+let platformRetainedAmount = 0;
+
+
+
+ if (cancelledBy === "provider") {
+  // Provider cancel → Full refund
+
+  cancellationFee = 0;
+
+  // Wallet coins full refund
+  walletRefund = walletUsed;
+
+  // Stripe se jitna customer ne pay kiya tha
+  // (service + customer commission)
+  stripeRefund = stripePaid;
+
+  // Total refund
+  refundAmount = walletRefund + stripeRefund;
+
+  // Platform kuch retain nahi karega
+  platformRetainedAmount = 0;
+} else {
+  // Customer cancel
+
+  // Cancellation sirf Stripe se paid service amount par lagega
+  cancellationFee = Number(
+    ((stripeServicePaid * cancellationPercent) / 100).toFixed(2),
+  );
+
+  // Wallet coins full refund
+  walletRefund = walletUsed;
+
+  // Stripe refund = service amount - cancellation fee
+  stripeRefund = Number(
+    (stripeServicePaid - cancellationFee).toFixed(2),
+  );
+
+  // Customer ko total refund
+  refundAmount = Number(
+    (walletRefund + stripeRefund).toFixed(2),
+  );
+
+  // Platform cancellation fee + customer commission retain karega
+  platformRetainedAmount = Number(
+    (cancellationFee + customerCommission).toFixed(2),
+  );
+}
     console.log("========== REFUND DEBUG ==========");
     console.log("payment.originalAmount:", payment.originalAmount);
     console.log("payment.walletAmountUsed:", payment.walletAmountUsed);
     console.log("payment.customerPaidAmount:", payment.customerPaidAmount);
-    console.log(
-      "payment.customerCommissionAmount:",
-      payment.customerCommissionAmount,
-    );
-    console.log("discountedServiceAmount:", discountedServiceAmount);
+    console.log("payment.customerCommissionAmount:", payment.customerCommissionAmount);
+    console.log("serviceAmount:", serviceAmount);
+    console.log("walletUsed:", walletUsed);
+    console.log("stripeServicePaid:", stripeServicePaid);
     console.log("cancellationPercent:", cancellationPercent);
     console.log("cancellationFee:", cancellationFee);
     console.log("refundAmount:", refundAmount);
     console.log("==================================");
     console.log(
       "💰 Total Amount:",
-      cancelledBy === "provider"
-        ? payment.customerPaidAmount
-        : discountedServiceAmount,
+      cancelledBy === "provider" ? payment.customerPaidAmount : stripeServicePaid,
     );
     console.log("💰 Cancellation Fee:", cancellationFee);
     console.log("💰 Refundable Amount:", refundAmount);
     logPaymentFlow("refundBooking:refundAmountsCalculated", {
       totalAmount:
-        cancelledBy === "provider"
-          ? payment.customerPaidAmount
-          : discountedServiceAmount,
-
+        cancelledBy === "provider" ? payment.customerPaidAmount : stripeServicePaid,
       cancellationPercent,
-
       cancellationFee,
-
       refundAmount,
-
       platformRetainedAmount,
     });
 
@@ -1766,7 +1799,7 @@ exports.refundBooking = async (req, res) => {
     const stripeRefundReason = "requested_by_customer";
     const refund = await stripe.refunds.create({
       payment_intent: payment.paymentIntentId,
-      amount: Math.round(refundAmount * 100),
+      amount: Math.round(stripeRefund * 100),
       reason: stripeRefundReason,
 
       metadata: {
@@ -1790,7 +1823,7 @@ exports.refundBooking = async (req, res) => {
     cancellationReason: reason || "No Reason",
 
     refundAmount:
-        refundAmount.toString(),
+        stripeRefund.toString(),
 
     cancellationFee:
         cancellationFee.toString(),
@@ -1836,28 +1869,40 @@ exports.refundBooking = async (req, res) => {
       refundAmount: booking.refundAmount,
     });
     if (payment.usedWallet && payment.walletCoinsUsed > 0) {
-      const wallet = await Wallet.findOne({
-        user: booking.customer._id,
-      });
+  const wallet = await Wallet.findOne({
+    user: booking.customer._id,
+  });
 
-      if (wallet) {
-        wallet.reservedPoints = Math.max(
-          0,
-          wallet.reservedPoints - payment.walletCoinsUsed,
-        );
+  if (wallet) {
+    // Reserved coins release
+    wallet.reservedPoints = Math.max(
+      0,
+      wallet.reservedPoints - payment.walletCoinsUsed,
+    );
 
-        await wallet.save();
+    // Wallet coins customer ko wapas
+ wallet.availablePoints = Number(wallet.availablePoints || 0);
 
-        await WalletHistory.create({
-          user: booking.customer._id,
-          points: payment.walletCoinsUsed,
-          transactionType: "credit",
-          type: "wallet_refund",
-          service: booking.service._id,
-          note: "Wallet coins released after cancellation",
-        });
-      }
-    }
+    await wallet.save();
+
+    // Wallet history
+    await WalletHistory.create({
+      user: booking.customer._id,
+      points: walletRefund,
+      transactionType: "credit",
+      type: "wallet_refund",
+      service: booking.service._id,
+      note: "Wallet coins refunded after cancellation",
+    });
+
+    console.log("✅ Wallet coins refunded", {
+      userId: booking.customer._id,
+      refundedCoins: walletRefund,
+      availablePoints: wallet.availablePoints,
+      reservedPoints: wallet.reservedPoints,
+    });
+  }
+}
     // ✅ UPDATE PAYMENT
     payment.status = refund.status === "succeeded" ? "refunded" : "pending";
 

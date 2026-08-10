@@ -27,6 +27,7 @@ const {
   getMyWallet,
   acceptAmbassadorAgreement,
   declineAmbassadorInvitation,
+  updateAmbassador,
 } = require("../controller/ambassadorController");
 // USER
 
@@ -37,7 +38,7 @@ router.get("/dashboard", auth, dashboard);
 router.get("/wallet-history", auth, walletHistory);
 router.get("/wallet", auth, getMyWallet);
 router.put(
-  "/decline-invitation",
+  "/ambassador/decline-invitation",
   auth,
   declineAmbassadorInvitation,
 );
@@ -53,6 +54,7 @@ router.post(
   adminAuth,
   assignParentAmbassador,
 );
+router.post("/admin/update-ambassador/:userId", adminAuth, updateAmbassador);
 
 // =====================================
 // ADMIN APPLICATIONS

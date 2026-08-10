@@ -4012,204 +4012,209 @@ if (assignment.status !== "pending") {
     session.endSession();
   }
 };
-// exports.updateAmbassador = async (req, res) => {
-//   try {
-//     const { userId } = req.params;
-//     const { commissionRate, territoryIds } = req.body;
+exports.updateAmbassador = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { commissionRate, territoryIds } = req.body;
 
-//     console.log("[updateAmbassador] Request", {
-//       userId,
-//       commissionRate,
-//       territoryIds,
-//     });
+    console.log("[updateAmbassador] Request", {
+      userId,
+      commissionRate,
+      territoryIds,
+    });
 
-//     // =====================================
-//     // GET USER
-//     // =====================================
+    // =====================================
+    // GET USER
+    // =====================================
 
-//     const user = await User.findById(userId);
+    const user = await User.findById(userId);
 
-//     if (!user) {
-//       return res.status(404).json({
-//         isSuccess: false,
-//         message: "Ambassador not found",
-//       });
-//     }
+    if (!user) {
+      return res.status(404).json({
+        isSuccess: false,
+        message: "Ambassador not found",
+      });
+    }
 
-//     if (!user.isAmbassador) {
-//       return res.status(400).json({
-//         isSuccess: false,
-//         message: "User is not an ambassador",
-//       });
-//     }
+    if (!user.isAmbassador) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "User is not an ambassador",
+      });
+    }
 
-//     if (user.ambassadorStatus !== "approved") {
-//       return res.status(400).json({
-//         isSuccess: false,
-//         message: "Only approved ambassadors can be updated",
-//       });
-//     }
+    if (user.ambassadorStatus !== "approved") {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Only approved ambassadors can be updated",
+      });
+    }
 
-//     // =====================================
-//     // VALIDATE COMMISSION
-//     // =====================================
+    // =====================================
+    // VALIDATE COMMISSION
+    // =====================================
 
-//     if (
-//       commissionRate === undefined ||
-//       commissionRate === null ||
-//       isNaN(commissionRate)
-//     ) {
-//       return res.status(400).json({
-//         isSuccess: false,
-//         message: "commissionRate is required",
-//       });
-//     }
+    if (
+      commissionRate === undefined ||
+      commissionRate === null ||
+      isNaN(commissionRate)
+    ) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "commissionRate is required",
+      });
+    }
 
-//     if (
-//       Number(commissionRate) < 0 ||
-//       Number(commissionRate) > 12
-//     ) {
-//       return res.status(400).json({
-//         isSuccess: false,
-//         message: "commissionRate must be between 0 and 12",
-//       });
-//     }
+    if (
+      Number(commissionRate) < 0 ||
+      Number(commissionRate) > 12
+    ) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "commissionRate must be between 0 and 12",
+      });
+    }
 
-//     user.commissionRate = Number(commissionRate);
+    user.commissionRate = Number(commissionRate);
 
-//     // =====================================
-//     // STANDARD AMBASSADOR
-//     // =====================================
+    // =====================================
+    // STANDARD AMBASSADOR
+    // =====================================
 
-//     if (user.ambassadorType === "standard") {
-//       await user.save();
+    if (user.ambassadorType === "standard") {
+      await user.save();
 
-//       return res.json({
-//         isSuccess: true,
-//         message: "Standard ambassador updated successfully",
-//         user,
-//       });
-//     }
+      return res.json({
+        isSuccess: true,
+        message: "Standard ambassador updated successfully",
+        user,
+      });
+    }
 
-//     // =====================================
-//     // EXCLUSIVE AMBASSADOR
-//     // =====================================
+    // =====================================
+    // EXCLUSIVE AMBASSADOR
+    // =====================================
 
-//     if (user.ambassadorType === "exclusive") {
+    if (user.ambassadorType === "exclusive") {
 
-//       if (
-//         !territoryIds ||
-//         !Array.isArray(territoryIds) ||
-//         territoryIds.length === 0
-//       ) {
-//         return res.status(400).json({
-//           isSuccess: false,
-//           message: "territoryIds is required",
-//         });
-//       }
+      if (
+        !territoryIds ||
+        !Array.isArray(territoryIds) ||
+        territoryIds.length === 0
+      ) {
+        return res.status(400).json({
+          isSuccess: false,
+          message: "territoryIds is required",
+        });
+      }
 
-//       const uniqueTerritoryIds = [...new Set(territoryIds)];
+      const uniqueTerritoryIds = [...new Set(territoryIds)];
 
-//       const territories = await Territory.find({
-//         _id: {
-//           $in: uniqueTerritoryIds,
-//         },
-//         active: true,
-//       });
+      console.log("[updateAmbassador] Exclusive ambassador territory update", {
+        userId: user._id.toString(),
+        uniqueTerritoryIds,
+      });
 
-//       if (territories.length !== uniqueTerritoryIds.length) {
-//         return res.status(404).json({
-//           isSuccess: false,
-//           message: "One or more territories not found",
-//         });
-//       }
+      const territories = await Territory.find({
+        _id: {
+          $in: uniqueTerritoryIds,
+        },
+        active: true,
+      });
 
-//       // =====================================
-//       // CHECK TERRITORY ALREADY ASSIGNED
-//       // =====================================
+      if (territories.length !== uniqueTerritoryIds.length) {
+        return res.status(404).json({
+          isSuccess: false,
+          message: "One or more territories not found",
+        });
+      }
 
-//       for (const territory of territories) {
-//         if (
-//           territory.exclusiveAmbassador &&
-//           territory.exclusiveAmbassador.toString() !== user._id.toString()
-//         ) {
-//           return res.status(400).json({
-//             isSuccess: false,
-//             message: `${territory.city}, ${territory.country} is already assigned to another ambassador`,
-//           });
-//         }
-//       }
+      // =====================================
+      // CHECK TERRITORY ALREADY ASSIGNED
+      // =====================================
 
-//       // =====================================
-//       // REMOVE OLD TERRITORIES
-//       // =====================================
+      for (const territory of territories) {
+        if (
+          territory.exclusiveAmbassador &&
+          territory.exclusiveAmbassador.toString() !== user._id.toString()
+        ) {
+          return res.status(400).json({
+            isSuccess: false,
+            message: `${territory.city}, ${territory.country} is already assigned to another ambassador`,
+          });
+        }
+      }
 
-//       await Territory.updateMany(
-//         {
-//           exclusiveAmbassador: user._id,
-//         },
-//         {
-//           $set: {
-//             exclusiveAmbassador: null,
-//             assignedAt: null,
-//             reviewDueAt: null,
-//           },
-//         }
-//       );
+      // =====================================
+      // REMOVE OLD TERRITORIES
+      // =====================================
 
-//       // =====================================
-//       // ASSIGN NEW TERRITORIES
-//       // =====================================
+      await Territory.updateMany(
+        {
+          exclusiveAmbassador: user._id,
+        },
+        {
+          $set: {
+            exclusiveAmbassador: null,
+            assignedAt: null,
+            reviewDueAt: null,
+          },
+        }
+      );
 
-//       await Territory.updateMany(
-//         {
-//           _id: {
-//             $in: uniqueTerritoryIds,
-//           },
-//         },
-//         {
-//           $set: {
-//             exclusiveAmbassador: user._id,
-//             assignedAt: new Date(),
-//             reviewDueAt: new Date(
-//               Date.now() + 180 * 24 * 60 * 60 * 1000
-//             ),
-//           },
-//         }
-//       );
+      // =====================================
+      // ASSIGN NEW TERRITORIES
+      // =====================================
 
-//       await user.save();
+      await Territory.updateMany(
+        {
+          _id: {
+            $in: uniqueTerritoryIds,
+          },
+        },
+        {
+          $set: {
+            exclusiveAmbassador: user._id,
+            assignedAt: new Date(),
+            reviewDueAt: new Date(
+              Date.now() + 180 * 24 * 60 * 60 * 1000
+            ),
+          },
+        }
+      );
 
-//       const updatedTerritories = await Territory.find({
-//         exclusiveAmbassador: user._id,
-//       }).select("city country");
+      await user.save();
 
-//       return res.json({
-//         isSuccess: true,
-//         message: "Exclusive ambassador updated successfully",
-//         user,
-//         territories: updatedTerritories,
-//       });
-//     }
+      const updatedTerritories = await Territory.find({
+        exclusiveAmbassador: user._id,
+      }).select("city country");
 
-//     // =====================================
-//     // INVALID TYPE
-//     // =====================================
+      return res.json({
+        isSuccess: true,
+        message: "Exclusive ambassador updated successfully",
+        user,
+        territories: updatedTerritories,
+      });
+    }
 
-//     return res.status(400).json({
-//       isSuccess: false,
-//       message: "Invalid ambassador type",
-//     });
+    // =====================================
+    // INVALID TYPE
+    // =====================================
 
-//   } catch (err) {
-//     console.error("[updateAmbassador]", err);
+    return res.status(400).json({
+      isSuccess: false,
+      message: "Invalid ambassador type",
+    });
 
-//     return res.status(500).json({
-//       isSuccess: false,
-//       message: err.message,
-//     });
-//   }
-// };
+  } catch (err) {
+    console.error("[updateAmbassador]", err);
+
+    return res.status(500).json({
+      isSuccess: false,
+      message: err.message,
+    });
+  }
+};
 exports.handlePayoutCreated = async (payout) => {
   try {
     console.log("[handlePayoutCreated] Start", {

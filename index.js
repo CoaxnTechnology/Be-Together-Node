@@ -113,7 +113,6 @@ app.post(
 // Middleware
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
-
 app.use(
   cors({
     origin: [
@@ -149,7 +148,7 @@ app.get("/api/disclaimer", (req, res) => {
     path.join(
       __dirname,
       "templates",
-      "disclaimer-and-limitation-of-liability.html",
+      "disclaimer_and_limitation_of_liability.html",
     ),
   );
 });
@@ -168,6 +167,9 @@ app.get("/api/legal", (req, res) => {
     path.join(__dirname, "templates", "legal.html")
   );
 });
+
+
+
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 app.use(express.static(path.join(__dirname, "public")));
 

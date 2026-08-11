@@ -493,36 +493,36 @@ exports.bookService = async (req, res) => {
       payment_intent_data: {
         capture_method: "manual",
 
-   metadata: {
-  event: "service_booking",
+        metadata: {
+          event: "service_booking",
 
-  // IDs
-  customerId: customer._id.toString(),
-  providerId: provider._id.toString(),
-  serviceId: serviceDetails._id.toString(),
+          // IDs
+          customerId: customer._id.toString(),
+          providerId: provider._id.toString(),
+          serviceId: serviceDetails._id.toString(),
 
-  // Names
-  customerName: customer.name || "",
-  providerName: provider.name || "",
-  serviceTitle: serviceDetails.title || "",
+          // Names
+          customerName: customer.name || "",
+          providerName: provider.name || "",
+          serviceTitle: serviceDetails.title || "",
 
-  // Emails
-  customerEmail: customer.email || "",
-  providerEmail: provider.email || "",
+          // Emails
+          customerEmail: customer.email || "",
+          providerEmail: provider.email || "",
 
-  // Amounts
-  currency,
-  serviceAmount: amount.toString(),
-  providerAmount: providerAmount.toString(),
-  providerCommission: providerCommissionAmount.toString(),
-  customerCommission: customerCommissionAmount.toString(),
-  totalPaidByCustomer: customerPayable.toString(),
+          // Amounts
+          currency,
+          serviceAmount: amount.toString(),
+          providerAmount: providerAmount.toString(),
+          providerCommission: providerCommissionAmount.toString(),
+          customerCommission: customerCommissionAmount.toString(),
+          totalPaidByCustomer: customerPayable.toString(),
 
-  // Wallet
-  useWallet: String(useWallet),
-  walletCoinsUsed: walletCoinsUsed.toString(),
-  walletAmountUsed: walletAmountUsed.toString(),
-},
+          // Wallet
+          useWallet: String(useWallet),
+          walletCoinsUsed: walletCoinsUsed.toString(),
+          walletAmountUsed: walletAmountUsed.toString(),
+        },
       },
       success_url: `https://yourflutterapp.com/payment-success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `https://yourflutterapp.com/payment-cancel`,
@@ -691,7 +691,7 @@ exports.updateBookingStatus = async (req, res) => {
     // =============================================
     // 📌 Metadata
     // =============================================
-const { userId, providerId, serviceId } = paymentIntent.metadata;
+    const { userId, providerId, serviceId } = paymentIntent.metadata;
     console.log("🔐 Metadata:", session.metadata);
     logPaymentFlow("updateBookingStatus:metadataRead", {
       userId,
@@ -708,9 +708,9 @@ const { userId, providerId, serviceId } = paymentIntent.metadata;
       serviceId,
     });
 
-const customer = await User.findById(userId);
-const provider = await User.findById(providerId);
-const service = await Service.findById(serviceId);
+    const customer = await User.findById(userId);
+    const provider = await User.findById(providerId);
+    const service = await Service.findById(serviceId);
     console.log("👤 Customer:", customer ? "FOUND" : "NOT FOUND");
     console.log("🧑‍🔧 Provider:", provider ? "FOUND" : "NOT FOUND");
     console.log("🛠 Service:", service ? "FOUND" : "NOT FOUND");
@@ -1149,31 +1149,28 @@ exports.completeService = async (req, res) => {
         currency: payment.currency,
         destination: provider.stripeAccountId,
         transfer_group: booking._id.toString(),
-       metadata: {
-    event: "provider_payout",
+        metadata: {
+          event: "provider_payout",
 
-    paymentId: payment._id.toString(),
+          paymentId: payment._id.toString(),
 
-    bookingId: booking._id.toString(),
+          bookingId: booking._id.toString(),
 
-    serviceId: service._id.toString(),
-    serviceTitle: service.title,
+          serviceId: service._id.toString(),
+          serviceTitle: service.title,
 
-    customerId: customer._id.toString(),
-    customerName: customer.name,
+          customerId: customer._id.toString(),
+          customerName: customer.name,
 
-    providerId: provider._id.toString(),
-    providerName: provider.name,
+          providerId: provider._id.toString(),
+          providerName: provider.name,
 
-    transferReason:
-        "Service completed",
+          transferReason: "Service completed",
 
-    amount:
-        payment.providerAmount.toString(),
+          amount: payment.providerAmount.toString(),
 
-    currency:
-        payment.currency,
-},
+          currency: payment.currency,
+        },
       });
 
       transferStatus = "completed";
@@ -1360,7 +1357,7 @@ exports.getUserBookings = async (req, res) => {
           select: "categoryId name",
         },
       })
-      .populate("provider", "name email profile_image")
+      .populate("provider", "name email profile_image ambassadorType")
       .sort({ createdAt: -1 });
     logPaymentFlow("getUserBookings:customerBookingsFetched", {
       userId,
@@ -1376,7 +1373,7 @@ exports.getUserBookings = async (req, res) => {
           select: "categoryId name",
         },
       })
-      .populate("customer", "name email profile_image")
+      .populate("customer", "name email profile_image ambassadorType")
       .sort({ createdAt: -1 });
     logPaymentFlow("getUserBookings:providerBookingsFetched", {
       userId,
@@ -1444,7 +1441,6 @@ exports.getUserBookings = async (req, res) => {
     return res.status(500).json({ message: err.message });
   }
 };
-
 // ------------------------------
 // CANCEL BOOKING + PARTIAL REFUND
 // ------------------------------
@@ -1770,31 +1766,27 @@ exports.refundBooking = async (req, res) => {
       reason: stripeRefundReason,
 
       metadata: {
-    event: "booking_refund",
+        event: "booking_refund",
 
-    paymentId: payment._id.toString(),
+        paymentId: payment._id.toString(),
 
-    bookingId: booking._id.toString(),
+        bookingId: booking._id.toString(),
 
-    serviceId: booking.service._id.toString(),
-    serviceTitle: booking.service.title,
+        serviceId: booking.service._id.toString(),
+        serviceTitle: booking.service.title,
 
-    customerId: booking.customer._id.toString(),
-    customerName: booking.customer.name,
+        customerId: booking.customer._id.toString(),
+        customerName: booking.customer.name,
 
-    providerId: booking.provider._id.toString(),
-    providerName: booking.provider.name,
+        providerId: booking.provider._id.toString(),
+        providerName: booking.provider.name,
 
-    
+        cancellationReason: reason || "No Reason",
 
-    cancellationReason: reason || "No Reason",
+        refundAmount: refundAmount.toString(),
 
-    refundAmount:
-        refundAmount.toString(),
-
-    cancellationFee:
-        cancellationFee.toString(),
-},
+        cancellationFee: cancellationFee.toString(),
+      },
     });
     console.log("🔁 Stripe Refund ID:", refund.id);
     if (refund.status !== "succeeded") {
@@ -1988,45 +1980,45 @@ exports.bookingPreview = async (req, res) => {
         message: "Service not found",
       });
     }
-// ======================
-// Free Service Preview
-// ======================
-if (service.isFree) {
-  return res.json({
-    isSuccess: true,
+    // ======================
+    // Free Service Preview
+    // ======================
+    if (service.isFree) {
+      return res.json({
+        isSuccess: true,
 
-    serviceAmount: 0,
+        serviceAmount: 0,
 
-    currency: service.currency || "EUR",
+        currency: service.currency || "EUR",
 
-    walletBalance: 0,
-    reservedCoins: 0,
-    availableCoins: 0,
-    remainingCoins: 0,
+        walletBalance: 0,
+        reservedCoins: 0,
+        availableCoins: 0,
+        remainingCoins: 0,
 
-    coinValue: 0,
-    redeemPercent: 0,
-    maxRedeemableCoins: 0,
+        coinValue: 0,
+        redeemPercent: 0,
+        maxRedeemableCoins: 0,
 
-    coinsUsed: 0,
-    walletDiscount: 0,
+        coinsUsed: 0,
+        walletDiscount: 0,
 
-    eligibleDiscountPercent: 0,
+        eligibleDiscountPercent: 0,
 
-    finalPayable: 0,
+        finalPayable: 0,
 
-    canRedeem: false,
+        canRedeem: false,
 
-    isOwnService: String(service.user) === String(userId),
+        isOwnService: String(service.user) === String(userId),
 
-    providerCommissionPercent: 0,
-    customerCommissionPercent: 0,
-    customerCommissionAmount: 0,
+        providerCommissionPercent: 0,
+        customerCommissionPercent: 0,
+        customerCommissionAmount: 0,
 
-    useWallet: false,
-    walletEligibleCoins: 0,
-  });
-}
+        useWallet: false,
+        walletEligibleCoins: 0,
+      });
+    }
     logPaymentFlow("bookingPreview:fetchingWallet", { userId });
     const wallet = await Wallet.findOne({
       user: userId,
@@ -2235,13 +2227,13 @@ exports.stripeWebhook = async (req, res) => {
           break;
         }
 
-const { customerId, providerId, serviceId } = paymentIntent.metadata;
+        const { customerId, providerId, serviceId } = paymentIntent.metadata;
 
-console.log("PaymentIntent Metadata:", paymentIntent.metadata);
+        console.log("PaymentIntent Metadata:", paymentIntent.metadata);
 
-const customer = await User.findById(customerId);
-const provider = await User.findById(providerId);
-const service = await Service.findById(serviceId);
+        const customer = await User.findById(customerId);
+        const provider = await User.findById(providerId);
+        const service = await Service.findById(serviceId);
         if (!customer || !provider || !service) {
           console.log("Invalid customer/provider/service");
           break;

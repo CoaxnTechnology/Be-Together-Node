@@ -33,10 +33,15 @@ const userSchema = new mongoose.Schema(
       default: "manual",
     },
     status: {
-      type: String,
-      enum: ["active", "inactive", "banned"],
-      default: "active",
-    },
+  type: String,
+  enum: [
+    "pending_verification",
+    "active",
+    "inactive",
+    "banned",
+  ],
+  default: "pending_verification",
+},
     is_active: { type: Boolean, default: true },
 
     otp_code: { type: String, default: null },
@@ -164,11 +169,6 @@ const userSchema = new mongoose.Schema(
       default: null,
     },
 
-    territory: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Territory",
-      default: null,
-    },
     ambassadorAgreementAccepted: {
       type: Boolean,
       default: false,
@@ -221,22 +221,7 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
-    pendingAmbassadorInvitation: {
-      invitedBy: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "User",
-        default: null,
-      },
-      invitedAt: {
-        type: Date,
-        default: null,
-      },
-      invitationStatus: {
-        type: String,
-        enum: ["pending", "accepted", "declined"],
-        default: "pending",
-      },
-    },
+    
     stripeCustomerId: { type: String, default: null },
     stripeAccountId: { type: String, default: null },
     performancePoints: { type: Number, default: 0 },

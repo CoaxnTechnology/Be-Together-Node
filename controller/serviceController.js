@@ -967,16 +967,18 @@ exports.getInterestedUsers = async (req, res) => {
     // -----------------------------
     // STEP 5: FETCH USERS
     // -----------------------------
-    const mapUsers = await User.find(query)
-      .select("name email profile_image interests languages age lastLocation")
-      .lean();
-
-    const listUsers = await User.find(query)
-      .select("name email profile_image interests languages age lastLocation")
-      .skip(skip)
-      .limit(Number(limit))
-      .lean();
-
+const mapUsers = await User.find(query)
+  .select(
+    "name email profile_image interests languages age lastLocation ambassadorType"
+  )
+  .lean();
+const listUsers = await User.find(query)
+  .select(
+    "name email profile_image interests languages age lastLocation ambassadorType"
+  )
+  .skip(skip)
+  .limit(Number(limit))
+  .lean();
     console.log("📦 mapUsers count:", mapUsers.length);
     console.log("📦 listUsers count:", listUsers.length);
 
@@ -1321,9 +1323,9 @@ exports.getservicbyId = async (req, res) => {
 
     // Populate owner and category
     await service.populate(
-      "owner",
-      "name profile_image notifyOnProfileView fcmToken",
-    );
+  "owner",
+  "name profile_image notifyOnProfileView fcmToken ambassadorType",
+);
     await service.populate("category", "name");
 
     console.log(`✅ Service found: ${service.title}`);

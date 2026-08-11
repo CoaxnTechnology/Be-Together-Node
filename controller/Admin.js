@@ -17,6 +17,7 @@ const csv = require("csv-parser");
 const Booking = require("../model/Booking");
 const Payment = require("../model/Payment");
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
+const PendingAmbassadorAssignment = require("../model/PendingAmbassadorAssignment");
 // ------------------ Cloudinary Config ------------------
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -484,9 +485,11 @@ exports.getUserById = async (req, res) => {
 //--------------------ALL REAL  USER----------
 exports.getAllUsers = async (req, res) => {
   try {
-    const users = await User.find({
+    const filter = {
       $or: [{ is_fake: false }, { is_fake: { $exists: false } }],
-    }).select(`
+    };
+
+    const users = await User.find(filter).select(`
       name
       email
       mobile
@@ -502,13 +505,28 @@ exports.getAllUsers = async (req, res) => {
       commissionRate
       ambassadorCode
     `);
+    const userIds = users.map((u) => u._id);
+
+const pendingAssignments = await PendingAmbassadorAssignment.find({
+  user: { $in: userIds },
+  status: "pending",
+}).select("user");
+
+const pendingMap = new Set(
+  pendingAssignments.map((p) => p.user.toString())
+);
+
+    const response = users.map((user) => ({
+      ...user.toObject(),
+      hasPendingInvitation: pendingMap.has(user._id.toString()),
+    }));
 
     return res.json({
       success: true,
-      data: users,
+      data: response,
     });
   } catch (err) {
-    console.error("Error fetching users:", err);
+    console.error("❌ getAllUsers error:", err);
 
     return res.status(500).json({
       success: false,
@@ -1434,7 +1452,6 @@ exports.updateService = async (req, res) => {
     });
   }
 };
-
 // Admin Login
 const { createAccessToken } = require("../utils/jwt");
 const { sendServiceForceDeletedEmail } = require("../utils/email");
@@ -2210,10 +2227,7 @@ exports.searchServices = async (req, res) => {
 };
 exports.searchUsers = async (req, res) => {
   try {
-    console.log("🔍 User Search API Hit");
-
     const { keyword } = req.query;
-    console.log("👉 Keyword:", keyword);
 
     if (!keyword) {
       return res.status(400).json({
@@ -2225,20 +2239,20 @@ exports.searchUsers = async (req, res) => {
     const trimmedKeyword = keyword.trim();
 
     const conditions = [
-      // Name start match (flexible)
+      // Name starts with
       { name: { $regex: `^${trimmedKeyword}`, $options: "i" } },
 
       // Email contains
       { email: { $regex: trimmedKeyword, $options: "i" } },
 
-      // City start match
+      // City starts with
       { city: { $regex: `^${trimmedKeyword}`, $options: "i" } },
 
       // Mobile exact match
       { mobile: trimmedKeyword },
     ];
 
-    // If numeric → check age exact
+    // Numeric → Age search
     if (!isNaN(trimmedKeyword)) {
       conditions.push({ age: Number(trimmedKeyword) });
     }
@@ -2247,17 +2261,35 @@ exports.searchUsers = async (req, res) => {
       $or: conditions,
     });
 
-    console.log("✅ Users found:", users.length);
+    const userIds = users.map((u) => u._id);
 
-    res.json({
-      success: true,
-      data: users,
-    });
+const pendingAssignments = await PendingAmbassadorAssignment.find({
+  user: { $in: userIds },
+  status: "pending",
+}).select("user");
+
+const pendingMap = new Set(
+  pendingAssignments.map((p) => p.user.toString())
+);
+
+    // ===== DEBUG START =====
+    // ===== DEBUG END =====
+const response = users.map((user) => ({
+  ...user.toObject(),
+  hasPendingInvitation: pendingMap.has(user._id.toString()),
+}));
+
+return res.json({
+  success: true,
+  data: response,
+});
   } catch (error) {
     console.error("🔥 User search error:", error);
-    res.status(500).json({
+
+    return res.status(500).json({
       success: false,
       message: "Search failed",
+      error: error.message,
     });
   }
 };

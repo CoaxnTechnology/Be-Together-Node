@@ -493,36 +493,36 @@ exports.bookService = async (req, res) => {
       payment_intent_data: {
         capture_method: "manual",
 
-   metadata: {
-  event: "service_booking",
+        metadata: {
+          event: "service_booking",
 
-  // IDs
-  customerId: customer._id.toString(),
-  providerId: provider._id.toString(),
-  serviceId: serviceDetails._id.toString(),
+          // IDs
+          customerId: customer._id.toString(),
+          providerId: provider._id.toString(),
+          serviceId: serviceDetails._id.toString(),
 
-  // Names
-  customerName: customer.name || "",
-  providerName: provider.name || "",
-  serviceTitle: serviceDetails.title || "",
+          // Names
+          customerName: customer.name || "",
+          providerName: provider.name || "",
+          serviceTitle: serviceDetails.title || "",
 
-  // Emails
-  customerEmail: customer.email || "",
-  providerEmail: provider.email || "",
+          // Emails
+          customerEmail: customer.email || "",
+          providerEmail: provider.email || "",
 
-  // Amounts
-  currency,
-  serviceAmount: amount.toString(),
-  providerAmount: providerAmount.toString(),
-  providerCommission: providerCommissionAmount.toString(),
-  customerCommission: customerCommissionAmount.toString(),
-  totalPaidByCustomer: customerPayable.toString(),
+          // Amounts
+          currency,
+          serviceAmount: amount.toString(),
+          providerAmount: providerAmount.toString(),
+          providerCommission: providerCommissionAmount.toString(),
+          customerCommission: customerCommissionAmount.toString(),
+          totalPaidByCustomer: customerPayable.toString(),
 
-  // Wallet
-  useWallet: String(useWallet),
-  walletCoinsUsed: walletCoinsUsed.toString(),
-  walletAmountUsed: walletAmountUsed.toString(),
-},
+          // Wallet
+          useWallet: String(useWallet),
+          walletCoinsUsed: walletCoinsUsed.toString(),
+          walletAmountUsed: walletAmountUsed.toString(),
+        },
       },
       success_url: `https://yourflutterapp.com/payment-success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `https://yourflutterapp.com/payment-cancel`,
@@ -691,7 +691,7 @@ exports.updateBookingStatus = async (req, res) => {
     // =============================================
     // 📌 Metadata
     // =============================================
-const { userId, providerId, serviceId } = paymentIntent.metadata;
+    const { userId, providerId, serviceId } = paymentIntent.metadata;
     console.log("🔐 Metadata:", session.metadata);
     logPaymentFlow("updateBookingStatus:metadataRead", {
       userId,
@@ -708,9 +708,9 @@ const { userId, providerId, serviceId } = paymentIntent.metadata;
       serviceId,
     });
 
-const customer = await User.findById(userId);
-const provider = await User.findById(providerId);
-const service = await Service.findById(serviceId);
+    const customer = await User.findById(userId);
+    const provider = await User.findById(providerId);
+    const service = await Service.findById(serviceId);
     console.log("👤 Customer:", customer ? "FOUND" : "NOT FOUND");
     console.log("🧑‍🔧 Provider:", provider ? "FOUND" : "NOT FOUND");
     console.log("🛠 Service:", service ? "FOUND" : "NOT FOUND");
@@ -1149,31 +1149,28 @@ exports.completeService = async (req, res) => {
         currency: payment.currency,
         destination: provider.stripeAccountId,
         transfer_group: booking._id.toString(),
-       metadata: {
-    event: "provider_payout",
+        metadata: {
+          event: "provider_payout",
 
-    paymentId: payment._id.toString(),
+          paymentId: payment._id.toString(),
 
-    bookingId: booking._id.toString(),
+          bookingId: booking._id.toString(),
 
-    serviceId: service._id.toString(),
-    serviceTitle: service.title,
+          serviceId: service._id.toString(),
+          serviceTitle: service.title,
 
-    customerId: customer._id.toString(),
-    customerName: customer.name,
+          customerId: customer._id.toString(),
+          customerName: customer.name,
 
-    providerId: provider._id.toString(),
-    providerName: provider.name,
+          providerId: provider._id.toString(),
+          providerName: provider.name,
 
-    transferReason:
-        "Service completed",
+          transferReason: "Service completed",
 
-    amount:
-        payment.providerAmount.toString(),
+          amount: payment.providerAmount.toString(),
 
-    currency:
-        payment.currency,
-},
+          currency: payment.currency,
+        },
       });
 
       transferStatus = "completed";
@@ -1360,7 +1357,7 @@ exports.getUserBookings = async (req, res) => {
           select: "categoryId name",
         },
       })
-      .populate("provider", "name email profile_image")
+      .populate("provider", "name email profile_image ambassadorType")
       .sort({ createdAt: -1 });
     logPaymentFlow("getUserBookings:customerBookingsFetched", {
       userId,
@@ -1376,7 +1373,7 @@ exports.getUserBookings = async (req, res) => {
           select: "categoryId name",
         },
       })
-      .populate("customer", "name email profile_image")
+      .populate("customer", "name email profile_image ambassadorType")
       .sort({ createdAt: -1 });
     logPaymentFlow("getUserBookings:providerBookingsFetched", {
       userId,
@@ -1444,7 +1441,6 @@ exports.getUserBookings = async (req, res) => {
     return res.status(500).json({ message: err.message });
   }
 };
-
 // ------------------------------
 // CANCEL BOOKING + PARTIAL REFUND
 // ------------------------------
@@ -1677,99 +1673,66 @@ exports.refundBooking = async (req, res) => {
       });
     }
 
-const serviceAmount = payment.originalAmount;
+    let discountedServiceAmount =
+      payment.originalAmount - (payment.walletAmountUsed || 0);
 
-const walletUsed = payment.walletAmountUsed || 0;
+    let cancellationFee = 0;
+    let refundAmount = 0;
+    let platformRetainedAmount = 0;
 
-// Stripe se sirf service ke liye kitna pay hua
-const stripeServicePaid = serviceAmount - walletUsed;
+    if (cancelledBy === "provider") {
+      // Provider ki galti
+      refundAmount = payment.customerPaidAmount;
 
-// Stripe se total kitna pay hua
-// (service + customer commission)
-const stripePaid = payment.customerPaidAmount;
+      cancellationFee = 0;
 
-// Customer commission
-const customerCommission = payment.customerCommissionAmount || 0;
+      platformRetainedAmount = 0;
+    } else {
+      cancellationFee = Number(
+        ((discountedServiceAmount * cancellationPercent) / 100).toFixed(2),
+      );
 
-let cancellationFee = 0;
+      refundAmount = Number(
+        (discountedServiceAmount - cancellationFee).toFixed(2),
+      );
 
-let refundAmount = 0;
-
-let walletRefund = 0;
-
-let stripeRefund = 0;
-
-let platformRetainedAmount = 0;
-
-
-
- if (cancelledBy === "provider") {
-  // Provider cancel → Full refund
-
-  cancellationFee = 0;
-
-  // Wallet coins full refund
-  walletRefund = walletUsed;
-
-  // Stripe se jitna customer ne pay kiya tha
-  // (service + customer commission)
-  stripeRefund = stripePaid;
-
-  // Total refund
-  refundAmount = walletRefund + stripeRefund;
-
-  // Platform kuch retain nahi karega
-  platformRetainedAmount = 0;
-} else {
-  // Customer cancel
-
-  // Cancellation sirf Stripe se paid service amount par lagega
-  cancellationFee = Number(
-    ((stripeServicePaid * cancellationPercent) / 100).toFixed(2),
-  );
-
-  // Wallet coins full refund
-  walletRefund = walletUsed;
-
-  // Stripe refund = service amount - cancellation fee
-  stripeRefund = Number(
-    (stripeServicePaid - cancellationFee).toFixed(2),
-  );
-
-  // Customer ko total refund
-  refundAmount = Number(
-    (walletRefund + stripeRefund).toFixed(2),
-  );
-
-  // Platform cancellation fee + customer commission retain karega
-  platformRetainedAmount = Number(
-    (cancellationFee + customerCommission).toFixed(2),
-  );
-}
+      platformRetainedAmount = Number(
+        (cancellationFee + (payment.customerCommissionAmount || 0)).toFixed(2),
+      );
+    }
     console.log("========== REFUND DEBUG ==========");
     console.log("payment.originalAmount:", payment.originalAmount);
     console.log("payment.walletAmountUsed:", payment.walletAmountUsed);
     console.log("payment.customerPaidAmount:", payment.customerPaidAmount);
-    console.log("payment.customerCommissionAmount:", payment.customerCommissionAmount);
-    console.log("serviceAmount:", serviceAmount);
-    console.log("walletUsed:", walletUsed);
-    console.log("stripeServicePaid:", stripeServicePaid);
+    console.log(
+      "payment.customerCommissionAmount:",
+      payment.customerCommissionAmount,
+    );
+    console.log("discountedServiceAmount:", discountedServiceAmount);
     console.log("cancellationPercent:", cancellationPercent);
     console.log("cancellationFee:", cancellationFee);
     console.log("refundAmount:", refundAmount);
     console.log("==================================");
     console.log(
       "💰 Total Amount:",
-      cancelledBy === "provider" ? payment.customerPaidAmount : stripeServicePaid,
+      cancelledBy === "provider"
+        ? payment.customerPaidAmount
+        : discountedServiceAmount,
     );
     console.log("💰 Cancellation Fee:", cancellationFee);
     console.log("💰 Refundable Amount:", refundAmount);
     logPaymentFlow("refundBooking:refundAmountsCalculated", {
       totalAmount:
-        cancelledBy === "provider" ? payment.customerPaidAmount : stripeServicePaid,
+        cancelledBy === "provider"
+          ? payment.customerPaidAmount
+          : discountedServiceAmount,
+
       cancellationPercent,
+
       cancellationFee,
+
       refundAmount,
+
       platformRetainedAmount,
     });
 
@@ -1799,35 +1762,31 @@ let platformRetainedAmount = 0;
     const stripeRefundReason = "requested_by_customer";
     const refund = await stripe.refunds.create({
       payment_intent: payment.paymentIntentId,
-      amount: Math.round(stripeRefund * 100),
+      amount: Math.round(refundAmount * 100),
       reason: stripeRefundReason,
 
       metadata: {
-    event: "booking_refund",
+        event: "booking_refund",
 
-    paymentId: payment._id.toString(),
+        paymentId: payment._id.toString(),
 
-    bookingId: booking._id.toString(),
+        bookingId: booking._id.toString(),
 
-    serviceId: booking.service._id.toString(),
-    serviceTitle: booking.service.title,
+        serviceId: booking.service._id.toString(),
+        serviceTitle: booking.service.title,
 
-    customerId: booking.customer._id.toString(),
-    customerName: booking.customer.name,
+        customerId: booking.customer._id.toString(),
+        customerName: booking.customer.name,
 
-    providerId: booking.provider._id.toString(),
-    providerName: booking.provider.name,
+        providerId: booking.provider._id.toString(),
+        providerName: booking.provider.name,
 
-    
+        cancellationReason: reason || "No Reason",
 
-    cancellationReason: reason || "No Reason",
+        refundAmount: refundAmount.toString(),
 
-    refundAmount:
-        stripeRefund.toString(),
-
-    cancellationFee:
-        cancellationFee.toString(),
-},
+        cancellationFee: cancellationFee.toString(),
+      },
     });
     console.log("🔁 Stripe Refund ID:", refund.id);
     if (refund.status !== "succeeded") {
@@ -1869,40 +1828,28 @@ let platformRetainedAmount = 0;
       refundAmount: booking.refundAmount,
     });
     if (payment.usedWallet && payment.walletCoinsUsed > 0) {
-  const wallet = await Wallet.findOne({
-    user: booking.customer._id,
-  });
+      const wallet = await Wallet.findOne({
+        user: booking.customer._id,
+      });
 
-  if (wallet) {
-    // Reserved coins release
-    wallet.reservedPoints = Math.max(
-      0,
-      wallet.reservedPoints - payment.walletCoinsUsed,
-    );
+      if (wallet) {
+        wallet.reservedPoints = Math.max(
+          0,
+          wallet.reservedPoints - payment.walletCoinsUsed,
+        );
 
-    // Wallet coins customer ko wapas
- wallet.availablePoints = Number(wallet.availablePoints || 0);
+        await wallet.save();
 
-    await wallet.save();
-
-    // Wallet history
-    await WalletHistory.create({
-      user: booking.customer._id,
-      points: walletRefund,
-      transactionType: "credit",
-      type: "wallet_refund",
-      service: booking.service._id,
-      note: "Wallet coins refunded after cancellation",
-    });
-
-    console.log("✅ Wallet coins refunded", {
-      userId: booking.customer._id,
-      refundedCoins: walletRefund,
-      availablePoints: wallet.availablePoints,
-      reservedPoints: wallet.reservedPoints,
-    });
-  }
-}
+        await WalletHistory.create({
+          user: booking.customer._id,
+          points: payment.walletCoinsUsed,
+          transactionType: "credit",
+          type: "wallet_refund",
+          service: booking.service._id,
+          note: "Wallet coins released after cancellation",
+        });
+      }
+    }
     // ✅ UPDATE PAYMENT
     payment.status = refund.status === "succeeded" ? "refunded" : "pending";
 
@@ -2033,45 +1980,45 @@ exports.bookingPreview = async (req, res) => {
         message: "Service not found",
       });
     }
-// ======================
-// Free Service Preview
-// ======================
-if (service.isFree) {
-  return res.json({
-    isSuccess: true,
+    // ======================
+    // Free Service Preview
+    // ======================
+    if (service.isFree) {
+      return res.json({
+        isSuccess: true,
 
-    serviceAmount: 0,
+        serviceAmount: 0,
 
-    currency: service.currency || "EUR",
+        currency: service.currency || "EUR",
 
-    walletBalance: 0,
-    reservedCoins: 0,
-    availableCoins: 0,
-    remainingCoins: 0,
+        walletBalance: 0,
+        reservedCoins: 0,
+        availableCoins: 0,
+        remainingCoins: 0,
 
-    coinValue: 0,
-    redeemPercent: 0,
-    maxRedeemableCoins: 0,
+        coinValue: 0,
+        redeemPercent: 0,
+        maxRedeemableCoins: 0,
 
-    coinsUsed: 0,
-    walletDiscount: 0,
+        coinsUsed: 0,
+        walletDiscount: 0,
 
-    eligibleDiscountPercent: 0,
+        eligibleDiscountPercent: 0,
 
-    finalPayable: 0,
+        finalPayable: 0,
 
-    canRedeem: false,
+        canRedeem: false,
 
-    isOwnService: String(service.user) === String(userId),
+        isOwnService: String(service.user) === String(userId),
 
-    providerCommissionPercent: 0,
-    customerCommissionPercent: 0,
-    customerCommissionAmount: 0,
+        providerCommissionPercent: 0,
+        customerCommissionPercent: 0,
+        customerCommissionAmount: 0,
 
-    useWallet: false,
-    walletEligibleCoins: 0,
-  });
-}
+        useWallet: false,
+        walletEligibleCoins: 0,
+      });
+    }
     logPaymentFlow("bookingPreview:fetchingWallet", { userId });
     const wallet = await Wallet.findOne({
       user: userId,
@@ -2280,13 +2227,13 @@ exports.stripeWebhook = async (req, res) => {
           break;
         }
 
-const { customerId, providerId, serviceId } = paymentIntent.metadata;
+        const { customerId, providerId, serviceId } = paymentIntent.metadata;
 
-console.log("PaymentIntent Metadata:", paymentIntent.metadata);
+        console.log("PaymentIntent Metadata:", paymentIntent.metadata);
 
-const customer = await User.findById(customerId);
-const provider = await User.findById(providerId);
-const service = await Service.findById(serviceId);
+        const customer = await User.findById(customerId);
+        const provider = await User.findById(providerId);
+        const service = await Service.findById(serviceId);
         if (!customer || !provider || !service) {
           console.log("Invalid customer/provider/service");
           break;

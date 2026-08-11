@@ -1321,9 +1321,9 @@ exports.getservicbyId = async (req, res) => {
 
     // Populate owner and category
     await service.populate(
-      "owner",
-      "name profile_image notifyOnProfileView fcmToken",
-    );
+  "owner",
+  "name profile_image notifyOnProfileView fcmToken ambassadorType",
+);
     await service.populate("category", "name");
 
     console.log(`✅ Service found: ${service.title}`);

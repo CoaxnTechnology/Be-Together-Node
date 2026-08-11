@@ -516,6 +516,7 @@ exports.getProfileById = async (req, res) => {
         offeredTags: user.offeredTags || [],
         age: user.age || null,
         servicesCount: user.services.length,
+          ambassadorType: user.ambassadorType || null,
         services: user.services || [],
         servicesCount: servicesWithRating.length, // total services
         services: servicesWithRating, // full service details with avg rating

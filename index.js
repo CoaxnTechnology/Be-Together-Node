@@ -115,18 +115,47 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(
   cors({
-    origin: [
-      "https://uat.admin.betogetherapp.com",
-      "https://uat.betogetherapp.com",
-      "https://admin.betogetherapp.com",
-      "https://betogetherapp.com",
-      "http://localhost:8080",
-    ], // Allow all origins (not recommended for production)
-    methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
+    origin: function (origin, callback) {
+      // Postman / server-to-server requests
+      if (!origin) {
+        return callback(null, true);
+      }
+
+      // Allow ANY localhost / 127.0.0.1 port
+      const isLocalhost =
+        /^http:\/\/localhost(:\d+)?$/.test(origin) ||
+        /^http:\/\/127\.0\.0\.1(:\d+)?$/.test(origin);
+
+      if (isLocalhost) {
+        return callback(null, true);
+      }
+
+      // Allow your production/UAT domains
+      const allowedOrigins = [
+        "https://uat.admin.betogetherapp.com",
+        "https://uat.betogetherapp.com",
+        "https://admin.betogetherapp.com",
+        "https://betogetherapp.com",
+      ];
+
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      return callback(new Error("Not allowed by CORS"));
+    },
+
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "X-Requested-With",
+    ],
+
     credentials: true,
-  }),
-);
-connectDB();
+  })
+);connectDB();
 
 // Route to serve terms_and_conditions.html
 app.get("/api/terms", (req, res) => {

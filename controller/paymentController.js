@@ -187,14 +187,68 @@ exports.bookService = async (req, res) => {
     });
 
     if (existingPayment) {
-      logPaymentFlow("bookService:blockingDuplicatePayment", {
-        paymentId: existingPayment._id,
-      });
-      return res.status(400).json({
-        isSuccess: false,
-        message: "Payment already in progress. Please do not pay again.",
-        paymentId: existingPayment._id,
-      });
+      // ⭐ Don't trust the DB blindly — verify with Stripe whether the
+      // customer actually completed (or is mid-way through) the checkout,
+      // or whether they simply abandoned it and came back without paying.
+      let releasedStalePayment = false;
+
+      try {
+        if (existingPayment.status === "pending" && existingPayment.paymentIntentId) {
+          const existingIntent = await stripe.paymentIntents.retrieve(
+            existingPayment.paymentIntentId,
+          );
+          logPaymentFlow("bookService:existingPaymentIntentStatus", {
+            paymentId: existingPayment._id,
+            intentStatus: existingIntent.status,
+          });
+
+          // Customer never finished paying on the Stripe page → safe to release
+          if (
+            ["requires_payment_method", "requires_action", "canceled"].includes(
+              existingIntent.status,
+            )
+          ) {
+            existingPayment.status = "canceled";
+            existingPayment.failureReason =
+              "Checkout abandoned by customer — released to allow rebooking";
+            await existingPayment.save();
+
+            if (existingPayment.walletCoinsUsed > 0) {
+              const staleWallet = await Wallet.findOne({ user: userId });
+              if (staleWallet) {
+                staleWallet.reservedPoints = Math.max(
+                  0,
+                  (staleWallet.reservedPoints || 0) -
+                    existingPayment.walletCoinsUsed,
+                );
+                await staleWallet.save();
+              }
+            }
+
+            logPaymentFlow("bookService:staleExistingPaymentReleased", {
+              paymentId: existingPayment._id,
+              intentStatus: existingIntent.status,
+            });
+            releasedStalePayment = true;
+          }
+        }
+      } catch (stripeCheckErr) {
+        logPaymentError(
+          "bookService:existingPaymentStripeCheckFailed",
+          stripeCheckErr,
+        );
+      }
+
+      if (!releasedStalePayment) {
+        logPaymentFlow("bookService:blockingDuplicatePayment", {
+          paymentId: existingPayment._id,
+        });
+        return res.status(400).json({
+          isSuccess: false,
+          message: "Payment already in progress. Please do not pay again.",
+          paymentId: existingPayment._id,
+        });
+      }
     }
 
     if (serviceDetails.isFree) {
@@ -1441,6 +1495,7 @@ exports.getUserBookings = async (req, res) => {
     return res.status(500).json({ message: err.message });
   }
 };
+
 // ------------------------------
 // CANCEL BOOKING + PARTIAL REFUND
 // ------------------------------

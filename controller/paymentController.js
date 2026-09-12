@@ -48,8 +48,11 @@ const logPaymentError = (step, err) => {
 // -----------------------------
 // 1️⃣ Create Stripe Checkout Session (Booking not yet confirmed)
 // -----------------------------
+console.log("🔖🔖🔖 paymentController.js FILE LOADED — FIX_MARKER: STALE_PAYMENT_RELEASE_V1 🔖🔖🔖");
+
 exports.bookService = async (req, res) => {
   try {
+    console.log("🔥🔥🔥 bookService HIT — running FIX_MARKER: STALE_PAYMENT_RELEASE_V1 🔥🔥🔥");
     logPaymentFlow("bookService:start", {
       body: req.body,
     });

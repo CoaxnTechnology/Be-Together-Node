@@ -214,13 +214,42 @@ exports.bookService = async (req, res) => {
               sessionStatus: existingSession.status,
             });
 
-            // Stripe itself has no PaymentIntent for this session and the
-            // session is no longer open → definitely abandoned, safe to release.
-            if (!intentId && existingSession.status !== "open") {
+            // ⭐ No PaymentIntent exists on Stripe's side at all → the customer
+            // never got as far as submitting payment details, so no money can
+            // possibly be in flight. Safe to release regardless of whether the
+            // session itself still shows "open" (it stays "open" for up to 24h
+            // by default no matter what the customer actually did).
+            if (!intentId) {
+              if (existingSession.status === "open") {
+                try {
+                  await stripe.checkout.sessions.expire(
+                    existingPayment.checkoutSessionId,
+                  );
+                } catch (expireErr) {
+                  logPaymentError(
+                    "bookService:existingSessionExpireFailed",
+                    expireErr,
+                  );
+                }
+              }
+
               existingPayment.status = "canceled";
               existingPayment.failureReason =
-                "Checkout abandoned by customer — released to allow rebooking (no payment intent, session not open)";
+                "No payment was ever initiated for this checkout — released to allow rebooking";
               await existingPayment.save();
+
+              if (existingPayment.walletCoinsUsed > 0) {
+                const staleWallet = await Wallet.findOne({ user: userId });
+                if (staleWallet) {
+                  staleWallet.reservedPoints = Math.max(
+                    0,
+                    (staleWallet.reservedPoints || 0) -
+                      existingPayment.walletCoinsUsed,
+                  );
+                  await staleWallet.save();
+                }
+              }
+
               logPaymentFlow("bookService:staleExistingPaymentReleasedNoIntent", {
                 paymentId: existingPayment._id,
                 sessionStatus: existingSession.status,

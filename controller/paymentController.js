@@ -196,25 +196,57 @@ exports.bookService = async (req, res) => {
       let releasedStalePayment = false;
 
       try {
-        if (existingPayment.status === "pending" && existingPayment.paymentIntentId) {
-          const existingIntent = await stripe.paymentIntents.retrieve(
-            existingPayment.paymentIntentId,
-          );
-          logPaymentFlow("bookService:existingPaymentIntentStatus", {
-            paymentId: existingPayment._id,
-            intentStatus: existingIntent.status,
-          });
+        if (existingPayment.status === "pending") {
+          let intentId = existingPayment.paymentIntentId;
 
-          // Customer never finished paying on the Stripe page → safe to release
-          if (
-            ["requires_payment_method", "requires_action", "canceled"].includes(
-              existingIntent.status,
-            )
-          ) {
-            existingPayment.status = "canceled";
-            existingPayment.failureReason =
-              "Checkout abandoned by customer — released to allow rebooking";
-            await existingPayment.save();
+          // ⭐ Some older/edge-case records were saved without paymentIntentId
+          // (e.g. Stripe didn't return it synchronously at creation time).
+          // Recover it from the checkout session before giving up.
+          if (!intentId && existingPayment.checkoutSessionId) {
+            const existingSession = await stripe.checkout.sessions.retrieve(
+              existingPayment.checkoutSessionId,
+            );
+            intentId = existingSession.payment_intent || null;
+            logPaymentFlow("bookService:existingPaymentIntentRecoveredFromSession", {
+              paymentId: existingPayment._id,
+              checkoutSessionId: existingPayment.checkoutSessionId,
+              recoveredIntentId: intentId,
+              sessionStatus: existingSession.status,
+            });
+
+            // Stripe itself has no PaymentIntent for this session and the
+            // session is no longer open → definitely abandoned, safe to release.
+            if (!intentId && existingSession.status !== "open") {
+              existingPayment.status = "canceled";
+              existingPayment.failureReason =
+                "Checkout abandoned by customer — released to allow rebooking (no payment intent, session not open)";
+              await existingPayment.save();
+              logPaymentFlow("bookService:staleExistingPaymentReleasedNoIntent", {
+                paymentId: existingPayment._id,
+                sessionStatus: existingSession.status,
+              });
+              releasedStalePayment = true;
+            }
+          }
+
+          if (!releasedStalePayment && intentId) {
+            const existingIntent = await stripe.paymentIntents.retrieve(intentId);
+            logPaymentFlow("bookService:existingPaymentIntentStatus", {
+              paymentId: existingPayment._id,
+              intentStatus: existingIntent.status,
+            });
+
+            // Customer never finished paying on the Stripe page → safe to release
+            if (
+              ["requires_payment_method", "requires_action", "canceled"].includes(
+                existingIntent.status,
+              )
+            ) {
+              existingPayment.status = "canceled";
+              existingPayment.paymentIntentId = intentId; // backfill for future checks
+              existingPayment.failureReason =
+                "Checkout abandoned by customer — released to allow rebooking";
+              await existingPayment.save();
 
             if (existingPayment.walletCoinsUsed > 0) {
               const staleWallet = await Wallet.findOne({ user: userId });
@@ -233,6 +265,7 @@ exports.bookService = async (req, res) => {
               intentStatus: existingIntent.status,
             });
             releasedStalePayment = true;
+            }
           }
         }
       } catch (stripeCheckErr) {

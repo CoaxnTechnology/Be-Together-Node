@@ -1,40 +1,24 @@
 const express = require("express");
 const router = express.Router();
 const multer = require("multer");
-const fs = require("fs");
-const path = require("path");
 const blogController = require("../controller/blogController");
 const adminAuth = require("../Middleware/adminAuth");
 
 // ==================================================
-// 🖼 BLOG IMAGES (local disk — uploads/blog_images)
+// 🖼 BLOG IMAGES
+// Kept in memory only — blogController compresses/resizes the buffer with
+// sharp and writes the final optimized file to uploads/blog_images itself,
+// so raw (uncompressed) uploads never touch disk.
 // ==================================================
-const blogImageStorage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    const uploadDir = path.join(process.cwd(), "uploads", "blog_images");
-
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-      console.log("📁 uploads/blog_images folder auto-created");
-    }
-
-    cb(null, uploadDir);
-  },
-  filename: function (req, file, cb) {
-    const uniqueName =
-      "blog_" +
-      Date.now() +
-      "_" +
-      Math.round(Math.random() * 1e9) +
-      path.extname(file.originalname);
-
-    cb(null, uniqueName);
-  },
-});
-
 const uploadBlogImage = multer({
-  storage: blogImageStorage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 8 * 1024 * 1024 }, // 8 MB raw upload cap (before compression)
+  fileFilter: function (req, file, cb) {
+    if (!file.mimetype || !file.mimetype.startsWith("image/")) {
+      return cb(new Error("Only image files are allowed for featuredImage"));
+    }
+    cb(null, true);
+  },
 });
 
 // ==================================================

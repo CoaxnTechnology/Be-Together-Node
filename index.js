@@ -35,6 +35,8 @@ const adminWalletConfigRoutes = require("./routes/adminWalletConfigRoutes");
 const ambassadorRoutes = require("./routes/ambassadorRoutes");
 const territoryRoutes = require("./routes/territoryRoutes");
 const blogRoutes = require("./routes/blogRoutes");
+const serviceRequestRoutes = require("./routes/serviceRequestRoutes");
+const homeFeedRoutes = require("./routes/homeFeedRoutes");
 // --- KEEP RAW ONLY FOR GITHUB ---
 app.post(
   "/webhook/github",
@@ -178,7 +180,7 @@ app.get("/api/disclaimer", (req, res) => {
     path.join(
       __dirname,
       "templates",
-      "disclaimer_and_limitation_of_liability.html",
+      "disclaimer-and-limitation-of-liability.html",
     ),
   );
 });
@@ -243,6 +245,8 @@ app.use("/api/wallet", walletRoutes);
 app.use("/api/admin", adminWalletConfigRoutes);
 app.use("/api/account", deleteAccountRoutes);
 app.use("/api/blogs", blogRoutes);
+app.use("/api/service-requests", serviceRequestRoutes);
+app.use("/api/home", homeFeedRoutes);
 console.log("Product ID:", process.env.STRIPE_PROMOTION_PRODUCT_ID);
 console.log("apple client ID:", process.env.APPLE_CLIENT_ID);
 console.log("reset password link:", process.env.FRONTEND_RESET_URL);

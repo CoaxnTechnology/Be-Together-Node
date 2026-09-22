@@ -1,8 +1,14 @@
 const fs = require("fs");
 const path = require("path");
+const sharp = require("sharp");
 const Blog = require("../model/Blog");
 
 const BLOG_IMAGE_DIR = path.join(process.cwd(), "uploads", "blog_images");
+
+// Blog images only ever need to be this wide for the site's layout — anything
+// bigger just slows down page load without looking any sharper.
+const BLOG_IMAGE_MAX_WIDTH = 1600;
+const BLOG_IMAGE_QUALITY = 75; // webp quality — good balance of size vs. clarity
 
 // ---------- Helpers ----------
 function slugify(text = "") {
@@ -82,10 +88,32 @@ function buildImageUrl(filename) {
   return `${process.env.BASE_URL}/uploads/blog_images/${filename}`;
 }
 
+// Resizes + compresses an uploaded image buffer (multer memoryStorage) and
+// writes it to BLOG_IMAGE_DIR as .webp, so blog images stay small and fast
+// to load regardless of what the admin originally uploaded.
+async function saveCompressedBlogImage(buffer) {
+  if (!fs.existsSync(BLOG_IMAGE_DIR)) {
+    fs.mkdirSync(BLOG_IMAGE_DIR, { recursive: true });
+    console.log("📁 uploads/blog_images folder auto-created");
+  }
+
+  const filename = `blog_${Date.now()}_${Math.round(Math.random() * 1e9)}.webp`;
+  const filePath = path.join(BLOG_IMAGE_DIR, filename);
+
+  await sharp(buffer)
+    .rotate() // respect EXIF orientation before resizing
+    .resize({ width: BLOG_IMAGE_MAX_WIDTH, withoutEnlargement: true })
+    .webp({ quality: BLOG_IMAGE_QUALITY })
+    .toFile(filePath);
+
+  return filename;
+}
+
 // =====================================================================
 // ADMIN: CREATE BLOG
 // =====================================================================
 exports.createBlog = async (req, res) => {
+  let savedImageFilename = null;
   try {
     const {
       title,
@@ -127,7 +155,8 @@ exports.createBlog = async (req, res) => {
 
     let imageUrl = featuredImage || null;
     if (req.file) {
-      imageUrl = buildImageUrl(req.file.filename);
+      savedImageFilename = await saveCompressedBlogImage(req.file.buffer);
+      imageUrl = buildImageUrl(savedImageFilename);
     }
 
     const finalStatus = status === "published" ? "published" : "draft";
@@ -157,8 +186,8 @@ exports.createBlog = async (req, res) => {
       data: blog,
     });
   } catch (err) {
-    // Uploaded file already saved to disk — clean it up since the DB write failed
-    if (req.file) deleteLocalBlogImage(req.file.filename);
+    // Compressed file already written to disk — clean it up since the DB write failed
+    if (savedImageFilename) deleteLocalBlogImage(savedImageFilename);
 
     if (err.code === 11000) {
       return res
@@ -240,11 +269,11 @@ exports.getBlogByIdAdmin = async (req, res) => {
 // ADMIN: UPDATE BLOG
 // =====================================================================
 exports.updateBlog = async (req, res) => {
+  let savedImageFilename = null;
   try {
     const { id } = req.params;
     const blog = await Blog.findById(id);
     if (!blog) {
-      if (req.file) deleteLocalBlogImage(req.file.filename);
       return res
         .status(404)
         .json({ isSuccess: false, message: "Blog not found" });
@@ -292,8 +321,9 @@ exports.updateBlog = async (req, res) => {
 
     // Featured image: new file > explicit removal > explicit URL string
     if (req.file) {
+      savedImageFilename = await saveCompressedBlogImage(req.file.buffer);
       deleteLocalBlogImage(blog.featuredImage); // ⭐ delete OLD image
-      blog.featuredImage = buildImageUrl(req.file.filename);
+      blog.featuredImage = buildImageUrl(savedImageFilename);
     } else if (toBoolean(removeFeaturedImage)) {
       deleteLocalBlogImage(blog.featuredImage);
       blog.featuredImage = null;
@@ -319,7 +349,7 @@ exports.updateBlog = async (req, res) => {
       data: blog,
     });
   } catch (err) {
-    if (req.file) deleteLocalBlogImage(req.file.filename);
+    if (savedImageFilename) deleteLocalBlogImage(savedImageFilename);
 
     if (err.code === 11000) {
       return res

@@ -1058,7 +1058,156 @@ async function sendAmbassadorInvitationNotification(invitedUser) {
 //     console.error("❌ notifyServiceOwnerOnSubscription error:", err.message);
 //   }
 // }
+// ------------------------------------------------------------------
+// SERVICE REQUEST NOTIFICATIONS ("I need X" posts)
+// ------------------------------------------------------------------
+const SERVICE_REQUEST_RADIUS_KM = 30;
+const SERVICE_REQUEST_MAX_NOTIFIED = 50;
+
+function buildServiceRequestMessage(request, ownerName, distance) {
+  return {
+    title: "🙋 Someone near you needs help",
+    body: `${ownerName} is looking for "${request.title}" (${distance.toFixed(
+      1,
+    )} km away)`,
+  };
+}
+
+async function notifyNearbyUsersForRequest(request) {
+  try {
+    console.log(
+      `🚀 Starting notification for service request "${request.title}"`,
+    );
+
+    const owner = await User.findById(request.owner).select(
+      "name email profile_image",
+    );
+    const ownerName = owner?.name || "Someone";
+
+    // Broaden the match with the request's category name/tags — same
+    // expansion getInterestedUsers() does for category-based search.
+    let matchTags = Array.isArray(request.tags) ? [...request.tags] : [];
+    if (request.category) {
+      const category = await Category.findById(request.category).select(
+        "name tags",
+      );
+      if (category) {
+        if (category.name) matchTags.push(category.name);
+        if (Array.isArray(category.tags)) matchTags.push(...category.tags);
+      }
+    }
+    matchTags = [...new Set(matchTags.map((t) => String(t).toLowerCase()))];
+
+    if (!matchTags.length) {
+      console.log(
+        "⚠️ Service request has no tags/category to match — skipping notification fan-out",
+      );
+      return 0;
+    }
+
+    const candidates = await User.find({
+      interests: { $in: matchTags },
+      is_active: true,
+      _id: { $ne: request.owner },
+    });
+
+    console.log(
+      `Found ${candidates.length} active users with matching interests`,
+    );
+
+    // Compute distance for everyone in range, then cap the fan-out to the
+    // nearest N so one popular tag near a dense city can't blast hundreds
+    // of push notifications.
+    const [reqLng, reqLat] = request.location.coordinates;
+    const inRange = [];
+    for (const user of candidates) {
+      if (!user.fcmToken?.length) continue;
+      if (!user.lastLocation?.coords?.coordinates) continue;
+
+      const dist = getDistanceFromLatLonInKm(
+        reqLat,
+        reqLng,
+        user.lastLocation.coords.coordinates[1],
+        user.lastLocation.coords.coordinates[0],
+      );
+
+      if (dist > SERVICE_REQUEST_RADIUS_KM) continue;
+
+      inRange.push({ user, dist });
+    }
+
+    inRange.sort((a, b) => a.dist - b.dist);
+    const toNotify = inRange.slice(0, SERVICE_REQUEST_MAX_NOTIFIED);
+
+    let notifiedUsers = [];
+
+    for (const { user, dist } of toNotify) {
+      const key = `sr-${user._id}-${request._id}`;
+      if (!global.notifiedMap) global.notifiedMap = {};
+      if (global.notifiedMap[key]) {
+        console.log(
+          `⏱ Already notified ${user.name} for this request, skipping`,
+        );
+        continue;
+      }
+
+      const message = buildServiceRequestMessage(request, ownerName, dist);
+      const payload = {
+        tokens: user.fcmToken,
+        notification: { title: message.title, body: message.body },
+        data: {
+          type: "ServiceRequest",
+          pageType: "ServiceRequestDetailsPage",
+          requestId: request._id.toString(),
+          requestTitle: request.title || "",
+          ownerId: request.owner.toString(),
+          ownerName: ownerName,
+          ownerEmail: owner?.email || "",
+          ownerProfileImage: owner?.profile_image || "",
+          distanceKm: dist.toFixed(1),
+        },
+      };
+
+      try {
+        const response = await admin.messaging().sendEachForMulticast(payload);
+        response.responses.forEach((res, index) => {
+          const token = payload.tokens[index];
+          if (res.success) console.log(`✅ Sent to token: ${token}`);
+          else
+            console.log(
+              `❌ Failed for token: ${token} - ${res.error?.message}`,
+            );
+        });
+
+        global.notifiedMap[key] = true;
+        notifiedUsers.push(user.name);
+      } catch (err) {
+        console.error(
+          `❌ Failed to send request notification to ${user.name}:`,
+          err.message,
+        );
+      }
+    }
+
+    console.log(
+      `🎯 Finished notification for service request "${request.title}"`,
+    );
+    console.log(`📣 Total users notified: ${notifiedUsers.length}`);
+    if (notifiedUsers.length > 0)
+      console.log(`Users notified: ${notifiedUsers.join(", ")}`);
+
+    return notifiedUsers.length;
+  } catch (err) {
+    console.error(
+      `❌ Notification error for service request "${request.title}":`,
+      err.message,
+    );
+    return 0;
+  }
+}
+
 // Exports
+exports.notifyOnNewServiceRequest = notifyNearbyUsersForRequest;
 exports.notifyOnNewService = (service) => notifyUsersForService(service, "new");
 exports.notifyOnUpdate = (service) => notifyUsersForService(service, "update");
 exports.notifyOnUserInterestUpdate = notifyNearbyUsersOnInterestUpdate;

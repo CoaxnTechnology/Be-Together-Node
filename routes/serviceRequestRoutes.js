@@ -12,7 +12,9 @@ router.post("/create", authMiddleware, serviceRequestController.createServiceReq
 router.post("/list", optionalAuth, serviceRequestController.getServiceRequests);
 
 router.get("/my", authMiddleware, serviceRequestController.getMyServiceRequests);
-router.get("/:id", authMiddleware, serviceRequestController.getServiceRequestById);
+// Public — anyone can view a request. Pass ?userId=<viewer id> so the
+// response can tell the creator not to show the booking button.
+router.get("/:id", serviceRequestController.getServiceRequestById);
 router.put(
   "/:id/status",
   authMiddleware,

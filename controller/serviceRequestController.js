@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const ServiceRequest = require("../model/ServiceRequest");
 const User = require("../model/User");
 const Category = require("../model/Category");
@@ -518,6 +519,14 @@ exports.getMyServiceRequests = async (req, res) => {
 exports.getServiceRequestById = async (req, res) => {
   try {
     const { id } = req.params;
+    const { userId } = req.query; // optional — viewer's id, no auth required
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res
+        .status(400)
+        .json({ isSuccess: false, message: "Invalid service request id" });
+    }
+
     const request = await ServiceRequest.findById(id)
       .populate("category", "name")
       .populate("owner", "name profile_image")
@@ -529,10 +538,17 @@ exports.getServiceRequestById = async (req, res) => {
         .json({ isSuccess: false, message: "Service request not found" });
     }
 
+    const ownerId = request.owner?._id || request.owner;
+    const isOwner = Boolean(userId) && String(ownerId) === String(userId);
+
     return res.json({
       isSuccess: true,
       message: "Service request fetched successfully",
-      data: decorateRequest(request),
+      data: {
+        ...decorateRequest(request),
+        isOwner,
+        showBookingButton: !isOwner,
+      },
     });
   } catch (err) {
     console.error("getServiceRequestById error:", err);

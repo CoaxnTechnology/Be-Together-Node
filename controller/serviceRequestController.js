@@ -9,7 +9,6 @@ const {
   timeAgo,
 } = require("../utils/dateTimeFormat");
 
-const MAX_REQUESTS_PER_DAY = 5;
 const SERVICE_TYPES = ["doorstep", "pickDrop", "atTheirPlace"];
 
 // Adds display-friendly fields to a plain (lean) ServiceRequest object:
@@ -283,22 +282,6 @@ exports.createServiceRequest = async (req, res) => {
       return res.status(400).json({
         isSuccess: false,
         message: "schedule date/time must be in the future",
-      });
-    }
-
-    // -----------------------------
-    // Rate limit: max N open requests created in the last 24h
-    // -----------------------------
-    const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const recentCount = await ServiceRequest.countDocuments({
-      owner: userId,
-      createdAt: { $gte: since },
-    });
-
-    if (recentCount >= MAX_REQUESTS_PER_DAY) {
-      return res.status(429).json({
-        isSuccess: false,
-        message: `You can only create ${MAX_REQUESTS_PER_DAY} requests per day. Please try again later.`,
       });
     }
 

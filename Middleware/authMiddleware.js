@@ -1,6 +1,6 @@
 const User = require("../model/User");
 const { decodeToken } = require("../utils/jwt");
-const { liftExpiredBan } = require("../utils/banUser");
+const { liftExpiredBan, getBanMessage } = require("../utils/banUser");
 
 async function authMiddleware(req, res, next) {
   try {
@@ -46,7 +46,7 @@ async function authMiddleware(req, res, next) {
       return res.status(403).json({
         success: false,
         code: "USER_BLOCKED",
-        message: "Your account has been blocked by admin",
+        message: getBanMessage(user),
       });
     }
 

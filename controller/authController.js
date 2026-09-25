@@ -4,7 +4,7 @@ const mongoose = require("mongoose");
 const User = require("../model/User");
 const { createAccessToken } = require("../utils/jwt");
 const { generateOTP } = require("../utils/otp");
-const { liftExpiredBan } = require("../utils/banUser");
+const { liftExpiredBan, getBanMessage } = require("../utils/banUser");
 const { sendOtpEmail, sendResetEmail } = require("../utils/email");
 const { getFullImageUrl } = require("../utils/image");
 const { randomUUID } = require("crypto");
@@ -669,7 +669,7 @@ exports.verifyOtpRegister = async (req, res) => {
     if (user.status === "banned" || user.is_active === false) {
       return res.status(403).json({
         IsSucces: false,
-        message: "Your account has been blocked by admin",
+        message: getBanMessage(user),
       });
     }
 
@@ -765,7 +765,7 @@ exports.login = async (req, res) => {
     if (user && (user.status === "banned" || user.is_active === false)) {
       return res.status(403).json({
         IsSucces: false,
-        message: "Your account has been blocked by admin",
+        message: getBanMessage(user),
       });
     }
 
@@ -1161,7 +1161,7 @@ exports.verifyOtpLogin = async (req, res) => {
     if (user.status === "banned" || user.is_active === false) {
       return res.status(403).json({
         IsSucces: false,
-        message: "Your account has been blocked by admin",
+        message: getBanMessage(user),
       });
     }
 
@@ -1299,7 +1299,7 @@ exports.resendOtp = async (req, res) => {
     if (user.status === "banned" || user.is_active === false) {
       return res.status(403).json({
         IsSucces: false,
-        message: "Your account has been blocked by admin",
+        message: getBanMessage(user),
       });
     }
 
@@ -1430,7 +1430,7 @@ exports.forgotOrResetPassword = async (req, res) => {
       console.log("🚫 User blocked");
       return res.status(403).json({
         isSuccess: false,
-        message: "Your account has been blocked by admin",
+        message: getBanMessage(user),
       });
     }
 

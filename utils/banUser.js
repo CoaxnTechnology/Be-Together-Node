@@ -38,4 +38,20 @@ async function liftExpiredBan(user) {
   return false;
 }
 
-module.exports = { banUser, liftExpiredBan };
+// One shared message builder so every login/OTP/reset check (and the auth
+// middleware) shows the exact same wording — a temporary restriction tells
+// the user when it lifts and to contact support; a permanent block doesn't
+// imply an end date.
+function getBanMessage(user) {
+  if (user.bannedUntil) {
+    const until = new Date(user.bannedUntil).toLocaleDateString("en-GB", {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    });
+    return `Your account has been restricted until ${until} due to a reported incident. Please contact admin support if you have questions.`;
+  }
+  return "Your account has been blocked by admin.";
+}
+
+module.exports = { banUser, liftExpiredBan, getBanMessage };

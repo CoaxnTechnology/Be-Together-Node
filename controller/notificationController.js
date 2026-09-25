@@ -1206,7 +1206,176 @@ async function notifyNearbyUsersForRequest(request) {
   }
 }
 
+// =====================================================================
+// SINGLE-RECIPIENT NOTIFICATIONS — Offer / Join / Quotation Change
+// (client-finalized 24 Sep 2026 Service Request booking flow)
+// Same sendEachForMulticast payload shape as the broadcast functions
+// above, just targeted at exactly one user instead of a radius search —
+// extracted into one helper so the 6 call sites below don't duplicate it.
+// =====================================================================
+async function sendUserNotification(user, title, body, data = {}) {
+  try {
+    if (!user?.fcmToken?.length) {
+      console.log(`⚠️ No fcmToken for user ${user?._id} — skipping notification`);
+      return false;
+    }
+    const payload = {
+      tokens: user.fcmToken,
+      notification: { title, body },
+      data: Object.fromEntries(
+        Object.entries(data).map(([k, v]) => [k, String(v ?? "")]),
+      ),
+    };
+    const response = await admin.messaging().sendEachForMulticast(payload);
+    response.responses.forEach((res, index) => {
+      const token = payload.tokens[index];
+      if (res.success) console.log(`✅ Sent to token: ${token}`);
+      else console.log(`❌ Failed for token: ${token} - ${res.error?.message}`);
+    });
+    return true;
+  } catch (err) {
+    console.error(`❌ sendUserNotification error for user ${user?._id}:`, err.message);
+    return false;
+  }
+}
+
+async function notifyNewOffer(request, offer) {
+  const owner = await User.findById(request.owner).select("fcmToken");
+  const provider = await User.findById(offer.provider).select("name");
+  if (!owner) return;
+  await sendUserNotification(
+    owner,
+    "💬 New Offer received",
+    `${provider?.name || "A provider"} offered ${offer.currency || ""} ${offer.amount} for "${request.title}"`,
+    {
+      type: "ServiceRequestOffer",
+      pageType: "ServiceRequestOffersPage",
+      requestId: request._id,
+      offerId: offer._id,
+    },
+  );
+}
+
+async function notifyOfferAccepted(request, offer) {
+  const provider = await User.findById(offer.provider).select("fcmToken");
+  if (!provider) return;
+  await sendUserNotification(
+    provider,
+    "🎉 Your Offer was accepted",
+    `Your offer of ${offer.currency || ""} ${offer.amount} for "${request.title}" was accepted`,
+    {
+      type: "ServiceRequestOffer",
+      pageType: "ServiceRequestOffersPage",
+      requestId: request._id,
+      offerId: offer._id,
+    },
+  );
+}
+
+async function notifyOfferDeclined(request, offer) {
+  const provider = await User.findById(offer.provider).select("fcmToken");
+  if (!provider) return;
+  await sendUserNotification(
+    provider,
+    "Offer not selected this time",
+    `Your offer for "${request.title}" was not selected — another provider was chosen`,
+    {
+      type: "ServiceRequestOffer",
+      pageType: "ServiceRequestOffersPage",
+      requestId: request._id,
+      offerId: offer._id,
+    },
+  );
+}
+
+async function notifyGroupFilled(request) {
+  const owner = await User.findById(request.owner).select("fcmToken");
+  if (!owner) return;
+  await sendUserNotification(
+    owner,
+    "✅ Your request is full",
+    `"${request.title}" has reached its required participants`,
+    {
+      type: "ServiceRequest",
+      pageType: "ServiceRequestDetailsPage",
+      requestId: request._id,
+    },
+  );
+}
+
+async function notifyQuotationChangeSubmitted(quotationChange, booking) {
+  const customer = await User.findById(booking.customer).select("fcmToken");
+  if (!customer) return;
+  await sendUserNotification(
+    customer,
+    "📝 Updated price proposed",
+    `The provider proposed a new price: ${quotationChange.proposedAmount} (was ${quotationChange.previousAmount})`,
+    {
+      type: "QuotationChange",
+      pageType: "BookingDetailsPage",
+      bookingId: booking._id,
+      quotationChangeId: quotationChange._id,
+    },
+  );
+}
+
+async function notifyQuotationChangeResponded(quotationChange, booking) {
+  const provider = await User.findById(booking.provider).select("fcmToken");
+  if (!provider) return;
+  const accepted = quotationChange.status === "accepted";
+  await sendUserNotification(
+    provider,
+    accepted ? "✅ Price change accepted" : "Price change rejected",
+    accepted
+      ? `The customer accepted the new price of ${quotationChange.proposedAmount}`
+      : `The customer rejected the new price of ${quotationChange.proposedAmount}`,
+    {
+      type: "QuotationChange",
+      pageType: "BookingDetailsPage",
+      bookingId: booking._id,
+      quotationChangeId: quotationChange._id,
+    },
+  );
+}
+
+// =====================================================================
+// REPORT RESOLUTION — push notification to the reported user once admin
+// takes an action (warn/restrict/block). Not sent for "dismiss" (nothing
+// happened) or "refund" (that's between the customer and admin, not a
+// notice about the reported user's own account standing).
+// =====================================================================
+async function notifyReportOutcome(user, adminAction, notes) {
+  if (!user) return;
+  const titles = {
+    warned: "⚠️ Account Warning",
+    restricted: "🚫 Account Temporarily Restricted",
+    blocked: "⛔ Account Blocked",
+  };
+  const bodies = {
+    warned:
+      "You've received a warning following a reported incident. Repeated issues may lead to a temporary or permanent restriction.",
+    restricted:
+      "Your account has been restricted for 7 days due to a reported incident.",
+    blocked: "Your account has been blocked due to a reported incident.",
+  };
+  const title = titles[adminAction];
+  const body = bodies[adminAction];
+  if (!title || !body) return;
+  await sendUserNotification(user, title, notes ? `${body} (${notes})` : body, {
+    type: "report_outcome",
+    adminAction,
+  });
+}
+
 // Exports
+exports.sendUserNotification = sendUserNotification;
+exports.notifyReportOutcome = notifyReportOutcome;
+exports.notifyNewOffer = notifyNewOffer;
+exports.notifyOfferAccepted = notifyOfferAccepted;
+exports.notifyOfferDeclined = notifyOfferDeclined;
+exports.notifyGroupFilled = notifyGroupFilled;
+exports.notifyQuotationChangeSubmitted = notifyQuotationChangeSubmitted;
+exports.notifyQuotationChangeResponded = notifyQuotationChangeResponded;
 exports.notifyOnNewServiceRequest = notifyNearbyUsersForRequest;
 exports.notifyOnNewService = (service) => notifyUsersForService(service, "new");
 exports.notifyOnUpdate = (service) => notifyUsersForService(service, "update");

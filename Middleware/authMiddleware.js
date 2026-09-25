@@ -1,5 +1,6 @@
 const User = require("../model/User");
 const { decodeToken } = require("../utils/jwt");
+const { liftExpiredBan } = require("../utils/banUser");
 
 async function authMiddleware(req, res, next) {
   try {
@@ -25,7 +26,7 @@ async function authMiddleware(req, res, next) {
     }
 
     const user = await User.findById(decoded.id).select(
-      "_id status is_active session_id",
+      "_id status is_active session_id bannedUntil",
     );
 
     if (!user) {
@@ -35,6 +36,10 @@ async function authMiddleware(req, res, next) {
         message: "User not found",
       });
     }
+
+    // ⭐ A temporary (e.g. 7-day) ban self-heals here once it's passed —
+    // no cron job needed.
+    await liftExpiredBan(user);
 
     // 🔴 BLOCK CHECK (CORRECT PLACE)
     if (user.status === "banned" || user.is_active === false) {

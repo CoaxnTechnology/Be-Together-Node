@@ -14,7 +14,20 @@ const bookingSchema = new mongoose.Schema(
     service: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Service",
-      required: true,
+      // Required unless this booking came from a Service Request instead
+      // (see `serviceRequest` below) — existing Service bookings are
+      // unaffected since they never set `serviceRequest`.
+      required: function () {
+        return !this.serviceRequest;
+      },
+    },
+    // ⭐ Set instead of `service` when this booking was created from the
+    // Service Request flow (paid_fixed / paid_offer) — lets Booking History
+    // label the entry as a "Request Booking" via a simple populate.
+    serviceRequest: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ServiceRequest",
+      default: null,
     },
     // ⭐ NEW FIELDS
     contactPhone: { type: String, required: true }, // phone required

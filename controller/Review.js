@@ -2,47 +2,89 @@ const mongoose = require("mongoose");
 const Review = require("../model/review");
 const Service = require("../model/Service");
 const User = require("../model/User");
+const Booking = require("../model/Booking");
 
-// Create a review
+// Create a review — now gated on a real, completed booking (previously
+// anyone could review any service at any time, any number of times).
+// Works for both Service- and Service-Request-sourced bookings, since the
+// provider is derived from `booking.provider`, not `service.owner`.
 exports.createReview = async (req, res) => {
   try {
-    const { serviceId, userId, rating, text } = req.body;
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ isSuccess: false, message: "Unauthorized" });
+    }
+    const { bookingId, rating, text } = req.body;
 
-    if (!serviceId || !userId || rating == null) {
-      return res.status(400).json({ 
-        isSuccess: false, 
-        message: "serviceId, userId and rating are required" 
+    if (!bookingId || rating == null) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "bookingId and rating are required",
       });
     }
 
-    const service = await Service.findById(serviceId);
-    if (!service) return res.status(404).json({ isSuccess: false, message: "Service not found" });
+    const booking = await Booking.findById(bookingId);
+    if (!booking) {
+      return res.status(404).json({ isSuccess: false, message: "Booking not found" });
+    }
+    if (String(booking.customer) !== String(userId)) {
+      return res.status(403).json({
+        isSuccess: false,
+        message: "You can only review your own booking",
+      });
+    }
+    if (booking.status !== "completed") {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "You can only review a booking once the service is completed",
+      });
+    }
 
-    const user = await User.findById(userId);
-    if (!user) return res.status(404).json({ isSuccess: false, message: "User not found" });
+    const existing = await Review.findOne({ booking: booking._id });
+    if (existing) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "You have already reviewed this booking",
+      });
+    }
 
     const review = new Review({
-      service: service._id,
-      user: user._id,
+      service: booking.service || null,
+      booking: booking._id,
+      provider: booking.provider,
+      user: userId,
       rating: Number(rating),
       text: text || "",
     });
 
     await review.save();
 
-    return res.json({ 
-      isSuccess: true, 
-      message: "Review submitted successfully", 
-      data: review 
+    return res.status(201).json({
+      isSuccess: true,
+      message: "Review submitted successfully",
+      data: review,
     });
   } catch (err) {
     console.error("createReview error:", err);
-    return res.status(500).json({ 
-      isSuccess: false, 
-      message: "Server error", 
-      error: err.message 
+    return res.status(500).json({
+      isSuccess: false,
+      message: "Server error",
+      error: err.message,
     });
   }
+};
+
+// Small reusable helper — average rating + count for a provider, same
+// calc style as getServiceReviews below. Used by serviceRequestController.js
+// to rank Offers / nearby requests by the provider's rating.
+exports.getProviderRating = async (providerId) => {
+  const reviews = await Review.find({ provider: providerId }).select("rating");
+  if (!reviews.length) return { averageRating: 0, totalReviews: 0 };
+  const total = reviews.reduce((sum, r) => sum + r.rating, 0);
+  return {
+    averageRating: Number((total / reviews.length).toFixed(1)),
+    totalReviews: reviews.length,
+  };
 };
 
 // Get reviews for a service

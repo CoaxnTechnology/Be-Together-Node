@@ -4,6 +4,7 @@ const mongoose = require("mongoose");
 const User = require("../model/User");
 const { createAccessToken } = require("../utils/jwt");
 const { generateOTP } = require("../utils/otp");
+const { liftExpiredBan } = require("../utils/banUser");
 const { sendOtpEmail, sendResetEmail } = require("../utils/email");
 const { getFullImageUrl } = require("../utils/image");
 const { randomUUID } = require("crypto");
@@ -664,6 +665,7 @@ exports.verifyOtpRegister = async (req, res) => {
         .status(404)
         .json({ IsSucces: false, message: "User not found" });
     }
+    await liftExpiredBan(user);
     if (user.status === "banned" || user.is_active === false) {
       return res.status(403).json({
         IsSucces: false,
@@ -759,6 +761,7 @@ exports.login = async (req, res) => {
     }
 
     console.log("🔍 Fetched user from DB:", user);
+    if (user) await liftExpiredBan(user);
     if (user && (user.status === "banned" || user.is_active === false)) {
       return res.status(403).json({
         IsSucces: false,
@@ -1154,6 +1157,7 @@ exports.verifyOtpLogin = async (req, res) => {
         .status(404)
         .json({ IsSucces: false, message: "User not found" });
     }
+    await liftExpiredBan(user);
     if (user.status === "banned" || user.is_active === false) {
       return res.status(403).json({
         IsSucces: false,
@@ -1291,6 +1295,7 @@ exports.resendOtp = async (req, res) => {
         .status(404)
         .json({ IsSucces: false, message: "User not found" });
     }
+    await liftExpiredBan(user);
     if (user.status === "banned" || user.is_active === false) {
       return res.status(403).json({
         IsSucces: false,
@@ -1420,6 +1425,7 @@ exports.forgotOrResetPassword = async (req, res) => {
 
     console.log("👤 User found:", user._id);
 
+    await liftExpiredBan(user);
     if (user.status === "banned" || user.is_active === false) {
       console.log("🚫 User blocked");
       return res.status(403).json({

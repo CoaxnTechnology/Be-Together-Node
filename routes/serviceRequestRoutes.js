@@ -22,4 +22,25 @@ router.put(
 );
 router.delete("/:id", authMiddleware, serviceRequestController.deleteServiceRequest);
 
+// ⭐ Booking flows (client-finalized 24 Sep 2026)
+// Category A — Paid, Fixed Price: book a seat directly.
+router.post("/:id/book", authMiddleware, serviceRequestController.bookFixedRequest);
+
+// Category B — Paid, Offer-Based: submit / list / withdraw / accept.
+router.post("/:id/offers", authMiddleware, serviceRequestController.submitOffer);
+router.get("/:id/offers", authMiddleware, serviceRequestController.listOffers);
+router.delete(
+  "/:id/offers/:offerId",
+  authMiddleware,
+  serviceRequestController.withdrawOffer,
+);
+router.post(
+  "/:id/offers/:offerId/accept",
+  authMiddleware,
+  serviceRequestController.acceptOffer,
+);
+
+// Category C & D — Free (single) / Free Group: Join.
+router.post("/:id/join", authMiddleware, serviceRequestController.joinRequest);
+
 module.exports = router;

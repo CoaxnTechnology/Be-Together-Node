@@ -74,9 +74,31 @@ exports.getHomeHighlights = async (req, res) => {
       return res.status(401).json({ isSuccess: false, message: "Unauthorized" });
     }
 
-    const user = await User.findById(userId).select("interests lastLocation");
+    const user = await User.findById(userId).select(
+      "interests lastLocation accountNotice",
+    );
     if (!user) {
       return res.status(404).json({ isSuccess: false, message: "User not found" });
+    }
+
+    // ⭐ Report-resolution notice (warned/restricted/blocked) — shown for a
+    // short window after admin resolves a report against this user. Checked
+    // at read-time against `expiresAt`; nothing needs to clear it once it
+    // passes, it just stops being included here.
+    let accountNoticeItem = null;
+    if (
+      user.accountNotice?.expiresAt &&
+      new Date(user.accountNotice.expiresAt) > new Date()
+    ) {
+      accountNoticeItem = {
+        type: "account_notice",
+        message: user.accountNotice.message,
+        data: {
+          noticeType: user.accountNotice.noticeType,
+          issuedAt: user.accountNotice.issuedAt,
+          expiresAt: user.accountNotice.expiresAt,
+        },
+      };
     }
 
     // -----------------------------
@@ -226,6 +248,48 @@ exports.getHomeHighlights = async (req, res) => {
     // -----------------------------
     const aggregates = [];
 
+    // ⭐ "Live Demand" banner — how many nearby users are asking for
+    // something in this user's own interest area, i.e. demand for what they
+    // can provide (opposite direction from the "new services near you"
+    // aggregate below, which counts nearby offers, not nearby demand).
+    // Based purely on user.interests (confirmed) — counts nearby
+    // ServiceRequests, not Services. When there's no interest match, no
+    // banner is added here — the existing random nearby highlights below
+    // already cover "show everything nearest" in that case.
+    if (interests.length) {
+      const demandByTag = {};
+      for (const request of nearbyRequests) {
+        const requestTags = [
+          ...(request.tags || []),
+          request.category?.name || "",
+        ].map((t) => t.toLowerCase());
+        for (const tag of interests) {
+          if (requestTags.includes(tag)) {
+            demandByTag[tag] = (demandByTag[tag] || 0) + 1;
+          }
+        }
+      }
+      const bestTag = Object.keys(demandByTag).reduce(
+        (best, tag) => (demandByTag[tag] > (demandByTag[best] || 0) ? tag : best),
+        null,
+      );
+      const bestCount = bestTag ? demandByTag[bestTag] : 0;
+
+      if (bestCount >= 1) {
+        const matchedRequest = nearbyRequests.find((r) =>
+          [...(r.tags || []), r.category?.name || ""]
+            .map((t) => t.toLowerCase())
+            .includes(bestTag),
+        );
+        const categoryLabel = matchedRequest?.category?.name || bestTag;
+        aggregates.unshift({
+          type: "live_demand",
+          message: `${bestCount} user${bestCount === 1 ? "" : "s"} need${bestCount === 1 ? "s" : ""} your service — ${categoryLabel}, near you`,
+          data: { count: bestCount, category: categoryLabel },
+        });
+      }
+    }
+
     const recentCount = nearbyServices.filter(
       (s) => new Date(s.createdAt) >= recentSince,
     ).length;
@@ -257,10 +321,14 @@ exports.getHomeHighlights = async (req, res) => {
       }
     }
 
-    const highlights = [...aggregates, ...topIndividualItems].slice(
-      0,
-      MAX_HIGHLIGHTS,
-    );
+    // ⭐ Account notice always leads, and doesn't count against the normal
+    // cap — it's a personal alert, not competing with nearby-activity items.
+    const highlights = accountNoticeItem
+      ? [
+          accountNoticeItem,
+          ...[...aggregates, ...topIndividualItems].slice(0, MAX_HIGHLIGHTS),
+        ]
+      : [...aggregates, ...topIndividualItems].slice(0, MAX_HIGHLIGHTS);
 
     return res.json({
       isSuccess: true,

@@ -11,7 +11,26 @@ const paymentSchema = new mongoose.Schema(
     service: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Service",
-      required: true,
+      // Required unless this payment came from a Service Request booking
+      // instead (see `serviceRequest`) — existing Service payments are
+      // unaffected since they never set `serviceRequest`.
+      required: function () {
+        return !this.serviceRequest;
+      },
+    },
+    // ⭐ Set instead of `service` when this payment was created from the
+    // Service Request flow (paid_fixed / paid_offer).
+    serviceRequest: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ServiceRequest",
+      default: null,
+    },
+    // Set only for paid_offer bookings — the specific accepted Offer this
+    // payment was created for (kept for traceability/history).
+    serviceRequestOffer: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ServiceRequestOffer",
+      default: null,
     },
     contactPhone: { type: String },
     location_name: { type: String, default: null },

@@ -17,7 +17,6 @@ const commissionRoutes = require("./routes/adminCommissionRoutes");
 const cancellationRoutes = require("./routes/adminCancellationRoutes");
 const stripeRoutes = require("./routes/stripeConnectRoutes");
 const paymentRoutes = require("./routes/paymentRoutes");
-const paymentViolationRoutes = require("./routes/paymentViolationRoutes");
 const deleteAccountRoutes = require("./routes/deleteaccountRoutes");
 const connectDB = require("./utils/connect");
 const app = express();
@@ -37,6 +36,7 @@ const territoryRoutes = require("./routes/territoryRoutes");
 const blogRoutes = require("./routes/blogRoutes");
 const serviceRequestRoutes = require("./routes/serviceRequestRoutes");
 const homeFeedRoutes = require("./routes/homeFeedRoutes");
+const adminNotificationRoutes = require("./routes/adminNotificationRoutes");
 // --- KEEP RAW ONLY FOR GITHUB ---
 app.post(
   "/webhook/github",
@@ -234,7 +234,6 @@ app.use("/api/admin/cancellation", cancellationRoutes);
 
 app.use("/api/stripe/connect", stripeRoutes);
 app.use("/api/payments", paymentRoutes);
-app.use("/api/payment/violation", paymentViolationRoutes);
 app.use("/api/promotion", promotionSubscription);
 app.use("/api", promotionPlanAdminRoutes);
 // Connect to MongoDB (live Atlas)
@@ -247,6 +246,7 @@ app.use("/api/account", deleteAccountRoutes);
 app.use("/api/blogs", blogRoutes);
 app.use("/api/service-requests", serviceRequestRoutes);
 app.use("/api/home", homeFeedRoutes);
+app.use("/api/admin/notifications", adminNotificationRoutes);
 console.log("Product ID:", process.env.STRIPE_PROMOTION_PRODUCT_ID);
 console.log("apple client ID:", process.env.APPLE_CLIENT_ID);
 console.log("reset password link:", process.env.FRONTEND_RESET_URL);

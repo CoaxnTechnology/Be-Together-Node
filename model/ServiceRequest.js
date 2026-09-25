@@ -45,6 +45,24 @@ const serviceRequestSchema = new mongoose.Schema(
 
     numberOfParticipants: { type: Number, default: 1, min: 1 },
 
+    // ⭐ Which of the 4 final booking flows this request uses (client-finalized
+    // 24 Sep 2026): paid_fixed = fixed price, many seats ("Book Now");
+    // paid_offer = providers submit a priced Offer, owner Accepts one or more
+    // ("Submit Offer"); free_single = one Join wins ("Join"); free_group =
+    // many Join until numberOfParticipants is reached ("Join").
+    requestMode: {
+      type: String,
+      enum: ["paid_fixed", "paid_offer", "free_single", "free_group"],
+      required: true,
+    },
+
+    // Atomic seat counter for paid_fixed / free_group (capped at
+    // numberOfParticipants) and for paid_offer's "accept N offers" case.
+    seatsBooked: { type: Number, default: 0, min: 0 },
+
+    // Only set for free_single once someone Joins (first Join wins).
+    joinedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+
     category: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Category",

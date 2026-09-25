@@ -18,6 +18,7 @@ const Booking = require("../model/Booking");
 const Payment = require("../model/Payment");
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const PendingAmbassadorAssignment = require("../model/PendingAmbassadorAssignment");
+const { banUser } = require("../utils/banUser");
 // ------------------ Cloudinary Config ------------------
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -1951,21 +1952,9 @@ exports.blockUser = async (req, res) => {
       fcmTokens: user.fcmToken?.length || 0,
     });
 
-    // 🔥 BLOCK USER
+    // 🔥 BLOCK USER — shared helper (also used by the Reports resolve action)
     console.log("🚫 Blocking user now...");
-    user.status = "banned";
-    user.is_active = false;
-
-    // 🔥 kill all sessions
-    console.log("🔐 Clearing session & access token");
-    user.session_id = null;
-    user.access_token = null;
-
-    // 🔥 mobile push logout
-    console.log("📵 Clearing FCM tokens");
-    user.fcmToken = [];
-
-    await user.save();
+    await banUser(user);
 
     console.log("✅ USER BLOCKED SUCCESSFULLY:", {
       id: user._id,

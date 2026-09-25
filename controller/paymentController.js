@@ -1,4 +1,5 @@
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
+const cron = require("node-cron");
 const endpointSecret = process.env.STRIPE_PAYMENT_WEBHOOK_SECRET;
 const ambassadorEndpointSecret = process.env.STRIPE_AMBASSADOR_WEBHOOK_SECRET;
 console.log("Stripe Webhook Secret:", endpointSecret);
@@ -17,10 +18,15 @@ const {
   sendServiceStartedNotification,
   sendServiceCompletedNotification,
   sendServiceCancelledNotification,
+  notifyQuotationChangeSubmitted,
+  notifyQuotationChangeResponded,
 } = require("../controller/notificationController"); // ✅ import it
 const CancellationSetting = require("../model/CancellationSetting");
 const User = require("../model/User");
 const Service = require("../model/Service");
+const ServiceRequest = require("../model/ServiceRequest");
+const ServiceRequestOffer = require("../model/ServiceRequestOffer");
+const QuotationChange = require("../model/QuotationChange");
 const Payment = require("../model/Payment");
 const Booking = require("../model/Booking");
 const CommissionSetting = require("../model/CommissionSetting");
@@ -60,6 +66,8 @@ exports.bookService = async (req, res) => {
       userId,
       providerId,
       serviceId,
+      serviceRequestId, // ⭐ set instead of serviceId for a Service Request booking (paid_fixed/paid_offer)
+      offerId, // ⭐ set alongside serviceRequestId for a paid_offer booking (the accepted Offer)
       phone, // REQUIRED
       location_name, // OPTIONAL
       latitude, // OPTIONAL
@@ -73,14 +81,16 @@ exports.bookService = async (req, res) => {
       userId,
       providerId,
       serviceId,
+      serviceRequestId,
       hasPhone: Boolean(phone),
       useWallet,
     });
-    if (!userId || !providerId || !serviceId) {
+    if (!userId || !providerId || (!serviceId && !serviceRequestId)) {
       logPaymentFlow("bookService:missingRequiredData", {
         userId,
         providerId,
         serviceId,
+        serviceRequestId,
       });
       return res.status(400).json({
         isSuccess: false,
@@ -109,7 +119,43 @@ exports.bookService = async (req, res) => {
     });
     const customer = await User.findById(userId);
     const provider = await User.findById(providerId);
-    const serviceDetails = await Service.findById(serviceId);
+
+    // ⭐ Service Request booking (paid_fixed / paid_offer) — build a
+    // Service-shaped object so every line below (commission calc, wallet
+    // redemption, Stripe session, Payment.create) runs completely
+    // unchanged. The caller (serviceRequestController.js) has already
+    // resolved/validated `providerId` and the request/offer before
+    // calling this same function.
+    let serviceDetails;
+    if (serviceRequestId) {
+      const serviceRequestDoc = await ServiceRequest.findById(serviceRequestId);
+      if (!serviceRequestDoc) {
+        return res
+          .status(404)
+          .json({ isSuccess: false, message: "Service request not found" });
+      }
+      let resolvedAmount = serviceRequestDoc.budget?.amount;
+      if (offerId) {
+        const offerDoc = await ServiceRequestOffer.findById(offerId);
+        if (!offerDoc) {
+          return res
+            .status(404)
+            .json({ isSuccess: false, message: "Offer not found" });
+        }
+        resolvedAmount = offerDoc.amount;
+      }
+      serviceDetails = {
+        _id: null,
+        user: providerId,
+        title: serviceRequestDoc.title,
+        description: serviceRequestDoc.description,
+        currency: serviceRequestDoc.budget?.currency || "EUR",
+        isFree: false,
+        price: resolvedAmount,
+      };
+    } else {
+      serviceDetails = await Service.findById(serviceId);
+    }
     logPaymentFlow("bookService:dataFetched", {
       customerFound: Boolean(customer),
       providerFound: Boolean(provider),
@@ -181,7 +227,9 @@ exports.bookService = async (req, res) => {
     const existingPayment = await Payment.findOne({
       user: userId,
       provider: providerId,
-      service: serviceId,
+      ...(serviceRequestId
+        ? { serviceRequest: serviceRequestId }
+        : { service: serviceId }),
       status: { $in: ["pending", "held"] },
     });
     logPaymentFlow("bookService:existingPaymentChecked", {
@@ -250,6 +298,20 @@ exports.bookService = async (req, res) => {
                 }
               }
 
+              // ⭐ Release the seat this abandoned Payment had reserved on a
+              // Service Request (Category A/B) — reuses this exact
+              // stale-detection logic instead of a separate mechanism.
+              if (existingPayment.serviceRequest) {
+                await ServiceRequest.updateOne(
+                  { _id: existingPayment.serviceRequest, seatsBooked: { $gt: 0 } },
+                  { $inc: { seatsBooked: -1 } },
+                );
+                await ServiceRequest.updateOne(
+                  { _id: existingPayment.serviceRequest, status: "fulfilled" },
+                  { status: "open" },
+                );
+              }
+
               logPaymentFlow("bookService:staleExistingPaymentReleasedNoIntent", {
                 paymentId: existingPayment._id,
                 sessionStatus: existingSession.status,
@@ -287,6 +349,19 @@ exports.bookService = async (req, res) => {
                 );
                 await staleWallet.save();
               }
+            }
+
+            // ⭐ Release the seat this abandoned Payment had reserved on a
+            // Service Request (Category A/B).
+            if (existingPayment.serviceRequest) {
+              await ServiceRequest.updateOne(
+                { _id: existingPayment.serviceRequest, seatsBooked: { $gt: 0 } },
+                { $inc: { seatsBooked: -1 } },
+              );
+              await ServiceRequest.updateOne(
+                { _id: existingPayment.serviceRequest, status: "fulfilled" },
+                { status: "open" },
+              );
             }
 
             logPaymentFlow("bookService:staleExistingPaymentReleased", {
@@ -610,15 +685,21 @@ exports.bookService = async (req, res) => {
         },
       ],
       payment_intent_data: {
-        capture_method: "manual",
-
+        // ⭐ Automatic capture — customer is charged immediately at booking.
+        // Funds sit in the platform's Stripe balance until completeService()
+        // transfers the provider's share when the job is finished.
         metadata: {
-          event: "service_booking",
+          event: serviceRequestId ? "service_request_booking" : "service_booking",
 
           // IDs
           customerId: customer._id.toString(),
           providerId: provider._id.toString(),
-          serviceId: serviceDetails._id.toString(),
+          ...(serviceRequestId
+            ? {
+                serviceRequestId: serviceRequestId.toString(),
+                ...(offerId && { offerId: offerId.toString() }),
+              }
+            : { serviceId: serviceDetails._id.toString() }),
 
           // Names
           customerName: customer.name || "",
@@ -664,7 +745,12 @@ exports.bookService = async (req, res) => {
     const payment = await Payment.create({
       user: userId,
       provider: providerId,
-      service: serviceId,
+      ...(serviceRequestId
+        ? {
+            serviceRequest: serviceRequestId,
+            ...(offerId && { serviceRequestOffer: offerId }),
+          }
+        : { service: serviceId }),
       checkoutSessionId: session.id,
       customerStripeId,
       providerStripeId: provider.stripeAccountId,
@@ -766,9 +852,9 @@ exports.updateBookingStatus = async (req, res) => {
       metadata: paymentIntent.metadata,
     });
 
-    if (paymentIntent.status !== "requires_capture") {
-      console.log("❌ Payment NOT in requires_capture state.");
-      logPaymentFlow("updateBookingStatus:paymentNotRequiresCapture", {
+    if (paymentIntent.status !== "succeeded") {
+      console.log("❌ Payment NOT in succeeded state.");
+      logPaymentFlow("updateBookingStatus:paymentNotSucceeded", {
         status: paymentIntent.status,
       });
       return res.status(400).json({ message: "Payment not completed" });
@@ -1476,6 +1562,9 @@ exports.getUserBookings = async (req, res) => {
           select: "categoryId name",
         },
       })
+      // ⭐ Set instead of `service` for a Service Request booking — lets
+      // the app label this history entry "Request Booking".
+      .populate("serviceRequest", "title requestMode")
       .populate("provider", "name email profile_image ambassadorType")
       .sort({ createdAt: -1 });
     logPaymentFlow("getUserBookings:customerBookingsFetched", {
@@ -1492,6 +1581,7 @@ exports.getUserBookings = async (req, res) => {
           select: "categoryId name",
         },
       })
+      .populate("serviceRequest", "title requestMode")
       .populate("customer", "name email profile_image ambassadorType")
       .sort({ createdAt: -1 });
     logPaymentFlow("getUserBookings:providerBookingsFetched", {
@@ -1509,7 +1599,9 @@ exports.getUserBookings = async (req, res) => {
       bookings.push({
         bookingId: b._id,
         role: "customer",
+        bookingType: b.serviceRequest ? "request" : "service",
         service: b.service,
+        serviceRequest: b.serviceRequest,
         otherUser: b.provider,
         // ✅ ADD THESE
         contactPhone: b.contactPhone,
@@ -1531,7 +1623,9 @@ exports.getUserBookings = async (req, res) => {
       bookings.push({
         bookingId: b._id,
         role: "provider",
+        bookingType: b.serviceRequest ? "request" : "service",
         service: b.service,
+        serviceRequest: b.serviceRequest,
         otherUser: b.customer,
         // ✅ ADD THESE
         contactPhone: b.contactPhone,
@@ -1621,17 +1715,31 @@ exports.refundBooking = async (req, res) => {
     }
 
     if (booking.status === "started") {
-      logPaymentFlow("refundBooking:blockedStartedBooking", {
-        bookingId,
-        status: booking.status,
-      });
-      return res.status(400).json({
-        isSuccess: false,
-        message: "Service already started. Cancellation not allowed.",
-      });
-    }
+      // ⭐ Narrow exception (client-finalized 24 Sep 2026): a provider may
+      // decline the remaining work if the customer rejected their
+      // Quotation Change — this does NOT loosen cancellation for any other
+      // "started" booking, only this specific already-rejected case.
+      const rejectedQuotationChange =
+        cancelledBy === "provider" &&
+        (await QuotationChange.findOne({
+          booking: booking._id,
+          status: "rejected",
+        }));
 
-    if (booking.status !== "booked") {
+      if (!rejectedQuotationChange) {
+        logPaymentFlow("refundBooking:blockedStartedBooking", {
+          bookingId,
+          status: booking.status,
+        });
+        return res.status(400).json({
+          isSuccess: false,
+          message: "Service already started. Cancellation not allowed.",
+        });
+      }
+      logPaymentFlow("refundBooking:providerDeclineAfterRejectedQuotationChange", {
+        bookingId,
+      });
+    } else if (booking.status !== "booked") {
       logPaymentFlow("refundBooking:blockedNonBookedStatus", {
         bookingId,
         status: booking.status,
@@ -2078,6 +2186,261 @@ exports.refundBooking = async (req, res) => {
     return res.status(500).json({ message: err.message });
   }
 };
+
+// =====================================================================
+// QUOTATION CHANGE — post-booking price revision for a "paid_offer"
+// Service Request booking (client-finalized 24 Sep 2026). There is no
+// visit/inspection fee anywhere in the platform; this is the single
+// adjustment mechanism, and it only ever runs on an already
+// confirmed+paid booking.
+// =====================================================================
+exports.createQuotationChange = async (req, res) => {
+  try {
+    const providerId = req.user?.id;
+    if (!providerId) {
+      return res.status(401).json({ isSuccess: false, message: "Unauthorized" });
+    }
+    const { bookingId } = req.params;
+    const { proposedAmount, reason } = req.body;
+
+    const amountNum = Number(proposedAmount);
+    if (!Number.isFinite(amountNum) || amountNum <= 0) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "A positive proposedAmount is required",
+      });
+    }
+    // Required per the client's risk-mitigation decision (24 Sep 2026).
+    if (!reason || !String(reason).trim()) {
+      return res
+        .status(400)
+        .json({ isSuccess: false, message: "A reason is required" });
+    }
+
+    const booking = await Booking.findById(bookingId);
+    if (!booking) {
+      return res.status(404).json({ isSuccess: false, message: "Booking not found" });
+    }
+    if (String(booking.provider) !== String(providerId)) {
+      return res.status(403).json({
+        isSuccess: false,
+        message: "You can only propose a change on your own booking",
+      });
+    }
+    // Mirrors completeService's own gate — the job must already be in
+    // progress (OTP verified) before a scope/price change makes sense.
+    if (booking.status !== "started") {
+      return res.status(400).json({
+        isSuccess: false,
+        message:
+          "A price change can only be proposed once the service has started (OTP verified)",
+      });
+    }
+
+    const payment = await Payment.findById(booking.paymentId);
+    if (!payment) {
+      return res
+        .status(404)
+        .json({ isSuccess: false, message: "Payment not found for this booking" });
+    }
+
+    const existingPending = await QuotationChange.findOne({
+      booking: booking._id,
+      status: "pending",
+    });
+    if (existingPending) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "A price change is already pending for this booking",
+      });
+    }
+
+    const quotationChange = await QuotationChange.create({
+      booking: booking._id,
+      payment: payment._id,
+      provider: providerId,
+      previousAmount: payment.originalAmount,
+      proposedAmount: amountNum,
+      reason: reason.trim(),
+    });
+
+    notifyQuotationChangeSubmitted(quotationChange, booking).catch((err) =>
+      console.error("❌ notifyQuotationChangeSubmitted error:", err),
+    );
+
+    return res.status(201).json({
+      isSuccess: true,
+      message: "Quotation change submitted",
+      data: quotationChange,
+    });
+  } catch (err) {
+    console.error("createQuotationChange error:", err);
+    return res.status(500).json({ isSuccess: false, message: "Server error" });
+  }
+};
+
+exports.respondToQuotationChange = async (req, res) => {
+  try {
+    const customerId = req.user?.id;
+    if (!customerId) {
+      return res.status(401).json({ isSuccess: false, message: "Unauthorized" });
+    }
+    const { bookingId, id } = req.params;
+    const { decision } = req.body; // "accept" | "reject"
+    if (!["accept", "reject"].includes(decision)) {
+      return res
+        .status(400)
+        .json({ isSuccess: false, message: "decision must be accept or reject" });
+    }
+
+    const booking = await Booking.findById(bookingId);
+    if (!booking) {
+      return res.status(404).json({ isSuccess: false, message: "Booking not found" });
+    }
+    if (String(booking.customer) !== String(customerId)) {
+      return res.status(403).json({
+        isSuccess: false,
+        message: "You can only respond to a change on your own booking",
+      });
+    }
+
+    const quotationChange = await QuotationChange.findById(id);
+    if (!quotationChange || String(quotationChange.booking) !== String(bookingId)) {
+      return res
+        .status(404)
+        .json({ isSuccess: false, message: "Quotation change not found" });
+    }
+    if (quotationChange.status !== "pending") {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "This quotation change has already been responded to",
+      });
+    }
+
+    const payment = await Payment.findById(quotationChange.payment);
+    if (!payment) {
+      return res.status(404).json({ isSuccess: false, message: "Payment not found" });
+    }
+
+    if (decision === "reject") {
+      quotationChange.status = "rejected";
+      quotationChange.respondedAt = new Date();
+      await quotationChange.save();
+
+      notifyQuotationChangeResponded(quotationChange, booking).catch((err) =>
+        console.error("❌ notifyQuotationChangeResponded error:", err),
+      );
+
+      return res.json({
+        isSuccess: true,
+        message: "Quotation change rejected",
+        data: quotationChange,
+      });
+    }
+
+    // ===== ACCEPT: charge only the difference, recompute totals in place =====
+    const newTotal = quotationChange.proposedAmount;
+    const delta = Number((newTotal - payment.originalAmount).toFixed(2));
+    if (delta <= 0) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Proposed amount must be higher than the current amount",
+      });
+    }
+
+    const commissionSetting = await CommissionSetting.findOne();
+    const providerCommissionPercent =
+      commissionSetting?.providerCommissionPercentage || 0;
+    const customerCommissionPercent =
+      commissionSetting?.customerCommissionPercentage || 0;
+
+    // Commission on just the delta — this is linear, so it gives the exact
+    // same numbers as recomputing the whole total from scratch (matches
+    // the client-facing PDF's €100→€150 worked example).
+    const deltaProviderCommission = Number(
+      ((delta * providerCommissionPercent) / 100).toFixed(2),
+    );
+    const deltaCustomerCommission = Number(
+      ((delta * customerCommissionPercent) / 100).toFixed(2),
+    );
+    const deltaProviderAmount = delta - deltaProviderCommission;
+    const deltaCustomerPayable = delta + deltaCustomerCommission;
+
+    // Incremental Stripe charge for just the difference, off the same
+    // Stripe Customer already used for the original booking.
+    // ⚠️ Requires the Customer to have a reusable default payment method
+    // attached (Stripe Checkout does this automatically for a `customer`
+    // in `mode: "payment"` — verify against a real test charge before
+    // relying on this in production; if it ever fails, Stripe raises a
+    // clear "no attached payment method" error which is surfaced below).
+    let incrementalPaymentIntent;
+    try {
+      incrementalPaymentIntent = await stripe.paymentIntents.create({
+        amount: Math.round(deltaCustomerPayable * 100),
+        currency: payment.currency,
+        customer: payment.customerStripeId,
+        off_session: true,
+        confirm: true,
+        metadata: {
+          event: "quotation_change",
+          bookingId: booking._id.toString(),
+          quotationChangeId: quotationChange._id.toString(),
+        },
+      });
+    } catch (stripeErr) {
+      console.error(
+        "❌ Quotation change incremental charge failed:",
+        stripeErr.message,
+      );
+      return res.status(400).json({
+        isSuccess: false,
+        message:
+          "Could not charge the additional amount — the customer's saved payment method may need to be re-authorized",
+        error: stripeErr.message,
+      });
+    }
+
+    // Update Payment totals in place to the new grand total.
+    payment.originalAmount = newTotal;
+    payment.customerPaidAmount = Number(
+      (payment.customerPaidAmount + deltaCustomerPayable).toFixed(2),
+    );
+    payment.totalPaidByCustomer = payment.customerPaidAmount;
+    payment.providerAmount = Number(
+      (payment.providerAmount + deltaProviderAmount).toFixed(2),
+    );
+    payment.providerCommissionAmount = Number(
+      (payment.providerCommissionAmount + deltaProviderCommission).toFixed(2),
+    );
+    payment.customerCommissionAmount = Number(
+      (payment.customerCommissionAmount + deltaCustomerCommission).toFixed(2),
+    );
+    payment.appCommission = Number(
+      (payment.providerCommissionAmount + payment.customerCommissionAmount).toFixed(2),
+    );
+    await payment.save();
+
+    booking.amount = payment.originalAmount;
+    await booking.save();
+
+    quotationChange.status = "accepted";
+    quotationChange.respondedAt = new Date();
+    await quotationChange.save();
+
+    notifyQuotationChangeResponded(quotationChange, booking).catch((err) =>
+      console.error("❌ notifyQuotationChangeResponded error:", err),
+    );
+
+    return res.json({
+      isSuccess: true,
+      message: "Quotation change accepted — additional payment charged",
+      data: { quotationChange, payment },
+    });
+  } catch (err) {
+    console.error("respondToQuotationChange error:", err);
+    return res.status(500).json({ isSuccess: false, message: "Server error" });
+  }
+};
 //new code add
 exports.bookingPreview = async (req, res) => {
   try {
@@ -2342,8 +2705,8 @@ exports.stripeWebhook = async (req, res) => {
         const paymentIntent = await stripe.paymentIntents.retrieve(
           session.payment_intent,
         );
-        if (paymentIntent.status !== "requires_capture") {
-          console.log("Payment not authorized");
+        if (paymentIntent.status !== "succeeded") {
+          console.log("Payment not completed");
           break;
         }
 
@@ -2353,8 +2716,13 @@ exports.stripeWebhook = async (req, res) => {
 
         const customer = await User.findById(customerId);
         const provider = await User.findById(providerId);
-        const service = await Service.findById(serviceId);
-        if (!customer || !provider || !service) {
+        // ⭐ A Service Request booking (paid_fixed/paid_offer) has no
+        // `Service` doc at all — `payment.serviceRequest` (already stored
+        // by bookService) is what tells us which kind this is.
+        const service = payment.serviceRequest
+          ? null
+          : await Service.findById(serviceId);
+        if (!customer || !provider || (!service && !payment.serviceRequest)) {
           console.log("Invalid customer/provider/service");
           break;
         }
@@ -2362,7 +2730,9 @@ exports.stripeWebhook = async (req, res) => {
         const booking = await Booking.create({
           customer: customerId,
           provider: providerId,
-          service: serviceId,
+          ...(payment.serviceRequest
+            ? { serviceRequest: payment.serviceRequest }
+            : { service: serviceId }),
 
           amount: payment.originalAmount,
           currency: payment.currency,
@@ -2387,33 +2757,39 @@ exports.stripeWebhook = async (req, res) => {
         payment.heldAt = new Date();
         await payment.save();
 
-        try {
-          await sendServiceBookedEmail(
-            customer,
-            service,
-            provider,
-            booking,
-            "customer",
-          );
-        } catch (err) {
-          console.log("Error sending email to customer:", err);
-        }
-        try {
-          await sendServiceBookedEmail(
-            customer,
-            service,
-            provider,
-            booking,
-            "provider",
-          );
-        } catch (err) {
-          console.log("Error sending email to provider:", err);
-        }
+        if (service) {
+          // Existing Service-booking emails/notification — untouched, only
+          // guarded because a Service Request booking has no `service` doc
+          // (its own confirmation notification is sent separately from
+          // serviceRequestController.js at Offer-accept / seat-book time).
+          try {
+            await sendServiceBookedEmail(
+              customer,
+              service,
+              provider,
+              booking,
+              "customer",
+            );
+          } catch (err) {
+            console.log("Error sending email to customer:", err);
+          }
+          try {
+            await sendServiceBookedEmail(
+              customer,
+              service,
+              provider,
+              booking,
+              "provider",
+            );
+          } catch (err) {
+            console.log("Error sending email to provider:", err);
+          }
 
-        try {
-          await sendBookingNotification(customer, provider, service, booking);
-        } catch (err) {
-          console.log("Error sending notification:", err);
+          try {
+            await sendBookingNotification(customer, provider, service, booking);
+          } catch (err) {
+            console.log("Error sending notification:", err);
+          }
         }
 
         console.log("Booking Created");
@@ -2582,8 +2958,235 @@ exports.stripeWebhook = async (req, res) => {
       message: err.message,
     });
   }
-  
+
 };
+
+// =====================================================================
+// PAYMENT RECONCILIATION — safety net for "customer was charged but no
+// booking was ever created" (e.g. a missed/delayed Stripe webhook).
+//
+// Since bookService now charges the customer immediately (automatic
+// capture), a lost webhook is no longer harmless — real money has already
+// moved. This runs on a schedule and, for any Payment stuck at
+// status:"pending" for too long:
+//   1. Asks Stripe directly whether the PaymentIntent actually succeeded.
+//      If not, leaves it alone — still genuinely pending/abandoned.
+//   2. If succeeded and a Booking already exists, just repairs the
+//      Payment record (self-heals a partial write).
+//   3. If succeeded and no Booking exists, RETRIES the exact booking
+//      creation the webhook would have done.
+//   4. If that retry can't succeed (customer/provider/service no longer
+//      valid), automatically refunds the customer and marks the Payment
+//      so the outcome is fully traceable from the DB — never leaves a
+//      charge unexplained.
+//
+// This is intentionally a standalone function — it does not touch or
+// reuse the webhook/updateBookingStatus code paths, so it carries zero
+// risk of regressing the existing, already-working booking flow.
+// =====================================================================
+
+async function attemptBookingRecoveryForPayment(payment) {
+  const tag = `[PaymentReconciliation:${payment._id}]`;
+
+  try {
+    if (payment.status !== "pending") return;
+    if (!payment.checkoutSessionId) {
+      console.log(`${tag} No checkoutSessionId on record — skipping`);
+      return;
+    }
+
+    const session = await stripe.checkout.sessions.retrieve(
+      payment.checkoutSessionId,
+    );
+    const intentId = session.payment_intent;
+
+    if (!intentId) {
+      console.log(
+        `${tag} Stripe session has no PaymentIntent yet — still genuinely pending`,
+      );
+      return;
+    }
+
+    const paymentIntent = await stripe.paymentIntents.retrieve(intentId);
+
+    if (paymentIntent.status !== "succeeded") {
+      console.log(
+        `${tag} PaymentIntent status is "${paymentIntent.status}", not succeeded — leaving as-is`,
+      );
+      return;
+    }
+
+    console.log(
+      `🚨 ${tag} Customer WAS charged (PaymentIntent succeeded) but Payment is still "pending" — attempting recovery`,
+    );
+
+    // Self-heal: a Booking already exists (e.g. the webhook created it but
+    // the follow-up Payment update failed) — just fix the Payment record.
+    const existingBooking = await Booking.findOne({ paymentId: payment._id });
+    if (existingBooking) {
+      payment.status = "held";
+      payment.bookingId = existingBooking._id;
+      payment.paymentIntentId = intentId;
+      payment.heldAt = payment.heldAt || new Date();
+      await payment.save();
+      console.log(`✅ ${tag} Booking already existed — Payment record repaired`);
+      return;
+    }
+
+    // Re-check right before writing — the real webhook may have resolved
+    // this in the time it took to reach this point.
+    const freshPayment = await Payment.findById(payment._id);
+    if (!freshPayment || freshPayment.status !== "pending") {
+      console.log(
+        `${tag} Payment status changed since this check started — skipping (likely resolved already)`,
+      );
+      return;
+    }
+
+    // Retry booking creation with the same metadata the webhook would use.
+    const { customerId, providerId, serviceId } = paymentIntent.metadata || {};
+    // ⭐ A Service Request booking (paid_fixed/paid_offer) has no `Service`
+    // doc — `payment.serviceRequest` (stored by bookService) tells us so.
+    const [customer, provider, service] = await Promise.all([
+      User.findById(customerId),
+      User.findById(providerId),
+      freshPayment.serviceRequest ? null : Service.findById(serviceId),
+    ]);
+
+    if (!customer || !provider || (!service && !freshPayment.serviceRequest)) {
+      console.error(
+        `🚨 ${tag} Cannot recreate booking — customer/provider/service missing ` +
+          `(customer:${!!customer} provider:${!!provider} service:${!!service}). Refunding customer instead.`,
+      );
+
+      const refund = await stripe.refunds.create({
+        payment_intent: intentId,
+        reason: "requested_by_customer",
+        metadata: {
+          event: "reconciliation_auto_refund",
+          paymentId: payment._id.toString(),
+        },
+      });
+
+      // Release any wallet coins this booking had reserved — they were
+      // never actually spent (spend only happens in completeService), so
+      // a refund must free them back to the customer, same as refundBooking.
+      if (freshPayment.usedWallet && freshPayment.walletCoinsUsed > 0) {
+        const staleWallet = await Wallet.findOne({ user: freshPayment.user });
+        if (staleWallet) {
+          staleWallet.reservedPoints = Math.max(
+            0,
+            (staleWallet.reservedPoints || 0) - freshPayment.walletCoinsUsed,
+          );
+          await staleWallet.save();
+
+          await WalletHistory.create({
+            user: freshPayment.user,
+            points: freshPayment.walletCoinsUsed,
+            transactionType: "credit",
+            type: "wallet_refund",
+            service: freshPayment.service,
+            note: "Wallet coins released — reconciliation auto-refund",
+          });
+        }
+      }
+
+      freshPayment.status = "refunded";
+      freshPayment.refundId = refund.id;
+      freshPayment.refundStatus = refund.status;
+      freshPayment.refundReason =
+        "Auto-refunded by reconciliation job — booking could not be recreated (customer/provider/service no longer valid)";
+      freshPayment.refundedAt = new Date();
+      freshPayment.refundedAmount = freshPayment.amount;
+      await freshPayment.save();
+
+      // ⭐ Release the seat this unrecoverable payment had reserved on a
+      // Service Request, same as the stale-payment release in bookService.
+      if (freshPayment.serviceRequest) {
+        await ServiceRequest.updateOne(
+          { _id: freshPayment.serviceRequest, seatsBooked: { $gt: 0 } },
+          { $inc: { seatsBooked: -1 } },
+        );
+        await ServiceRequest.updateOne(
+          { _id: freshPayment.serviceRequest, status: "fulfilled" },
+          { status: "open" },
+        );
+      }
+
+      console.error(
+        `🚨 ${tag} Auto-refund issued: ${refund.id}. NEEDS MANUAL FOLLOW-UP WITH CUSTOMER.`,
+      );
+      return;
+    }
+
+    const booking = await Booking.create({
+      customer: customerId,
+      provider: providerId,
+      ...(freshPayment.serviceRequest
+        ? { serviceRequest: freshPayment.serviceRequest }
+        : { service: serviceId }),
+      amount: freshPayment.originalAmount,
+      currency: freshPayment.currency,
+      paymentId: freshPayment._id,
+      status: "booked",
+      contactPhone: freshPayment.contactPhone,
+      location_name: freshPayment.location_name,
+      ...(freshPayment.location && { location: freshPayment.location }),
+    });
+
+    freshPayment.status = "held";
+    freshPayment.bookingId = booking._id;
+    freshPayment.paymentIntentId = intentId;
+    freshPayment.heldAt = new Date();
+    await freshPayment.save();
+
+    console.log(`✅ ${tag} Booking recovered successfully: ${booking._id}`);
+
+    if (service) {
+      sendServiceBookedEmail(customer, service, provider, booking, "customer").catch(
+        (err) => console.log(`${tag} Customer email error:`, err),
+      );
+      sendServiceBookedEmail(customer, service, provider, booking, "provider").catch(
+        (err) => console.log(`${tag} Provider email error:`, err),
+      );
+      sendBookingNotification(customer, provider, service, booking).catch((err) =>
+        console.log(`${tag} Notification error:`, err),
+      );
+    }
+  } catch (err) {
+    console.error(`🚨 ${tag} error:`, err.message);
+  }
+}
+
+// Every 10 minutes: look for payments Stripe charged but that never turned
+// into a booking in our DB. 15-minute cutoff gives normal webhook delivery
+// a fair chance to resolve things first; 3-day floor avoids re-scanning
+// very old, long-abandoned attempts forever.
+cron.schedule("*/10 * * * *", async () => {
+  try {
+    const cutoff = new Date(Date.now() - 15 * 60 * 1000);
+    const oldestToCheck = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+
+    const stuckPayments = await Payment.find({
+      status: "pending",
+      createdAt: { $lte: cutoff, $gte: oldestToCheck },
+    });
+
+    if (!stuckPayments.length) return;
+
+    console.log(
+      `🔍 [PaymentReconciliation] Checking ${stuckPayments.length} stuck "pending" payment(s)...`,
+    );
+
+    for (const payment of stuckPayments) {
+      await attemptBookingRecoveryForPayment(payment);
+    }
+  } catch (err) {
+    console.error("🚨 [PaymentReconciliation] cron error:", err.message);
+  }
+});
+
+console.log("🕐 Payment reconciliation cron scheduled (every 10 minutes)");
 
 
 

@@ -379,6 +379,8 @@ const pendingAssignment = await PendingAmbassadorAssignment.findOne({
         averageRating: avgRating,
       };
     });
+    // Every request this user ever created — open first, fulfilled/closed last
+    const serviceRequests = await getRequestsByOwner(user._id);
 
     return res.json({
   isSuccess: true,
@@ -448,6 +450,9 @@ ambassadorStatus: user.isAmbassador
     servicesCount: servicesWithRating.length,
 
     services: servicesWithRating,
+
+    serviceRequestsCount: serviceRequests.length,
+    serviceRequests,
   },
 });
   } catch (err) {

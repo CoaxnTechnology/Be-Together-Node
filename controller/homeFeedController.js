@@ -69,25 +69,29 @@ function weightedRandomPick(candidates, count) {
 // =====================================================================
 exports.getHomeHighlights = async (req, res) => {
   try {
-    const userId = req.user?.id;
-    if (!userId) {
-      return res.status(401).json({ isSuccess: false, message: "Unauthorized" });
-    }
+    // ⭐ Guests are allowed — optionalAuth leaves req.user null instead of
+    // rejecting. A guest just gets the plain nearby mix: no interests to
+    // personalize with, no account notice (no account), and no lastLocation
+    // fallback (must send latitude/longitude directly).
+    const userId = req.user?.id || null;
 
-    const user = await User.findById(userId).select(
-      "interests lastLocation accountNotice",
-    );
-    if (!user) {
-      return res.status(404).json({ isSuccess: false, message: "User not found" });
+    let user = null;
+    if (userId) {
+      user = await User.findById(userId).select(
+        "interests lastLocation accountNotice",
+      );
+      if (!user) {
+        return res.status(404).json({ isSuccess: false, message: "User not found" });
+      }
     }
 
     // ⭐ Report-resolution notice (warned/restricted/blocked) — shown for a
     // short window after admin resolves a report against this user. Checked
     // at read-time against `expiresAt`; nothing needs to clear it once it
-    // passes, it just stops being included here.
+    // passes, it just stops being included here. Never applies to a guest.
     let accountNoticeItem = null;
     if (
-      user.accountNotice?.expiresAt &&
+      user?.accountNotice?.expiresAt &&
       new Date(user.accountNotice.expiresAt) > new Date()
     ) {
       accountNoticeItem = {
@@ -110,7 +114,7 @@ exports.getHomeHighlights = async (req, res) => {
 
     if (
       (centerLat === null || centerLng === null || Number.isNaN(centerLat) || Number.isNaN(centerLng)) &&
-      user.lastLocation?.coords?.coordinates?.length === 2
+      user?.lastLocation?.coords?.coordinates?.length === 2
     ) {
       [centerLng, centerLat] = user.lastLocation.coords.coordinates;
     }
@@ -124,11 +128,13 @@ exports.getHomeHighlights = async (req, res) => {
     ) {
       return res.status(400).json({
         isSuccess: false,
-        message: "Location is required (send latitude/longitude, or update your last known location first)",
+        message: userId
+          ? "Location is required (send latitude/longitude, or update your last known location first)"
+          : "Location is required (send latitude/longitude)",
       });
     }
 
-    const interests = (user.interests || []).map((t) => String(t).toLowerCase());
+    const interests = (user?.interests || []).map((t) => String(t).toLowerCase());
     const geoFilter = geoWithinRadius(centerLat, centerLng, RADIUS_KM);
     const recentSince = new Date(Date.now() - RECENT_WINDOW_HOURS * 60 * 60 * 1000);
 

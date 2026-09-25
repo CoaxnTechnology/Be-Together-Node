@@ -9,6 +9,7 @@ const fs = require("fs");
 const BASE_URL = process.env.BASE_URL;
 const AmbassadorApplication = require("../model/AmbassadorApplication");
 const PendingAmbassadorAssignment = require("../model/PendingAmbassadorAssignment");
+const { getRequestsByOwner } = require("./serviceRequestController");
 // ---------------- UPDATE Profile ----------------
 exports.editProfile = async (req, res) => {
   try {
@@ -501,6 +502,9 @@ exports.getProfileById = async (req, res) => {
         averageRating: avgRating,
       };
     });
+    // Every request this user ever created — open first, fulfilled/closed last
+    const serviceRequests = await getRequestsByOwner(user._id);
+
     res.json({
       isSuccess: true,
       message: "Profile fetched successfully",
@@ -520,6 +524,8 @@ exports.getProfileById = async (req, res) => {
         services: user.services || [],
         servicesCount: servicesWithRating.length, // total services
         services: servicesWithRating, // full service details with avg rating
+        serviceRequestsCount: serviceRequests.length,
+        serviceRequests,
       },
     });
   } catch (err) {

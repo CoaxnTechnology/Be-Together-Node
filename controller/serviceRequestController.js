@@ -36,6 +36,21 @@ function decorateRequest(r) {
         : null,
   };
 }
+exports.decorateRequest = decorateRequest;
+
+// All requests a user has ever created, for their profile / "my requests" /
+// admin views: open first, fulfilled/closed at the end, newest first within
+// each group (sort is stable, so the createdAt order holds).
+async function getRequestsByOwner(ownerId) {
+  const requests = await ServiceRequest.find({ owner: ownerId })
+    .populate("category", "name")
+    .sort({ createdAt: -1 })
+    .lean();
+  const isDone = (r) => r.status === "fulfilled" || r.status === "closed";
+  requests.sort((a, b) => isDone(a) - isDone(b));
+  return requests.map(decorateRequest);
+}
+exports.getRequestsByOwner = getRequestsByOwner;
 
 function isValidLatLng(lat, lng) {
   return (
@@ -552,15 +567,13 @@ exports.getMyServiceRequests = async (req, res) => {
       return res.status(401).json({ isSuccess: false, message: "Unauthorized" });
     }
 
-    const requests = await ServiceRequest.find({ owner: userId })
-      .populate("category", "name")
-      .sort({ createdAt: -1 })
-      .lean();
+    const requests = await getRequestsByOwner(userId);
 
     return res.json({
       isSuccess: true,
       message: "Service requests fetched successfully",
-      data: requests.map(decorateRequest),
+      total: requests.length,
+      data: requests,
     });
   } catch (err) {
     console.error("getMyServiceRequests error:", err);

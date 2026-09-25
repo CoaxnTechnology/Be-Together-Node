@@ -4,6 +4,7 @@ const axios = require("axios");
 const Category = require("../model/Category");
 const User = require("../model/User");
 const Service = require("../model/Service");
+const { getRequestsByOwner } = require("./serviceRequestController");
 const { getFullImageUrl } = require("../utils/image");
 const Review = require("../model/review");
 const moment = require("moment");
@@ -468,10 +469,17 @@ exports.getUserById = async (req, res) => {
         .json({ success: false, message: "User not found" });
     }
 
+    // Every request this user ever created — open first, fulfilled/closed last
+    const serviceRequests = await getRequestsByOwner(user._id);
+
     res.status(200).json({
       success: true,
       message: "User fetched successfully",
-      data: user,
+      data: {
+        ...user,
+        serviceRequestsCount: serviceRequests.length,
+        serviceRequests,
+      },
     });
   } catch (err) {
     console.error("❌ Error fetching user:", err);

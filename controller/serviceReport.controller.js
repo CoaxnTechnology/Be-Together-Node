@@ -18,7 +18,17 @@ exports.reportService = async (req, res) => {
     const { type = "service" } = req.body;
 
     if (type === "user") {
-      const { reportedUserId, bookingId, category, message } = req.body;
+      const { reportedUserId, bookingId, category, message, evidence } = req.body;
+      // ⭐ FIX: the schema has always had an `evidence` field (screenshot/
+      // photo URLs) but this controller never read it from the request, so
+      // it could never actually be attached. Accepts either an array or a
+      // single string; anything else is silently ignored rather than 400ing
+      // an otherwise-valid report over a malformed evidence field.
+      const evidenceUrls = Array.isArray(evidence)
+        ? evidence.filter((url) => typeof url === "string" && url.trim())
+        : typeof evidence === "string" && evidence.trim()
+          ? [evidence.trim()]
+          : [];
 
       // ⭐ A "user" report must always be tied to a real booking, and only
       // the two parties on that booking may report each other — nobody else
@@ -93,6 +103,7 @@ exports.reportService = async (req, res) => {
         reason: category,
         message: message || null,
         severity,
+        evidence: evidenceUrls,
       });
 
       await AdminNotification.create({

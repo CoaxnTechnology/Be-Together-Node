@@ -1655,6 +1655,47 @@ exports.getUserBookings = async (req, res) => {
   }
 };
 
+// ⭐ Releases the seat/join-slot a cancelled/refunded booking was holding on
+// its ServiceRequest — every cancellation path (customer, provider, and the
+// admin report-resolve "refund" action) funnels through refundBooking below,
+// so this one helper covers all of them. Never touches a request the owner
+// deliberately set to "closed" themselves. Silently no-ops for a plain
+// Service booking (no serviceRequestId) or if anything looks off — a failed
+// release must never block the refund that already succeeded.
+async function releaseServiceRequestSlot(serviceRequestId, customerId) {
+  if (!serviceRequestId) return;
+  try {
+    const request = await ServiceRequest.findById(serviceRequestId);
+    if (!request || request.status === "closed") return;
+
+    const notExpired = !request.expiresAt || new Date(request.expiresAt) > new Date();
+
+    if (request.requestMode === "free_single") {
+      if (request.joinedBy && String(request.joinedBy) === String(customerId)) {
+        request.joinedBy = null;
+        if (request.status === "fulfilled" && notExpired) {
+          request.status = "open";
+        }
+        await request.save();
+      }
+      return;
+    }
+
+    // paid_fixed / paid_offer / free_group — all use the seatsBooked counter.
+    request.seatsBooked = Math.max(0, (request.seatsBooked || 0) - 1);
+    if (
+      request.status === "fulfilled" &&
+      request.seatsBooked < request.numberOfParticipants &&
+      notExpired
+    ) {
+      request.status = "open";
+    }
+    await request.save();
+  } catch (err) {
+    console.error("releaseServiceRequestSlot error:", err);
+  }
+}
+
 // ------------------------------
 // CANCEL BOOKING + PARTIAL REFUND
 // ------------------------------
@@ -1682,7 +1723,8 @@ exports.refundBooking = async (req, res) => {
     const booking = await Booking.findById(bookingId)
       .populate("customer")
       .populate("provider")
-      .populate("service");
+      .populate("service")
+      .populate("serviceRequest", "title");
 
     console.log("📦 Booking Found:", booking?._id);
     logPaymentFlow("refundBooking:bookingFetched", {
@@ -1774,6 +1816,9 @@ exports.refundBooking = async (req, res) => {
         status: booking.status,
         cancelledBy: booking.cancelledBy,
       });
+      // ⭐ Free join cancelled (Category C/D) — release the seat/join-slot
+      // so someone else can take it instead of it being lost forever.
+      await releaseServiceRequestSlot(booking.serviceRequest, booking.customer._id);
       // ⭐ PERFORMANCE: Provider cancelled free service → 1 failed
       if (cancelledBy === "provider") {
         console.log("📉 Updating provider performance (free cancel)…");
@@ -2000,8 +2045,12 @@ exports.refundBooking = async (req, res) => {
 
         bookingId: booking._id.toString(),
 
-        serviceId: booking.service._id.toString(),
-        serviceTitle: booking.service.title,
+        // ⭐ FIX: booking.service is null for a Service-Request-sourced
+        // booking — this used to throw here unconditionally, meaning a paid
+        // Category A/B refund crashed with a 500 before Stripe was ever
+        // called. Fall back to serviceRequest.
+        serviceId: (booking.service?._id || booking.serviceRequest?._id)?.toString() || "N/A",
+        serviceTitle: booking.service?.title || booking.serviceRequest?.title || "N/A",
 
         customerId: booking.customer._id.toString(),
         customerName: booking.customer.name,
@@ -2049,6 +2098,9 @@ exports.refundBooking = async (req, res) => {
 
     await booking.save();
     console.log("✔ Booking Updated");
+    // ⭐ Paid seat/offer cancelled (Category A/B) — release it so someone
+    // else can book/offer instead of the seat being lost forever.
+    await releaseServiceRequestSlot(booking.serviceRequest, booking.customer._id);
     logPaymentFlow("refundBooking:bookingUpdated", {
       bookingId,
       status: booking.status,
@@ -2073,7 +2125,9 @@ exports.refundBooking = async (req, res) => {
           points: payment.walletCoinsUsed,
           transactionType: "credit",
           type: "wallet_refund",
-          service: booking.service._id,
+          // ⭐ FIX: null for a Service-Request booking (field is optional on
+          // WalletHistory) — was an unconditional crash before.
+          service: booking.service?._id || null,
           note: "Wallet coins released after cancellation",
         });
       }

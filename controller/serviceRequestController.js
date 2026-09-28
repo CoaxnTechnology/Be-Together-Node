@@ -38,11 +38,28 @@ function decorateRequest(r) {
 }
 exports.decorateRequest = decorateRequest;
 
+// Only the nearby-list query (getServiceRequests) filters by expiresAt —
+// the direct booking/offer/join actions below only checked `status`, so a
+// request past its expiry but still "open" (e.g. re-opened by the owner
+// after being closed) could still be booked by anyone holding a direct link.
+// Call this right after fetching the request in every action endpoint.
+function isExpired(request) {
+  return Boolean(request.expiresAt) && new Date(request.expiresAt) <= new Date();
+}
+
 // All requests a user has ever created, for their profile / "my requests" /
 // admin views: open first, fulfilled/closed at the end, newest first within
 // each group (sort is stable, so the createdAt order holds).
 async function getRequestsByOwner(ownerId) {
-  const requests = await ServiceRequest.find({ owner: ownerId })
+  const requests = await ServiceRequest.find({
+    owner: ownerId,
+    // ⭐ An "open" request whose expiresAt has already passed can no longer
+    // be booked/offered/joined (see isExpired() above) but would otherwise
+    // still show as misleadingly "Open" here. Hide it outright instead of
+    // just flagging it. "closed"/"fulfilled" are untouched — those are real
+    // end states the owner should still see in their history.
+    $nor: [{ status: "open", expiresAt: { $lte: new Date() } }],
+  })
     .populate("category", "name")
     .sort({ createdAt: -1 })
     .lean();
@@ -637,26 +654,34 @@ exports.updateServiceRequestStatus = async (req, res) => {
       return res.status(400).json({ isSuccess: false, message: "Invalid status" });
     }
 
-    const request = await ServiceRequest.findById(id);
-    if (!request) {
+    const existing = await ServiceRequest.findById(id).select("owner");
+    if (!existing) {
       return res
         .status(404)
         .json({ isSuccess: false, message: "Service request not found" });
     }
 
-    if (String(request.owner) !== String(userId)) {
+    if (String(existing.owner) !== String(userId)) {
       return res
         .status(403)
         .json({ isSuccess: false, message: "You can only update your own request" });
     }
 
-    request.status = status;
-    await request.save();
+    // ⭐ FIX: findOneAndUpdate (not load+mutate+save) so this never
+    // re-validates the WHOLE document. save() validates every required
+    // field on the schema, so an older request created before a field
+    // became required (e.g. requestMode) would 500 here even though only
+    // `status` is actually changing.
+    const updated = await ServiceRequest.findOneAndUpdate(
+      { _id: id, owner: userId },
+      { status },
+      { new: true },
+    );
 
     return res.json({
       isSuccess: true,
       message: "Service request updated successfully",
-      data: decorateRequest(request.toObject()),
+      data: decorateRequest(updated.toObject()),
     });
   } catch (err) {
     console.error("updateServiceRequestStatus error:", err);
@@ -714,6 +739,11 @@ exports.bookFixedRequest = async (req, res) => {
       return res
         .status(404)
         .json({ isSuccess: false, message: "Service request not found" });
+    }
+    if (isExpired(request)) {
+      return res
+        .status(400)
+        .json({ isSuccess: false, message: "This request has expired" });
     }
     if (request.requestMode !== "paid_fixed") {
       return res.status(400).json({
@@ -796,6 +826,11 @@ exports.submitOffer = async (req, res) => {
       return res
         .status(404)
         .json({ isSuccess: false, message: "Service request not found" });
+    }
+    if (isExpired(request)) {
+      return res
+        .status(400)
+        .json({ isSuccess: false, message: "This request has expired" });
     }
     if (request.requestMode !== "paid_offer") {
       return res.status(400).json({
@@ -967,6 +1002,11 @@ exports.acceptOffer = async (req, res) => {
         .status(404)
         .json({ isSuccess: false, message: "Service request not found" });
     }
+    if (isExpired(request)) {
+      return res
+        .status(400)
+        .json({ isSuccess: false, message: "This request has expired" });
+    }
     if (String(request.owner) !== String(userId)) {
       return res.status(403).json({
         isSuccess: false,
@@ -1085,6 +1125,11 @@ exports.joinRequest = async (req, res) => {
       return res
         .status(404)
         .json({ isSuccess: false, message: "Service request not found" });
+    }
+    if (isExpired(request)) {
+      return res
+        .status(400)
+        .json({ isSuccess: false, message: "This request has expired" });
     }
     if (!["free_single", "free_group"].includes(request.requestMode)) {
       return res

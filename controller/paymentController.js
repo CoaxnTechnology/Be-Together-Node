@@ -21,6 +21,7 @@ const {
   notifyQuotationChangeSubmitted,
   notifyQuotationChangeResponded,
   notifyPaymentFailed,
+  notifyWalletTransaction,
 } = require("../controller/notificationController"); // ✅ import it
 const CancellationSetting = require("../model/CancellationSetting");
 const User = require("../model/User");
@@ -302,7 +303,12 @@ exports.bookService = async (req, res) => {
               // ⭐ Release the seat this abandoned Payment had reserved on a
               // Service Request (Category A/B) — reuses this exact
               // stale-detection logic instead of a separate mechanism.
-              if (existingPayment.serviceRequest) {
+              // A paid_fixed rebook (no offer) keeps the seat: bookFixedRequest
+              // didn't reserve a new one, so it passes to this new checkout.
+              if (
+                existingPayment.serviceRequest &&
+                existingPayment.serviceRequestOffer
+              ) {
                 await ServiceRequest.updateOne(
                   { _id: existingPayment.serviceRequest, seatsBooked: { $gt: 0 } },
                   { $inc: { seatsBooked: -1 } },
@@ -353,8 +359,12 @@ exports.bookService = async (req, res) => {
             }
 
             // ⭐ Release the seat this abandoned Payment had reserved on a
-            // Service Request (Category A/B).
-            if (existingPayment.serviceRequest) {
+            // Service Request (Category A/B). A paid_fixed rebook (no offer)
+            // keeps the seat — it passes to this new checkout.
+            if (
+              existingPayment.serviceRequest &&
+              existingPayment.serviceRequestOffer
+            ) {
               await ServiceRequest.updateOne(
                 { _id: existingPayment.serviceRequest, seatsBooked: { $gt: 0 } },
                 { $inc: { seatsBooked: -1 } },
@@ -479,6 +489,13 @@ exports.bookService = async (req, res) => {
               referralUserId: customer._id,
               points: 50,
             });
+            notifyWalletTransaction(
+              referralOwner,
+              "referral_booking_bonus",
+              50,
+            ).catch((err) =>
+              console.error("❌ notifyWalletTransaction error:", err.message),
+            );
           }
         }
       }
@@ -1448,6 +1465,13 @@ exports.completeService = async (req, res) => {
           customerId: booking.customer._id,
           points: -payment.walletCoinsUsed,
         });
+        notifyWalletTransaction(
+          booking.customer,
+          "wallet_spent",
+          payment.walletCoinsUsed,
+        ).catch((err) =>
+          console.error("❌ notifyWalletTransaction error:", err.message),
+        );
       }
     } else {
       logPaymentFlow("completeService:walletDeductionSkipped", {
@@ -2131,6 +2155,13 @@ exports.refundBooking = async (req, res) => {
           service: booking.service?._id || null,
           note: "Wallet coins released after cancellation",
         });
+        notifyWalletTransaction(
+          booking.customer,
+          "wallet_refund",
+          payment.walletCoinsUsed,
+        ).catch((err) =>
+          console.error("❌ notifyWalletTransaction error:", err.message),
+        );
       }
     }
     // ✅ UPDATE PAYMENT
@@ -3199,6 +3230,13 @@ async function attemptBookingRecoveryForPayment(payment) {
             service: freshPayment.service,
             note: "Wallet coins released — reconciliation auto-refund",
           });
+          notifyWalletTransaction(
+            customer,
+            "wallet_refund",
+            freshPayment.walletCoinsUsed,
+          ).catch((err) =>
+            console.error("❌ notifyWalletTransaction error:", err.message),
+          );
         }
       }
 

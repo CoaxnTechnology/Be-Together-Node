@@ -3,6 +3,7 @@ const Review = require("../model/review");
 const Service = require("../model/Service");
 const User = require("../model/User");
 const Booking = require("../model/Booking");
+const { notifyNewReview } = require("./notificationController");
 
 // Create a review — now gated on a real, completed booking (previously
 // anyone could review any service at any time, any number of times).
@@ -58,6 +59,11 @@ exports.createReview = async (req, res) => {
     });
 
     await review.save();
+
+    const provider = await User.findById(booking.provider);
+    notifyNewReview(provider, review.rating, review.text).catch((err) =>
+      console.error("❌ notifyNewReview error:", err.message),
+    );
 
     return res.status(201).json({
       isSuccess: true,

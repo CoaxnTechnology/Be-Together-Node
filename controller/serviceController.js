@@ -335,6 +335,11 @@ exports.createService = async (req, res) => {
           referralOwner.totalReferralEarned += 30;
 
           await referralOwner.save();
+          notificationController
+            .notifyWalletTransaction(referralOwner, "referral_service_bonus", 30)
+            .catch((err) =>
+              console.error("❌ notifyWalletTransaction error:", err.message),
+            );
         }
       }
     }

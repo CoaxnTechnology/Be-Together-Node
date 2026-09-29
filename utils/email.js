@@ -251,6 +251,84 @@ async function sendServiceCancelledEmail(
   }
 }
 
+// ---------------- PROMOTION SUBSCRIPTION EMAIL ----------------
+// One shared template (promotion_status.html) for all three subscription
+// events — only the text/color per eventType changes, same structure as
+// every other status email in this file (logo, white card, details box,
+// footer). eventType is one of "purchased" | "renewed" | "cancelled".
+const PROMOTION_EMAIL_CONFIG = {
+  purchased: {
+    title_icon: "🚀",
+    title_text: "Promotion Activated!",
+    title_color: "#16a34a",
+    intro_text:
+      "Great news — your promotion is now live and boosting your service's visibility.",
+    status_label: "Active",
+    date_label: "Active Until",
+    closing_text:
+      "Your service will now appear with priority placement to nearby customers.",
+    subject: "Your Promotion is Live 🚀",
+  },
+  renewed: {
+    title_icon: "✅",
+    title_text: "Promotion Renewed",
+    title_color: "#16a34a",
+    intro_text: "Your promotion subscription has been renewed successfully.",
+    status_label: "Active",
+    date_label: "Active Until",
+    closing_text:
+      "Your service continues to get boosted visibility — no action needed from you.",
+    subject: "Your Promotion Has Been Renewed",
+  },
+  cancelled: {
+    title_icon: "🛑",
+    title_text: "Promotion Cancelled",
+    title_color: "#e63946",
+    intro_text:
+      "We're confirming that your promotion subscription has been cancelled.",
+    status_label: "Cancelled",
+    date_label: "Was Active Until",
+    closing_text:
+      "Your service has returned to normal listing. You can start a new promotion anytime.",
+    subject: "Your Promotion Has Been Cancelled",
+  },
+};
+
+async function sendPromotionStatusEmail(owner, serviceTitle, eventType, endDate) {
+  const cfg = PROMOTION_EMAIL_CONFIG[eventType];
+  if (!owner?.email || !cfg) return;
+
+  try {
+    const templatePath = path.join(
+      __dirname,
+      "../templates/promotion_status.html",
+    );
+    const htmlTemplate = fs.readFileSync(templatePath, "utf8");
+
+    const dateValue = endDate
+      ? new Date(endDate).toLocaleDateString("en-IN")
+      : "N/A";
+
+    const html = htmlTemplate
+      .replace("{{email_title}}", cfg.title_text)
+      .replace("{{title_icon}}", cfg.title_icon)
+      .replace("{{title_text}}", cfg.title_text)
+      .replace("{{title_color}}", cfg.title_color)
+      .replace("{{name}}", owner.name || "there")
+      .replace("{{intro_text}}", cfg.intro_text)
+      .replace("{{service_name}}", serviceTitle || "your service")
+      .replace("{{status_label}}", cfg.status_label)
+      .replace("{{date_label}}", cfg.date_label)
+      .replace("{{date_value}}", dateValue)
+      .replace("{{closing_text}}", cfg.closing_text);
+
+    await sendEmail({ to: owner.email, subject: cfg.subject, html });
+    console.log(`✅ Promotion "${eventType}" email sent to`, owner.email);
+  } catch (err) {
+    console.error("❌ Promotion status email error:", err.message);
+  }
+}
+
 const Admin = require("../model/Admin");
 // adjust path if needed
 async function sendServiceDeleteApprovedEmail(
@@ -534,4 +612,5 @@ module.exports = {
   sendServiceDeleteApprovedEmail,
   sendServiceForceDeletedEmail,
   sendCredentialsEmail,
+  sendPromotionStatusEmail,
 };

@@ -3,7 +3,15 @@ const Service = require("../model/Service");
 const User = require("../model/User");
 const cron = require("node-cron");
 const PromotionPlan = require("../model/PromotionPlan");
-const { notifyPaymentFailed } = require("./notificationController");
+const {
+  notifyPaymentFailed,
+  notifyPromotionPurchased,
+  notifyPromotionRenewed,
+  notifyPromotionCancelled,
+  notifyPromotionExpiringSoon,
+  notifyPromotionExpired,
+} = require("./notificationController");
+const { sendPromotionStatusEmail } = require("../utils/email");
 
 //////////////////////////////////////////////////////////
 // 🔐 Duplicate Event Protection
@@ -189,15 +197,19 @@ exports.stripeWebhook = async (req, res) => {
       service.isPromoted = true;
       service.promotionStatus = "active";
       service.promotionAutoRenew = true;
+      // ⭐ Fresh cycle — allow the expiring-soon reminder to fire again.
+      service.promotionExpiryReminderSent = false;
 
       await service.save();
       console.log("✅ Promotion Activated (First Time)");
 
-      // 🔔 SEND NOTIFICATION TO SERVICE OWNER
-      // await notifyServiceOwnerOnSubscription({
-      //   buyerId: data.metadata?.userId, // IMPORTANT
-      //   serviceId: service._id,
-      // });
+      const owner = await User.findById(service.owner);
+      notifyPromotionPurchased(owner, service.title, endDate).catch((err) =>
+        console.error("❌ notifyPromotionPurchased error:", err.message),
+      );
+      sendPromotionStatusEmail(owner, service.title, "purchased", endDate).catch(
+        (err) => console.error("❌ sendPromotionStatusEmail error:", err.message),
+      );
     }
 
     //////////////////////////////////////////////////////////////
@@ -263,6 +275,8 @@ exports.stripeWebhook = async (req, res) => {
       service.promotionEnd = endDate;
       service.isPromoted = true;
       service.promotionStatus = "active";
+      // ⭐ Fresh cycle — allow the expiring-soon reminder to fire again.
+      service.promotionExpiryReminderSent = false;
 
       await service.save();
 
@@ -274,6 +288,14 @@ exports.stripeWebhook = async (req, res) => {
         planName: stripeSubscription.metadata.planName,
         planDays: stripeSubscription.metadata.planDays,
       });
+
+      const owner = await User.findById(service.owner);
+      notifyPromotionRenewed(owner, service.title, endDate).catch((err) =>
+        console.error("❌ notifyPromotionRenewed error:", err.message),
+      );
+      sendPromotionStatusEmail(owner, service.title, "renewed", endDate).catch(
+        (err) => console.error("❌ sendPromotionStatusEmail error:", err.message),
+      );
     }
 
     //////////////////////////////////////////////////////////////
@@ -368,6 +390,19 @@ exports.stripeWebhook = async (req, res) => {
         await service.save();
 
         console.log("🛑 Subscription Fully Cancelled & DB Updated");
+
+        const owner = await User.findById(service.owner);
+        notifyPromotionCancelled(owner, service.title).catch((err) =>
+          console.error("❌ notifyPromotionCancelled error:", err.message),
+        );
+        sendPromotionStatusEmail(
+          owner,
+          service.title,
+          "cancelled",
+          service.promotionEnd,
+        ).catch((err) =>
+          console.error("❌ sendPromotionStatusEmail error:", err.message),
+        );
       }
     }
 
@@ -440,12 +475,23 @@ exports.cancelPromotionSubscription = async (req, res) => {
 cron.schedule("0 0 * * *", async () => {
   const now = new Date();
 
+  // ⭐ find() first (not a bare updateMany) so each owner can be notified —
+  // same matching condition as before, just fetched individually.
+  const expiredServices = await Service.find({
+    isPromoted: true,
+    promotionEnd: { $lt: now },
+    promotionAutoRenew: false,
+  }).select("owner title");
+
+  for (const service of expiredServices) {
+    const owner = await User.findById(service.owner);
+    notifyPromotionExpired(owner, service.title).catch((err) =>
+      console.error("❌ notifyPromotionExpired error:", err.message),
+    );
+  }
+
   const result = await Service.updateMany(
-    {
-      isPromoted: true,
-      promotionEnd: { $lt: now },
-      promotionAutoRenew: false,
-    },
+    { _id: { $in: expiredServices.map((s) => s._id) } },
     {
       $set: {
         isPromoted: false,
@@ -455,4 +501,38 @@ cron.schedule("0 0 * * *", async () => {
   );
 
   console.log("Expired promotions:", result.modifiedCount);
+});
+
+//////////////////////////////////////////////////////////
+// 5️⃣ DAILY CRON JOB (EXPIRING-SOON RENEWAL REMINDER)
+//////////////////////////////////////////////////////////
+// Runs an hour after the expiry-cleanup cron. Only for non-auto-renewing
+// promotions — an auto-renewing one doesn't need a "renew now" nudge, it'll
+// just renew and the owner gets notifyPromotionRenewed instead.
+cron.schedule("0 1 * * *", async () => {
+  const now = new Date();
+  const twoDaysFromNow = new Date(now.getTime() + 2 * 24 * 60 * 60 * 1000);
+
+  const expiringServices = await Service.find({
+    isPromoted: true,
+    promotionAutoRenew: false,
+    promotionEnd: { $gte: now, $lte: twoDaysFromNow },
+    promotionExpiryReminderSent: { $ne: true },
+  }).select("owner title promotionEnd");
+
+  for (const service of expiringServices) {
+    const owner = await User.findById(service.owner);
+    notifyPromotionExpiringSoon(owner, service.title, service.promotionEnd).catch(
+      (err) => console.error("❌ notifyPromotionExpiringSoon error:", err.message),
+    );
+  }
+
+  if (expiringServices.length) {
+    await Service.updateMany(
+      { _id: { $in: expiringServices.map((s) => s._id) } },
+      { $set: { promotionExpiryReminderSent: true } },
+    );
+  }
+
+  console.log("Expiring-soon reminders sent:", expiringServices.length);
 });

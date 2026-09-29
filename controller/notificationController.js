@@ -4,6 +4,7 @@ const admin = require("../utils/firebase"); // ✅ use initialized admin
 const User = require("../model/User");
 const Service = require("../model/Service");
 const Category = require("../model/Category");
+const { formatDateTime } = require("../utils/dateTimeFormat");
 const BASE_URL = process.env.BASE_URL;
 const notifiedMap = {}; // To avoid duplicate notifications
 
@@ -1390,10 +1391,132 @@ async function notifyPaymentFailed(user, itemTitle, amount, currency, reason) {
   });
 }
 
+// =====================================================================
+// WALLET COINS — one shared helper for every place points get credited or
+// debited: referral rewards (signup-time AND first-booking/first-service
+// milestones), coins actually spent on a completed booking, and coins
+// refunded back after a cancellation. Keyed by the exact same `type`
+// string already used on the WalletHistory record, so adding a new coin
+// event later only means adding one entry to this map.
+// =====================================================================
+const WALLET_NOTICES = {
+  referral_inviter_bonus: {
+    title: "🎁 Referral Reward!",
+    body: (points) => `You earned ${points} coins — a friend joined Betogether using your referral code!`,
+  },
+  referral_invited_bonus: {
+    title: "🎉 Welcome Bonus!",
+    body: (points) => `You earned ${points} coins for joining with a referral code!`,
+  },
+  referral_booking_bonus: {
+    title: "🎁 Referral Reward!",
+    body: (points) => `You earned ${points} coins — your referred friend just completed their first booking!`,
+  },
+  referral_service_bonus: {
+    title: "🎁 Referral Reward!",
+    body: (points) => `You earned ${points} coins — your referred friend just posted their first service!`,
+  },
+  wallet_spent: {
+    title: "🪙 Wallet Coins Used",
+    body: (points) => `${points} coins were deducted from your wallet for your recent booking.`,
+  },
+  wallet_refund: {
+    title: "🪙 Coins Refunded",
+    body: (points) => `${points} coins have been refunded to your wallet after your booking was cancelled.`,
+  },
+};
+
+async function notifyWalletTransaction(user, type, points) {
+  if (!user) return;
+  const notice = WALLET_NOTICES[type];
+  if (!notice) return;
+  await sendUserNotification(user, notice.title, notice.body(Math.abs(points)), {
+    type: "wallet_transaction",
+    walletEventType: type,
+    points: Math.abs(points),
+  });
+}
+
+// =====================================================================
+// PROMOTION / SUBSCRIPTION — purchase confirmation, renewal, expiring-soon
+// reminder, and expired notice, all sent to the service owner.
+// =====================================================================
+async function notifyPromotionPurchased(user, serviceTitle, endDate) {
+  if (!user) return;
+  await sendUserNotification(
+    user,
+    "🚀 Promotion Activated!",
+    `Your promotion for "${serviceTitle}" is now live until ${formatDateTime(endDate)}. Enjoy boosted visibility!`,
+    { type: "promotion_purchased", serviceTitle },
+  );
+}
+
+async function notifyPromotionRenewed(user, serviceTitle, endDate) {
+  if (!user) return;
+  await sendUserNotification(
+    user,
+    "✅ Promotion Renewed",
+    `Your promotion for "${serviceTitle}" has been renewed and is active until ${formatDateTime(endDate)}.`,
+    { type: "promotion_renewed", serviceTitle },
+  );
+}
+
+async function notifyPromotionExpiringSoon(user, serviceTitle, endDate) {
+  if (!user) return;
+  await sendUserNotification(
+    user,
+    "⏳ Promotion Expiring Soon",
+    `Your promotion for "${serviceTitle}" expires on ${formatDateTime(endDate)}. Renew now to keep your boosted visibility.`,
+    { type: "promotion_expiring_soon", serviceTitle },
+  );
+}
+
+async function notifyPromotionExpired(user, serviceTitle) {
+  if (!user) return;
+  await sendUserNotification(
+    user,
+    "🔴 Promotion Expired",
+    `Your promotion for "${serviceTitle}" has expired. Renew it to get boosted visibility again.`,
+    { type: "promotion_expired", serviceTitle },
+  );
+}
+
+// =====================================================================
+// NEW REVIEW — push notification to the provider when a customer reviews
+// their completed booking.
+// =====================================================================
+async function notifyNewReview(provider, rating, text) {
+  if (!provider) return;
+  const body = text
+    ? `You received a ${rating}-star review: "${text}"`
+    : `You received a ${rating}-star review!`;
+  await sendUserNotification(provider, "⭐ New Review!", body, {
+    type: "new_review",
+    rating,
+  });
+}
+
+async function notifyPromotionCancelled(user, serviceTitle) {
+  if (!user) return;
+  await sendUserNotification(
+    user,
+    "🛑 Promotion Cancelled",
+    `Your promotion for "${serviceTitle}" has been cancelled. Your service has returned to normal listing.`,
+    { type: "promotion_cancelled", serviceTitle },
+  );
+}
+
 // Exports
 exports.sendUserNotification = sendUserNotification;
 exports.notifyReportOutcome = notifyReportOutcome;
 exports.notifyPaymentFailed = notifyPaymentFailed;
+exports.notifyWalletTransaction = notifyWalletTransaction;
+exports.notifyPromotionPurchased = notifyPromotionPurchased;
+exports.notifyPromotionRenewed = notifyPromotionRenewed;
+exports.notifyPromotionCancelled = notifyPromotionCancelled;
+exports.notifyPromotionExpiringSoon = notifyPromotionExpiringSoon;
+exports.notifyPromotionExpired = notifyPromotionExpired;
+exports.notifyNewReview = notifyNewReview;
 exports.notifyNewOffer = notifyNewOffer;
 exports.notifyOfferAccepted = notifyOfferAccepted;
 exports.notifyOfferDeclined = notifyOfferDeclined;

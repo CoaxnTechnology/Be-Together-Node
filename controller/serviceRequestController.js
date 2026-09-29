@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 const ServiceRequest = require("../model/ServiceRequest");
 const ServiceRequestOffer = require("../model/ServiceRequestOffer");
 const Booking = require("../model/Booking");
+const Payment = require("../model/Payment");
 const User = require("../model/User");
 const Category = require("../model/Category");
 const {
@@ -127,7 +128,8 @@ exports.createServiceRequest = async (req, res) => {
       category,
       tags,
       budget,
-      requestMode,
+      requestMode: requestModeInput,
+      isFree,
       schedule,
     } = req.body;
 
@@ -144,13 +146,39 @@ exports.createServiceRequest = async (req, res) => {
     // `isFree` is derived from this instead of being a separate input, so
     // the two can never contradict each other.
     // -----------------------------
-    if (!requestMode || !REQUEST_MODES.includes(requestMode)) {
+    // -----------------------------
+    // Number of participants — optional, defaults to 1
+    // -----------------------------
+    let participants = 1;
+    if (numberOfParticipants !== undefined) {
+      participants = parseInt(numberOfParticipants, 10);
+      if (!Number.isInteger(participants) || participants < 1) {
+        return res.status(400).json({
+          isSuccess: false,
+          message: "numberOfParticipants must be a positive integer",
+        });
+      }
+    }
+
+    // Free requests don't need requestMode — the app just sends
+    // isFree: true and the participant count decides single vs group.
+    // Paid requests still have to say paid_fixed or paid_offer.
+    const wantsFree =
+      isFree === true ||
+      isFree === "true" ||
+      requestModeInput === "free_single" ||
+      requestModeInput === "free_group";
+    let requestMode = requestModeInput;
+    if (wantsFree) {
+      requestMode = participants > 1 ? "free_group" : "free_single";
+    } else if (!requestMode || !REQUEST_MODES.includes(requestMode)) {
       return res.status(400).json({
         isSuccess: false,
-        message: `requestMode must be one of: ${REQUEST_MODES.join(", ")}`,
+        message:
+          "For a paid request, requestMode must be paid_fixed or paid_offer. For a free request, send isFree: true",
       });
     }
-    const freeFlag = requestMode === "free_single" || requestMode === "free_group";
+    const freeFlag = wantsFree;
 
     // -----------------------------
     // serviceType decides which location block(s) are required
@@ -310,20 +338,6 @@ exports.createServiceRequest = async (req, res) => {
         currency: String(budget.currency).toUpperCase(),
         amount: amountNum,
       };
-    }
-
-    // -----------------------------
-    // Number of participants — optional, defaults to 1
-    // -----------------------------
-    let participants = 1;
-    if (numberOfParticipants !== undefined) {
-      participants = parseInt(numberOfParticipants, 10);
-      if (!Number.isInteger(participants) || participants < 1) {
-        return res.status(400).json({
-          isSuccess: false,
-          message: "numberOfParticipants must be a positive integer",
-        });
-      }
     }
 
     // -----------------------------
@@ -771,25 +785,49 @@ exports.bookFixedRequest = async (req, res) => {
         .json({ isSuccess: false, message: "Provider stripe account missing" });
     }
 
-    // Atomic seat reservation — guarantees only one winner even if many
-    // customers try to book the last seat at the exact same moment.
-    const updated = await ServiceRequest.findOneAndUpdate(
-      {
-        _id: id,
-        status: "open",
-        $expr: { $lt: ["$seatsBooked", "$numberOfParticipants"] },
-      },
-      { $inc: { seatsBooked: 1 } },
-      { new: true },
-    );
-    if (!updated) {
-      return res
-        .status(400)
-        .json({ isSuccess: false, message: "No seats available" });
+    // One seat per customer — a customer who already booked (or already
+    // paid) can't take a second seat on the same request.
+    const alreadyBooked = await Booking.exists({
+      serviceRequest: id,
+      customer: userId,
+      status: { $in: ["pending_payment", "booked", "started", "completed"] },
+    });
+    const existingPayment = await Payment.findOne({
+      serviceRequest: id,
+      user: userId,
+      status: { $in: ["pending", "held"] },
+    }).select("status");
+    if (alreadyBooked || existingPayment?.status === "held") {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "You have already booked a seat on this request",
+      });
     }
-    if (updated.seatsBooked >= updated.numberOfParticipants) {
-      updated.status = "fulfilled";
-      await updated.save();
+
+    // A still-pending checkout already holds this customer's seat — don't
+    // reserve a second one. bookService either blocks the duplicate payment
+    // or, if the old checkout was abandoned, hands that seat to the new one.
+    if (!existingPayment) {
+      // Atomic seat reservation — guarantees only one winner even if many
+      // customers try to book the last seat at the exact same moment.
+      const updated = await ServiceRequest.findOneAndUpdate(
+        {
+          _id: id,
+          status: "open",
+          $expr: { $lt: ["$seatsBooked", "$numberOfParticipants"] },
+        },
+        { $inc: { seatsBooked: 1 } },
+        { new: true },
+      );
+      if (!updated) {
+        return res
+          .status(400)
+          .json({ isSuccess: false, message: "No seats available" });
+      }
+      if (updated.seatsBooked >= updated.numberOfParticipants) {
+        updated.status = "fulfilled";
+        await updated.save();
+      }
     }
 
     // Reuse the exact same booking/payment function as a normal Service

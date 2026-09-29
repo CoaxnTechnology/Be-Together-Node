@@ -178,6 +178,15 @@ async function processAmbassadorCommission({
       return true;
     }
 
+    // Ambassador commission is only for normal Service bookings — a
+    // Service Request booking never pays one.
+    if (booking.serviceRequest) {
+      console.log("[AmbassadorCommission] skipped: service request booking", {
+        bookingId: booking._id,
+      });
+      return true;
+    }
+
     if (booking.status !== "completed") {
       return true;
     }

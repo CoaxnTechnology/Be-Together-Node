@@ -1055,6 +1055,22 @@ exports.updateBookingStatus = async (req, res) => {
 // ------------------------------
 // 2) START SERVICE → GENERATE OTP → EMAIL
 // ------------------------------
+// A Service Request booking has no `service` — give start/verify/complete
+// the same { _id, title, isFree, city } shape from the request instead, so
+// the OTP email, notifications, transfer metadata and ambassador commission
+// below all keep working unchanged.
+function bookingSubject(booking) {
+  if (booking.service) return booking.service;
+  const r = booking.serviceRequest;
+  if (!r) return null;
+  return {
+    _id: r._id,
+    title: r.title,
+    isFree: Boolean(r.isFree),
+    city: r.location_name || null,
+  };
+}
+
 exports.startService = async (req, res) => {
   try {
     logPaymentFlow("startService:start", { body: req.body });
@@ -1063,7 +1079,8 @@ exports.startService = async (req, res) => {
     const booking = await Booking.findById(bookingId)
       .populate("customer")
       .populate("provider")
-      .populate("service");
+      .populate("service")
+      .populate("serviceRequest", "title isFree location_name");
 
     logPaymentFlow("startService:bookingFetched", {
       bookingId: booking?._id,
@@ -1078,7 +1095,8 @@ exports.startService = async (req, res) => {
       return res.status(404).json({ message: "Booking not found" });
     }
 
-    const { customer, provider, service } = booking;
+    const { customer, provider } = booking;
+    const service = bookingSubject(booking);
     if (!customer || !customer.email) {
       logPaymentFlow("startService:customerEmailMissing", {
         bookingId,
@@ -1138,7 +1156,8 @@ exports.verifyServiceOtp = async (req, res) => {
     const booking = await Booking.findById(bookingId)
       .populate("customer")
       .populate("provider")
-      .populate("service");
+      .populate("service")
+      .populate("serviceRequest", "title isFree location_name");
 
     logPaymentFlow("verifyServiceOtp:bookingFetched", {
       bookingId: booking?._id,
@@ -1183,7 +1202,7 @@ exports.verifyServiceOtp = async (req, res) => {
     await sendServiceStartedNotification(
       booking.customer,
       booking.provider,
-      booking.service,
+      bookingSubject(booking),
       booking,
     );
     logPaymentFlow("verifyServiceOtp:startedNotificationSent", { bookingId });
@@ -1210,6 +1229,7 @@ exports.completeService = async (req, res) => {
     logPaymentFlow("completeService:fetchingBooking", { bookingId });
     const booking = await Booking.findById(bookingId)
       .populate("service")
+      .populate("serviceRequest", "title isFree location_name")
       .populate("customer")
       .populate("provider");
 
@@ -1237,14 +1257,14 @@ exports.completeService = async (req, res) => {
 
     const customer = booking.customer;
     const provider = booking.provider;
-    const service = booking.service;
+    const service = bookingSubject(booking);
 
     // Free service check first
-    if (booking.amount === 0 || booking.service.isFree) {
+    if (booking.amount === 0 || service?.isFree) {
       logPaymentFlow("completeService:freeServiceBranch", {
         bookingId,
         amount: booking.amount,
-        isFree: booking.service.isFree,
+        isFree: service?.isFree,
       });
       booking.status = "completed";
       await booking.save();
@@ -1457,7 +1477,7 @@ exports.completeService = async (req, res) => {
 
           type: "wallet_spent",
 
-          service: booking.service._id,
+          service: booking.service?._id || null, // null for a Service Request booking
 
           note: "Wallet used during booking",
         });
@@ -1749,7 +1769,7 @@ exports.refundBooking = async (req, res) => {
       .populate("customer")
       .populate("provider")
       .populate("service")
-      .populate("serviceRequest", "title");
+      .populate("serviceRequest", "title isFree location_name");
 
     console.log("📦 Booking Found:", booking?._id);
     logPaymentFlow("refundBooking:bookingFetched", {
@@ -1866,7 +1886,7 @@ exports.refundBooking = async (req, res) => {
         const emailResponse = await sendServiceCancelledEmail(
           booking.customer,
           booking.provider,
-          booking.service,
+          bookingSubject(booking),
           booking,
           reason,
         );
@@ -1886,7 +1906,7 @@ exports.refundBooking = async (req, res) => {
         await sendServiceCancelledNotification(
           booking.customer,
           booking.provider,
-          booking.service,
+          bookingSubject(booking),
           booking,
           reason || "",
         );
@@ -2222,7 +2242,7 @@ exports.refundBooking = async (req, res) => {
       const emailResponse = await sendServiceCancelledEmail(
         booking.customer,
         booking.provider,
-        booking.service,
+        bookingSubject(booking),
         booking,
         reason,
       );
@@ -2244,7 +2264,7 @@ exports.refundBooking = async (req, res) => {
     await sendServiceCancelledNotification(
       booking.customer,
       booking.provider,
-      booking.service,
+      bookingSubject(booking),
       booking,
       reason,
     );

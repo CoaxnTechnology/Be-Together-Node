@@ -3,6 +3,7 @@ const Service = require("../model/Service");
 const User = require("../model/User");
 const cron = require("node-cron");
 const PromotionPlan = require("../model/PromotionPlan");
+const { notifyPaymentFailed } = require("./notificationController");
 
 //////////////////////////////////////////////////////////
 // 🔐 Duplicate Event Protection
@@ -305,6 +306,17 @@ exports.stripeWebhook = async (req, res) => {
         await service.save();
 
         console.log("❌ Marked as payment_failed in DB");
+
+        const owner = await User.findById(service.owner);
+        notifyPaymentFailed(
+          owner,
+          service.title,
+          data.amount_due != null ? data.amount_due / 100 : null,
+          data.currency ? data.currency.toUpperCase() : null,
+          "Your card was declined or the renewal payment was rejected",
+        ).catch((err) =>
+          console.error("❌ notifyPaymentFailed error:", err.message),
+        );
       }
     }
 

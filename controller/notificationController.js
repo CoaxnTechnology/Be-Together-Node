@@ -1367,9 +1367,33 @@ async function notifyReportOutcome(user, adminAction, notes) {
   });
 }
 
+// =====================================================================
+// PAYMENT FAILED — one shared helper for every place a Stripe charge can
+// fail: a Service booking, a Service-Request booking (paid_fixed/
+// paid_offer — same Payment model, same webhook case), and a Promotion
+// subscription renewal. Kept as a single function so the wording never
+// drifts between the three call sites, and so a future 4th payment type
+// gets this for free.
+// =====================================================================
+async function notifyPaymentFailed(user, itemTitle, amount, currency, reason) {
+  if (!user) return;
+  const amountLabel =
+    amount !== null && amount !== undefined
+      ? `${currency ? currency + " " : ""}${amount}`
+      : null;
+  const body = reason
+    ? `Your payment${amountLabel ? ` of ${amountLabel}` : ""} for "${itemTitle}" failed: ${reason}. Please try again or use a different payment method.`
+    : `Your payment${amountLabel ? ` of ${amountLabel}` : ""} for "${itemTitle}" could not be processed. Please try again or use a different payment method.`;
+  await sendUserNotification(user, "❌ Payment Failed", body, {
+    type: "payment_failed",
+    itemTitle,
+  });
+}
+
 // Exports
 exports.sendUserNotification = sendUserNotification;
 exports.notifyReportOutcome = notifyReportOutcome;
+exports.notifyPaymentFailed = notifyPaymentFailed;
 exports.notifyNewOffer = notifyNewOffer;
 exports.notifyOfferAccepted = notifyOfferAccepted;
 exports.notifyOfferDeclined = notifyOfferDeclined;

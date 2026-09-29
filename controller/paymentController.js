@@ -20,6 +20,7 @@ const {
   sendServiceCancelledNotification,
   notifyQuotationChangeSubmitted,
   notifyQuotationChangeResponded,
+  notifyPaymentFailed,
 } = require("../controller/notificationController"); // ✅ import it
 const CancellationSetting = require("../model/CancellationSetting");
 const User = require("../model/User");
@@ -2880,9 +2881,16 @@ exports.stripeWebhook = async (req, res) => {
 
         const paymentIntent = event.data.object;
 
+        // ⭐ Populate user + service/serviceRequest so we can notify —
+        // covers both a plain Service booking and a Service-Request booking
+        // (paid_fixed/paid_offer) with the exact same code, since both flow
+        // through this one Payment model/webhook.
         const payment = await Payment.findOne({
           paymentIntentId: paymentIntent.id,
-        });
+        })
+          .populate("user")
+          .populate("service", "title")
+          .populate("serviceRequest", "title");
 
         if (payment) {
           payment.status = "failed";
@@ -2891,6 +2899,18 @@ exports.stripeWebhook = async (req, res) => {
           await payment.save();
 
           console.log("Payment marked as failed");
+
+          const itemTitle =
+            payment.service?.title || payment.serviceRequest?.title || "your booking";
+          notifyPaymentFailed(
+            payment.user,
+            itemTitle,
+            payment.amount,
+            payment.currency,
+            payment.failureReason,
+          ).catch((err) =>
+            console.error("❌ notifyPaymentFailed error:", err.message),
+          );
         }
 
         break;

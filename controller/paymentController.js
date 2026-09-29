@@ -2881,19 +2881,35 @@ exports.stripeWebhook = async (req, res) => {
 
         const paymentIntent = event.data.object;
 
-        // ⭐ Populate user + service/serviceRequest so we can notify —
-        // covers both a plain Service booking and a Service-Request booking
-        // (paid_fixed/paid_offer) with the exact same code, since both flow
-        // through this one Payment model/webhook.
-        const payment = await Payment.findOne({
-          paymentIntentId: paymentIntent.id,
-        })
-          .populate("user")
-          .populate("service", "title")
-          .populate("serviceRequest", "title");
+        // ⭐ FIX: our Payment.paymentIntentId is still null at this point for
+        // a Checkout-based booking — it's only ever filled in once
+        // checkout.session.completed runs (a *successful* payment), so
+        // matching on paymentIntentId here almost never finds the record.
+        // Look it up via the Checkout Session instead, the same correlation
+        // key every other handler in this file already relies on.
+        let payment = null;
+        try {
+          const sessions = await stripe.checkout.sessions.list({
+            payment_intent: paymentIntent.id,
+            limit: 1,
+          });
+          const session = sessions.data[0];
+          if (session) {
+            payment = await Payment.findOne({ checkoutSessionId: session.id })
+              .populate("user")
+              .populate("service", "title")
+              .populate("serviceRequest", "title");
+          }
+        } catch (lookupErr) {
+          console.error(
+            "❌ payment_intent.payment_failed session lookup error:",
+            lookupErr.message,
+          );
+        }
 
         if (payment) {
           payment.status = "failed";
+          payment.paymentIntentId = payment.paymentIntentId || paymentIntent.id;
           payment.failureReason =
             paymentIntent.last_payment_error?.message || null;
           await payment.save();
@@ -2911,6 +2927,27 @@ exports.stripeWebhook = async (req, res) => {
           ).catch((err) =>
             console.error("❌ notifyPaymentFailed error:", err.message),
           );
+        } else {
+          // ⭐ Fallback — even if we couldn't correlate this PaymentIntent to
+          // a DB record, it carries the same metadata we set at Checkout
+          // creation (customerId, serviceTitle, totalPaidByCustomer, …), so
+          // the customer still gets notified instead of hearing nothing.
+          console.log(
+            "⚠️ No Payment record matched — notifying from PaymentIntent metadata instead",
+          );
+          const meta = paymentIntent.metadata || {};
+          if (meta.customerId) {
+            const customer = await User.findById(meta.customerId);
+            notifyPaymentFailed(
+              customer,
+              meta.serviceTitle || "your booking",
+              meta.totalPaidByCustomer ? Number(meta.totalPaidByCustomer) : null,
+              meta.currency ? meta.currency.toUpperCase() : null,
+              paymentIntent.last_payment_error?.message || null,
+            ).catch((err) =>
+              console.error("❌ notifyPaymentFailed error:", err.message),
+            );
+          }
         }
 
         break;

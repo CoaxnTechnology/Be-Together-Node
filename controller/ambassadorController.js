@@ -24,6 +24,10 @@ const AmbassadorWalletHistory = require("../model/AmbassadorWalletHistory");
 const {
   sendExclusiveAmbassadorInvitationNotification,
 } = require("./notificationController");
+const {
+  notifyAmbassadorWithdrawalSuccess,
+  notifyAmbassadorWithdrawalFailed,
+} = require("./notificationController");
 
 function generateTempPassword(length = 8) {
   const chars =
@@ -2908,6 +2912,9 @@ exports.withdrawAmount = async (req, res) => {
   const ambassadorId = req.user.id;
   let transfer = null;
   let wallet = null;
+  // ⭐ Hoisted (was a `const` inside the try block) so the catch block below
+  // can use it too, to send the withdrawal-failed notification.
+  let user = null;
   const amount = Number(req.body.amount);
 
   console.log("[withdrawAmount] Start", {
@@ -2967,7 +2974,7 @@ exports.withdrawAmount = async (req, res) => {
     // User
     // ======================================
 
-    const user = await User.findById(ambassadorId).session(session);
+    user = await User.findById(ambassadorId).session(session);
     console.log("[withdrawAmount] User loaded", {
       ambassadorId,
       userId: user?._id,
@@ -3373,6 +3380,11 @@ exports.withdrawAmount = async (req, res) => {
       availableBalance: wallet.availableBalance,
       reservedBalance: wallet.reservedBalance,
     });
+
+    notifyAmbassadorWithdrawalSuccess(user, amount).catch((err) =>
+      console.error("❌ notifyAmbassadorWithdrawalSuccess error:", err.message),
+    );
+
     return res.status(200).json({
       isSuccess: true,
 
@@ -3463,6 +3475,17 @@ exports.withdrawAmount = async (req, res) => {
           reservedBalance: wallet.reservedBalance,
         });
       }
+
+      // ⭐ Only notify once a real withdrawal was actually being attempted
+      // (withdrawalDoc exists) — an early input-validation error (bad
+      // amount, wallet not found, etc.) never reaches this block at all,
+      // and the caller already sees that failure synchronously anyway.
+      notifyAmbassadorWithdrawalFailed(user, amount).catch((notifyErr) =>
+        console.error(
+          "❌ notifyAmbassadorWithdrawalFailed error:",
+          notifyErr.message,
+        ),
+      );
     }
 
     return res.status(500).json({

@@ -13,7 +13,11 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const fs = require("fs");
 const path = require("path");
-const { notifyOnServicePromoted } = require("./notificationController");
+const {
+  notifyOnServicePromoted,
+  notifyAccountBlocked,
+  notifyAccountUnblocked,
+} = require("./notificationController");
 const csv = require("csv-parser");
 const Booking = require("../model/Booking");
 const Payment = require("../model/Payment");
@@ -1960,6 +1964,13 @@ exports.blockUser = async (req, res) => {
       fcmTokens: user.fcmToken?.length || 0,
     });
 
+    // ⭐ Notify BEFORE banUser() — it clears fcmToken as part of logging the
+    // user out everywhere, so the push must go out first or it silently has
+    // no token left to send to.
+    notifyAccountBlocked(user).catch((err) =>
+      console.error("❌ notifyAccountBlocked error:", err.message),
+    );
+
     // 🔥 BLOCK USER — shared helper (also used by the Reports resolve action)
     console.log("🚫 Blocking user now...");
     await banUser(user);
@@ -2016,6 +2027,10 @@ exports.unblockUser = async (req, res) => {
     await user.save();
 
     console.log("✅ User unblocked:", user.email);
+
+    notifyAccountUnblocked(user).catch((err) =>
+      console.error("❌ notifyAccountUnblocked error:", err.message),
+    );
 
     return res.json({
       success: true,

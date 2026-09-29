@@ -5,6 +5,7 @@ const User = require("../model/User");
 const { createAccessToken } = require("../utils/jwt");
 const { generateOTP } = require("../utils/otp");
 const { liftExpiredBan, getBanMessage } = require("../utils/banUser");
+const { notifyPasswordChanged } = require("./notificationController");
 const { sendOtpEmail, sendResetEmail } = require("../utils/email");
 const { getFullImageUrl } = require("../utils/image");
 const { randomUUID } = require("crypto");
@@ -1597,6 +1598,10 @@ exports.forgotOrResetPassword = async (req, res) => {
     await user.save();
 
     console.log("🎉 PASSWORD RESET SUCCESS");
+
+    notifyPasswordChanged(user).catch((err) =>
+      console.error("❌ notifyPasswordChanged error:", err.message),
+    );
 
     return res.json({
       isSuccess: true,

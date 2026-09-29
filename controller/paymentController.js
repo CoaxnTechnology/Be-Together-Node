@@ -2896,6 +2896,28 @@ exports.stripeWebhook = async (req, res) => {
           } catch (err) {
             console.log("Error sending notification:", err);
           }
+        } else if (booking.serviceRequest) {
+          // ⭐ FIX: the comment above claimed this case was "sent separately
+          // from serviceRequestController.js at Offer-accept / seat-book
+          // time" — it wasn't; bookFixedRequest/acceptOffer only create a
+          // Stripe Checkout session at that point, not a confirmed booking
+          // (this webhook is what confirms it). A Service-Request booking
+          // was therefore getting NO "booking confirmed" push at all.
+          try {
+            const requestDoc = await ServiceRequest.findById(
+              booking.serviceRequest,
+            ).select("title isFree");
+            if (requestDoc) {
+              await sendBookingNotification(
+                customer,
+                provider,
+                { _id: requestDoc._id, title: requestDoc.title },
+                booking,
+              );
+            }
+          } catch (err) {
+            console.log("Error sending Service-Request booking notification:", err);
+          }
         }
 
         console.log("Booking Created");
@@ -3321,6 +3343,21 @@ async function attemptBookingRecoveryForPayment(payment) {
       sendBookingNotification(customer, provider, service, booking).catch((err) =>
         console.log(`${tag} Notification error:`, err),
       );
+    } else if (booking.serviceRequest) {
+      // ⭐ FIX: same gap as the main webhook handler — a Service-Request
+      // booking recovered here got no "booking confirmed" push at all.
+      ServiceRequest.findById(booking.serviceRequest)
+        .select("title")
+        .then((requestDoc) => {
+          if (!requestDoc) return;
+          sendBookingNotification(
+            customer,
+            provider,
+            { _id: requestDoc._id, title: requestDoc.title },
+            booking,
+          ).catch((err) => console.log(`${tag} Notification error:`, err));
+        })
+        .catch((err) => console.log(`${tag} ServiceRequest lookup error:`, err));
     }
   } catch (err) {
     console.error(`🚨 ${tag} error:`, err.message);

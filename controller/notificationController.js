@@ -356,6 +356,24 @@ async function notifyOnServiceView(service, viewer) {
 async function sendBookingNotification(customer, provider, service, booking) {
   console.log("🔔 sendBookingNotification CALLED");
 
+  // ⭐ Different wording for a Service-Request-sourced booking (Category A
+  // "Book Now" / Category B accepted Offer) vs a plain Service booking —
+  // `booking.serviceRequest` is set only for the former, whether populated
+  // or still a raw ObjectId, so a simple truthy check is enough here.
+  const isRequestBooking = Boolean(booking.serviceRequest);
+  const customerTitle = isRequestBooking
+    ? "🎉 Your Request Has Been Booked!"
+    : "🎉 Service Booked Successfully!";
+  const customerBody = isRequestBooking
+    ? `Your request "${service.title}" has been booked with ${provider.name}. Amount: ₹${booking.amount}`
+    : `You booked "${service.title}" with ${provider.name}. Amount: ₹${booking.amount}`;
+  const providerTitle = isRequestBooking
+    ? "🛎 You've Been Booked for a Request!"
+    : "🛎 New Booking Received!";
+  const providerBody = isRequestBooking
+    ? `${customer.name} booked you for their request "${service.title}". Amount: ₹${booking.amount}`
+    : `${customer.name} booked "${service.title}". Amount: ₹${booking.amount}`;
+
   try {
     console.log("Customer Tokens →", customer.fcmToken);
     console.log("Provider Tokens →", provider.fcmToken);
@@ -367,11 +385,11 @@ async function sendBookingNotification(customer, provider, service, booking) {
       await admin.messaging().sendEachForMulticast({
         tokens: customer.fcmToken,
         notification: {
-          title: "🎉 Service Booked Successfully!",
-          body: `You booked "${service.title}" with ${provider.name}. Amount: ₹${booking.amount}`,
+          title: customerTitle,
+          body: customerBody,
         },
         data: {
-          type: "booking_success",
+          type: isRequestBooking ? "request_booking_success" : "booking_success",
           userType: "customer",
           bookingId: booking._id.toString(),
         },
@@ -389,11 +407,11 @@ async function sendBookingNotification(customer, provider, service, booking) {
       await admin.messaging().sendEachForMulticast({
         tokens: provider.fcmToken,
         notification: {
-          title: "🛎 New Booking Received!",
-          body: `${customer.name} booked "${service.title}". Amount: ₹${booking.amount}`,
+          title: providerTitle,
+          body: providerBody,
         },
         data: {
-          type: "booking_received",
+          type: isRequestBooking ? "request_booking_received" : "booking_received",
           userType: "provider",
           bookingId: booking._id.toString(),
         },
@@ -1304,6 +1322,23 @@ async function notifyGroupFilled(request) {
   );
 }
 
+async function notifyOfferWithdrawn(request, offer) {
+  const owner = await User.findById(request.owner).select("fcmToken");
+  const provider = await User.findById(offer.provider).select("name");
+  if (!owner) return;
+  await sendUserNotification(
+    owner,
+    "↩️ Offer Withdrawn",
+    `${provider?.name || "A provider"} withdrew their offer on "${request.title}"`,
+    {
+      type: "ServiceRequest",
+      pageType: "ServiceRequestDetailsPage",
+      requestId: request._id,
+      offerId: offer._id,
+    },
+  );
+}
+
 async function notifyQuotationChangeSubmitted(quotationChange, booking) {
   const customer = await User.findById(booking.customer).select("fcmToken");
   if (!customer) return;
@@ -1496,6 +1531,122 @@ async function notifyNewReview(provider, rating, text) {
   });
 }
 
+// =====================================================================
+// REPORT SUBMITTED / RESOLVED — sent to the REPORTER (not the reported
+// party — that's notifyReportOutcome above). Covers both report types
+// (type:"service" and type:"user") with the same two functions.
+// =====================================================================
+async function notifyReportReceived(reporter) {
+  if (!reporter) return;
+  await sendUserNotification(
+    reporter,
+    "📩 Report Received",
+    "Your report has been received and is under review by our team. We'll take appropriate action shortly.",
+    { type: "report_received" },
+  );
+}
+
+function buildReporterResolutionMessage(reportType, outcome) {
+  if (reportType === "service") {
+    return outcome === "approved"
+      ? "Your report has been reviewed — the reported service has been removed. Thank you for helping keep Betogether safe."
+      : "Your report has been reviewed. We didn't find a violation this time, but thank you for flagging it.";
+  }
+  // reportType === "user"
+  if (outcome === "dismissed") {
+    return "Your report has been reviewed and closed — no violation was found.";
+  }
+  return "Your report has been reviewed and appropriate action has been taken. Thank you for helping keep Betogether safe.";
+}
+
+async function notifyReporterOnResolution(reporter, reportType, outcome) {
+  if (!reporter) return;
+  await sendUserNotification(
+    reporter,
+    "✅ Your Report Was Reviewed",
+    buildReporterResolutionMessage(reportType, outcome),
+    { type: "report_resolved", reportType, outcome },
+  );
+}
+
+// =====================================================================
+// REQUEST EXPIRING SOON, ZERO RESPONSE — heads-up to the request owner so
+// they can adjust price/details before it lapses with nobody having
+// booked/offered/joined at all.
+// =====================================================================
+async function notifyRequestExpiringNoResponse(owner, requestTitle) {
+  if (!owner) return;
+  await sendUserNotification(
+    owner,
+    "⏰ Your Request is Expiring Soon",
+    `Your request "${requestTitle}" expires soon and hasn't received any response yet. Consider adjusting your budget or details to attract more interest.`,
+    { type: "request_expiring_no_response", requestTitle },
+  );
+}
+
+// =====================================================================
+// DIRECT ADMIN BLOCK/UNBLOCK — Admin.js's blockUser/unblockUser act outside
+// the Reports flow (no linked report, no "reported incident" wording), so
+// these use plainer copy than notifyReportOutcome above.
+// =====================================================================
+// =====================================================================
+// AMBASSADOR WITHDRAWAL — success/failure of a payout request.
+// =====================================================================
+// =====================================================================
+// PASSWORD CHANGED — security notice, sent right after a successful
+// password reset so the account owner notices immediately if it wasn't
+// actually them.
+// =====================================================================
+async function notifyPasswordChanged(user) {
+  if (!user) return;
+  await sendUserNotification(
+    user,
+    "🔒 Password Changed",
+    "Your password was just changed. If this wasn't you, please contact support immediately.",
+    { type: "password_changed" },
+  );
+}
+
+async function notifyAmbassadorWithdrawalSuccess(user, amount) {
+  if (!user) return;
+  await sendUserNotification(
+    user,
+    "💸 Withdrawal Successful",
+    `Your withdrawal of €${amount} is being processed and will arrive in your bank account soon.`,
+    { type: "ambassador_withdrawal_success", amount },
+  );
+}
+
+async function notifyAmbassadorWithdrawalFailed(user, amount) {
+  if (!user) return;
+  await sendUserNotification(
+    user,
+    "❌ Withdrawal Failed",
+    `Your withdrawal of €${amount} could not be processed. The amount has been returned to your wallet — please try again.`,
+    { type: "ambassador_withdrawal_failed", amount },
+  );
+}
+
+async function notifyAccountBlocked(user) {
+  if (!user) return;
+  await sendUserNotification(
+    user,
+    "⛔ Account Blocked",
+    "Your account has been blocked by admin. Please contact support if you believe this is a mistake.",
+    { type: "account_blocked" },
+  );
+}
+
+async function notifyAccountUnblocked(user) {
+  if (!user) return;
+  await sendUserNotification(
+    user,
+    "✅ Account Restored",
+    "Good news — your account has been unblocked and is active again. Welcome back!",
+    { type: "account_unblocked" },
+  );
+}
+
 async function notifyPromotionCancelled(user, serviceTitle) {
   if (!user) return;
   await sendUserNotification(
@@ -1517,9 +1668,18 @@ exports.notifyPromotionCancelled = notifyPromotionCancelled;
 exports.notifyPromotionExpiringSoon = notifyPromotionExpiringSoon;
 exports.notifyPromotionExpired = notifyPromotionExpired;
 exports.notifyNewReview = notifyNewReview;
+exports.notifyReportReceived = notifyReportReceived;
+exports.notifyReporterOnResolution = notifyReporterOnResolution;
+exports.notifyAccountBlocked = notifyAccountBlocked;
+exports.notifyAccountUnblocked = notifyAccountUnblocked;
+exports.notifyAmbassadorWithdrawalSuccess = notifyAmbassadorWithdrawalSuccess;
+exports.notifyAmbassadorWithdrawalFailed = notifyAmbassadorWithdrawalFailed;
+exports.notifyPasswordChanged = notifyPasswordChanged;
+exports.notifyRequestExpiringNoResponse = notifyRequestExpiringNoResponse;
 exports.notifyNewOffer = notifyNewOffer;
 exports.notifyOfferAccepted = notifyOfferAccepted;
 exports.notifyOfferDeclined = notifyOfferDeclined;
+exports.notifyOfferWithdrawn = notifyOfferWithdrawn;
 exports.notifyGroupFilled = notifyGroupFilled;
 exports.notifyQuotationChangeSubmitted = notifyQuotationChangeSubmitted;
 exports.notifyQuotationChangeResponded = notifyQuotationChangeResponded;

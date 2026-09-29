@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const cron = require("node-cron");
 const ServiceRequest = require("../model/ServiceRequest");
 const ServiceRequestOffer = require("../model/ServiceRequestOffer");
 const Booking = require("../model/Booking");
@@ -10,7 +11,9 @@ const {
   notifyNewOffer,
   notifyOfferAccepted,
   notifyOfferDeclined,
+  notifyOfferWithdrawn,
   notifyGroupFilled,
+  notifyRequestExpiringNoResponse,
 } = require("./notificationController");
 const paymentController = require("./paymentController");
 const {
@@ -1018,6 +1021,15 @@ exports.withdrawOffer = async (req, res) => {
     offer.status = "withdrawn";
     await offer.save();
 
+    const request = await ServiceRequest.findById(offer.request).select(
+      "title owner",
+    );
+    if (request) {
+      notifyOfferWithdrawn(request, offer).catch((err) =>
+        console.error("❌ notifyOfferWithdrawn error:", err),
+      );
+    }
+
     return res.json({ isSuccess: true, message: "Offer withdrawn" });
   } catch (err) {
     console.error("withdrawOffer error:", err);
@@ -1246,3 +1258,58 @@ exports.joinRequest = async (req, res) => {
     return res.status(500).json({ isSuccess: false, message: "Server error" });
   }
 };
+
+//////////////////////////////////////////////////////////
+// HOURLY CRON — "expiring soon, zero response" reminder
+//////////////////////////////////////////////////////////
+// A request whose expiresAt is coming up within the next 2 hours, with
+// nobody having booked/offered/joined at all yet, gets the owner one
+// heads-up so they can adjust price/details before it quietly lapses.
+// Uses updateOne (not doc.save()) to flip the reminder flag — save() would
+// re-validate the WHOLE document and could 500 on an older request missing
+// a since-added required field, same class of bug fixed in
+// updateServiceRequestStatus.
+cron.schedule("0 * * * *", async () => {
+  try {
+    const now = new Date();
+    const twoHoursFromNow = new Date(now.getTime() + 2 * 60 * 60 * 1000);
+
+    const expiringRequests = await ServiceRequest.find({
+      status: "open",
+      expiresAt: { $gte: now, $lte: twoHoursFromNow },
+      expiringSoonReminderSent: { $ne: true },
+    }).select("owner title requestMode seatsBooked joinedBy");
+
+    for (const request of expiringRequests) {
+      let hasResponse;
+      if (request.requestMode === "free_single") {
+        hasResponse = Boolean(request.joinedBy);
+      } else if (request.requestMode === "paid_offer") {
+        const offerCount = await ServiceRequestOffer.countDocuments({
+          request: request._id,
+        });
+        hasResponse = offerCount > 0;
+      } else {
+        // paid_fixed / free_group
+        hasResponse = (request.seatsBooked || 0) > 0;
+      }
+
+      if (!hasResponse) {
+        const owner = await User.findById(request.owner);
+        notifyRequestExpiringNoResponse(owner, request.title).catch((err) =>
+          console.error("❌ notifyRequestExpiringNoResponse error:", err.message),
+        );
+      }
+
+      await ServiceRequest.updateOne(
+        { _id: request._id },
+        { expiringSoonReminderSent: true },
+      );
+    }
+
+    console.log(`Request-expiry reminders checked: ${expiringRequests.length}`);
+  } catch (err) {
+    console.error("❌ Request-expiry reminder cron error:", err.message);
+  }
+});
+console.log("🕐 Request-expiring-soon reminder cron scheduled (every hour)");

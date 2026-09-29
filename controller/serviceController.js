@@ -350,6 +350,12 @@ exports.createService = async (req, res) => {
       serviceId: createdService._id,
     });
 
+    // ⭐ Was imported but never actually called — nearby users with
+    // matching interests never got a "new service near you" push before.
+    notifyOnNewService(createdService).catch((err) =>
+      console.error("❌ notifyOnNewService error:", err),
+    );
+
     return res.json({
       isSuccess: true,
       message: "Service created successfully ✅",

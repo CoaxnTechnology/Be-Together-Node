@@ -124,6 +124,11 @@ const serviceRequestSchema = new mongoose.Schema(
       type: Date,
       required: true,
     },
+    // ⭐ De-dupes the "expiring soon, zero response" reminder cron — set
+    // once so the owner isn't reminded on every cron tick for the same
+    // request. No need to reset it (unlike promotion reminders) since a
+    // request's expiresAt never moves once set.
+    expiringSoonReminderSent: { type: Boolean, default: false },
   },
   { timestamps: true },
 );

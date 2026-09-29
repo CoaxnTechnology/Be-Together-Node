@@ -113,6 +113,14 @@ exports.reportService = async (req, res) => {
         report: report._id,
       });
 
+      // ⭐ req.user was fetched by authMiddleware with a limited .select()
+      // that excludes fcmToken — re-fetch fresh here so the push actually
+      // has a token to send to.
+      const reporterUser = await User.findById(userId);
+      notificationController
+        .notifyReportReceived(reporterUser)
+        .catch((err) => console.error("❌ notifyReportReceived error:", err.message));
+
       return res.json({
         isSuccess: true,
         message: "User reported successfully",
@@ -156,6 +164,11 @@ exports.reportService = async (req, res) => {
       message: `Service reported: ${reason}`,
       report: serviceReport._id,
     });
+
+    const reporterUser = await User.findById(userId);
+    notificationController
+      .notifyReportReceived(reporterUser)
+      .catch((err) => console.error("❌ notifyReportReceived error:", err.message));
 
     return res.json({
       isSuccess: true,
@@ -265,6 +278,29 @@ exports.getReportedServices = async (req, res) => {
 // ==========================
 // approveReport / rejectReport — unchanged, "service"-type only
 // ==========================
+// Notifies every distinct reporter who flagged this service — several
+// people may have reported the same service, and each of them should hear
+// back about what admin decided.
+async function notifyServiceReporters(serviceId, outcome) {
+  try {
+    const reports = await ServiceReport.find({
+      type: "service",
+      service: serviceId,
+    }).select("reportedBy");
+    const uniqueReporterIds = [...new Set(reports.map((r) => String(r.reportedBy)))];
+    for (const reporterId of uniqueReporterIds) {
+      const reporter = await User.findById(reporterId);
+      notificationController
+        .notifyReporterOnResolution(reporter, "service", outcome)
+        .catch((err) =>
+          console.error("❌ notifyReporterOnResolution error:", err.message),
+        );
+    }
+  } catch (err) {
+    console.error("notifyServiceReporters error:", err.message);
+  }
+}
+
 exports.approveReport = async (req, res) => {
   try {
     const { serviceId } = req.body;
@@ -277,6 +313,8 @@ exports.approveReport = async (req, res) => {
       { type: "service", service: serviceId },
       { status: "approved" },
     );
+
+    notifyServiceReporters(serviceId, "approved");
 
     return res.json({
       isSuccess: true,
@@ -294,6 +332,8 @@ exports.rejectReport = async (req, res) => {
       { type: "service", service: serviceId },
       { status: "rejected" },
     );
+
+    notifyServiceReporters(serviceId, "rejected");
 
     return res.json({
       isSuccess: true,
@@ -452,6 +492,13 @@ exports.resolveUserReport = async (req, res) => {
         { $inc: { reportCount: 1 } },
       );
     }
+
+    const reporterUser = await User.findById(report.reportedBy);
+    notificationController
+      .notifyReporterOnResolution(reporterUser, "user", adminAction)
+      .catch((err) =>
+        console.error("❌ notifyReporterOnResolution error:", err.message),
+      );
 
     return res.json({
       isSuccess: true,

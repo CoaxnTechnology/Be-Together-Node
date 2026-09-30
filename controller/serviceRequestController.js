@@ -969,7 +969,13 @@ exports.listOffers = async (req, res) => {
       });
     }
 
-    const offers = await ServiceRequestOffer.find({ request: id })
+    // ⭐ A withdrawn offer is the provider's own cancellation — the customer
+    // never needs to see it in their list, only the provider's own history
+    // (GET /my-offers) keeps a record of it.
+    const offers = await ServiceRequestOffer.find({
+      request: id,
+      status: { $ne: "withdrawn" },
+    })
       .populate("provider", "name profile_image")
       .lean();
 

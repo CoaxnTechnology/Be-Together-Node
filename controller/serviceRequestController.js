@@ -661,6 +661,24 @@ exports.getServiceRequestById = async (req, res) => {
         .lean();
     }
 
+    // Free requests — has this viewer already joined? Their Join booking
+    // (for cancelling via /refund) comes back as myBooking.
+    let myBooking = null;
+    if (
+      userId &&
+      !isOwner &&
+      ["free_single", "free_group"].includes(request.requestMode) &&
+      mongoose.Types.ObjectId.isValid(userId)
+    ) {
+      myBooking = await Booking.findOne({
+        serviceRequest: id,
+        customer: userId,
+        status: { $in: ["booked", "started", "completed"] },
+      })
+        .select("status createdAt")
+        .lean();
+    }
+
     return res.json({
       isSuccess: true,
       message: "Service request fetched successfully",
@@ -669,7 +687,9 @@ exports.getServiceRequestById = async (req, res) => {
         isOwner,
         hasSubmittedOffer: Boolean(myOffer),
         myOffer,
-        showBookingButton: !isOwner && !myOffer,
+        hasJoined: Boolean(myBooking),
+        myBooking,
+        showBookingButton: !isOwner && !myOffer && !myBooking,
       },
     });
   } catch (err) {
@@ -1265,6 +1285,19 @@ exports.joinRequest = async (req, res) => {
       return res
         .status(400)
         .json({ isSuccess: false, message: "You cannot join your own request" });
+    }
+
+    // One join per user — same check getServiceRequestById uses for
+    // hasJoined, so the button and this API always agree.
+    const alreadyJoined = await Booking.exists({
+      serviceRequest: id,
+      customer: userId,
+      status: { $in: ["booked", "started", "completed"] },
+    });
+    if (alreadyJoined) {
+      return res
+        .status(400)
+        .json({ isSuccess: false, message: "You have already joined this request" });
     }
 
     let updated;

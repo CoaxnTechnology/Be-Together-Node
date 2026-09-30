@@ -1530,31 +1530,52 @@ exports.loginAdmin = async (req, res) => {
 //admin booking
 exports.getAllBookings = async (req, res) => {
   try {
-    // 1️⃣ Fetch all bookings with populated references
-    const bookings = await Booking.find()
+    // ⭐ "service" (default) = bookings made against a normal Service
+    // listing; "request" = bookings made against a Service Request
+    // (Category A fixed-price / Category B accepted-offer / Category C-D
+    // free join). Reuses this single endpoint/function with a filter,
+    // same pattern as getAllPayments's `type` param.
+    const { type = "service" } = req.query;
+
+    const filter =
+      type === "request"
+        ? { serviceRequest: { $ne: null } }
+        : { serviceRequest: null };
+
+    // 1️⃣ Fetch bookings with populated references
+    const bookings = await Booking.find(filter)
       .populate("customer")
       .populate("provider")
       .populate("service")
+      .populate("serviceRequest", "title requestMode budget category schedule")
       .populate("paymentId")
       .sort({ createdAt: -1 });
 
-    // 2️⃣ Group bookings by service
-    const groupedByService = {};
+    // 2️⃣ Group bookings by service (or by request, for the request tab)
+    const grouped = {};
 
     bookings.forEach((booking) => {
-      // 🛑 SAFETY CHECK (VERY IMPORTANT)
-      // 🟡 HANDLE DELETED REFERENCES SAFELY
-      if (!booking.service || !booking.customer || !booking.provider) {
-        const serviceId = "deleted";
+      // 🛑 SAFETY CHECK — handle deleted references safely. A Request
+      // booking has no `service` by design, so this must check BOTH
+      // `service` and `serviceRequest` before treating it as orphaned
+      // (previously this only checked `service`, which mislabeled every
+      // Request booking as "Deleted Service" — fixed here).
+      if (
+        !booking.customer ||
+        !booking.provider ||
+        (!booking.service && !booking.serviceRequest)
+      ) {
+        const groupId = "deleted";
 
-        if (!groupedByService[serviceId]) {
-          groupedByService[serviceId] = {
+        if (!grouped[groupId]) {
+          grouped[groupId] = {
             service: {
               _id: "deleted",
-              title: "Deleted Service",
+              title: "Deleted Service / Request",
               price: 0,
               isFree: false,
             },
+            serviceRequest: null,
             provider: {
               _id: "deleted",
               name: "Deleted Provider",
@@ -1564,7 +1585,7 @@ exports.getAllBookings = async (req, res) => {
           };
         }
 
-        groupedByService[serviceId].users.push({
+        grouped[groupId].users.push({
           bookingId: booking._id,
           status: booking.status,
           cancelledBy: booking.cancelledBy,
@@ -1572,26 +1593,29 @@ exports.getAllBookings = async (req, res) => {
           refundAmount: booking.refundAmount || 0,
           cancellationFee: booking.cancellationFee || 0,
           amount: booking.amount,
-          note: "Related user or service was deleted",
+          note: "Related user, service or request was deleted",
           createdAt: booking.createdAt,
         });
 
         return;
       }
 
-      const serviceId = booking.service._id.toString();
+      const groupKey = booking.service
+        ? `service:${booking.service._id}`
+        : `request:${booking.serviceRequest._id}`;
 
-      // 3️⃣ Create service group if not exists
-      if (!groupedByService[serviceId]) {
-        groupedByService[serviceId] = {
-          service: booking.service,
+      // 3️⃣ Create group if not exists
+      if (!grouped[groupKey]) {
+        grouped[groupKey] = {
+          service: booking.service || null,
+          serviceRequest: booking.serviceRequest || null,
           provider: booking.provider,
           users: [],
         };
       }
 
       // 4️⃣ Push customer + booking details
-      groupedByService[serviceId].users.push({
+      grouped[groupKey].users.push({
         _id: booking.customer._id,
         name: booking.customer.name,
         email: booking.customer.email,
@@ -1602,6 +1626,8 @@ exports.getAllBookings = async (req, res) => {
         bookingId: booking._id,
         status: booking.status,
         amount: booking.amount,
+        contactPhone: booking.contactPhone || null,
+        location_name: booking.location_name || null,
         otp: booking.otp,
         otpExpiry: booking.otpExpiry,
         cancelledBy: booking.cancelledBy,
@@ -1618,7 +1644,7 @@ exports.getAllBookings = async (req, res) => {
     return res.status(200).json({
       isSuccess: true,
       message: "All bookings grouped by service",
-      services: Object.values(groupedByService),
+      services: Object.values(grouped),
     });
   } catch (error) {
     console.error("❌ getAllBookings Error:", error);

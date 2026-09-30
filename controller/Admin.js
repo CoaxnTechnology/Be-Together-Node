@@ -1641,12 +1641,25 @@ exports.getAllPayments = async (req, res) => {
       currency,
       providerId,
       userId,
+      // ⭐ "service" (default) = payments made against a normal Service
+      // listing; "request" = payments made against a Service Request
+      // (Category A fixed-price / Category B accepted-offer booking).
+      // Reuses this single endpoint/function instead of a parallel one —
+      // same pattern already used for bookService/refundBooking.
+      type = "service",
     } = req.query;
 
     page = Number(page);
     limit = Number(limit);
 
     const query = {};
+
+    // --------- SOURCE FILTER (service vs service-request) ---------
+    if (type === "request") {
+      query.serviceRequest = { $ne: null };
+    } else {
+      query.serviceRequest = null;
+    }
 
     // --------- OPTIONAL FILTERS ---------
     if (status) query.status = status;
@@ -1659,6 +1672,7 @@ exports.getAllPayments = async (req, res) => {
       .populate("user", "name email phone")
       .populate("provider", "name email phone")
       .populate("service", "title description price isFree")
+      .populate("serviceRequest", "title requestMode budget category schedule")
       .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
       .limit(limit);
@@ -1676,6 +1690,7 @@ exports.getAllPayments = async (req, res) => {
       data: payments.map((p) => ({
         paymentId: p._id,
         bookingId: p.bookingId || null,
+        contactPhone: p.contactPhone || null,
 
         customer: {
           id: p.user?._id || null,
@@ -1691,33 +1706,74 @@ exports.getAllPayments = async (req, res) => {
           phone: p.provider?.phone || null,
         },
 
-        service: {
-          id: p.service?._id || null,
-          title: p.service?.title || null,
-          description: p.service?.description || null,
-          price: p.service?.price || null,
-          isFree: p.service?.isFree || false,
-        },
+        service: p.service
+          ? {
+              id: p.service._id,
+              title: p.service.title,
+              description: p.service.description,
+              price: p.service.price,
+              isFree: p.service.isFree || false,
+            }
+          : null,
+
+        serviceRequest: p.serviceRequest
+          ? {
+              id: p.serviceRequest._id,
+              title: p.serviceRequest.title,
+              requestMode: p.serviceRequest.requestMode,
+              budget: p.serviceRequest.budget,
+              category: p.serviceRequest.category,
+              schedule: p.serviceRequest.schedule,
+            }
+          : null,
 
         amount: p.amount,
         currency: p.currency,
+        originalAmount: p.originalAmount,
         appCommission: p.appCommission,
         providerAmount: p.providerAmount,
+        providerCommissionPercentage: p.providerCommissionPercentage,
+        customerCommissionPercentage: p.customerCommissionPercentage,
+        totalPaidByCustomer: p.totalPaidByCustomer,
+        customerPaidAmount: p.customerPaidAmount,
+
+        // --------- WALLET ---------
+        usedWallet: p.usedWallet,
+        walletCoinsUsed: p.walletCoinsUsed,
+        walletAmountUsed: p.walletAmountUsed,
 
         // --------- PAYMENT STATUS ---------
         paymentStatus: p.status || "unknown",
+        captureStatus: p.captureStatus,
+        capturedAt: p.capturedAt,
+        failureReason: p.failureReason,
 
-        refundId: p.refundId,
-        refundReason: p.refundReason,
-
+        // --------- STRIPE IDs (for support cross-reference in Stripe dashboard) ---------
         checkoutSessionId: p.checkoutSessionId,
         paymentIntentId: p.paymentIntentId,
         customerStripeId: p.customerStripeId,
         providerStripeId: p.providerStripeId,
 
+        // --------- PROVIDER TRANSFER (payout) ---------
+        transferId: p.transferId,
+        transferStatus: p.transferStatus,
+        transferAmount: p.transferAmount,
+        transferCreatedAt: p.transferCreatedAt,
+        transferFailureReason: p.transferFailureReason,
+        transferFailureCode: p.transferFailureCode,
+
+        // --------- REFUND / CANCELLATION ---------
+        refundId: p.refundId,
+        refundReason: p.refundReason,
+        refundStatus: p.refundStatus,
+        refundedAmount: p.refundedAmount,
+        refundedAt: p.refundedAt,
+        cancellationFee: p.cancellationFee,
+        platformRetainedAmount: p.platformRetainedAmount,
+
+        // --------- TIMESTAMPS ---------
         createdAt: p.createdAt,
         completedAt: p.completedAt,
-        refundedAt: p.refundedAt,
       })),
     });
   } catch (err) {

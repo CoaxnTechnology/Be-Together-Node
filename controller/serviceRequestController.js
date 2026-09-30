@@ -643,13 +643,33 @@ exports.getServiceRequestById = async (req, res) => {
     const ownerId = request.owner?._id || request.owner;
     const isOwner = Boolean(userId) && String(ownerId) === String(userId);
 
+    // Same rule submitOffer enforces — a provider with a pending offer can't
+    // send another one, so hide the button and show their offer instead.
+    let myOffer = null;
+    if (
+      userId &&
+      !isOwner &&
+      request.requestMode === "paid_offer" &&
+      mongoose.Types.ObjectId.isValid(userId)
+    ) {
+      myOffer = await ServiceRequestOffer.findOne({
+        request: id,
+        provider: userId,
+        status: "pending",
+      })
+        .select("amount currency note status createdAt")
+        .lean();
+    }
+
     return res.json({
       isSuccess: true,
       message: "Service request fetched successfully",
       data: {
         ...decorateRequest(request),
         isOwner,
-        showBookingButton: !isOwner,
+        hasSubmittedOffer: Boolean(myOffer),
+        myOffer,
+        showBookingButton: !isOwner && !myOffer,
       },
     });
   } catch (err) {

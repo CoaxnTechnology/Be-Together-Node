@@ -896,15 +896,6 @@ exports.submitOffer = async (req, res) => {
         .status(400)
         .json({ isSuccess: false, message: "A positive amount is required" });
     }
-    // Required per the client's risk-mitigation decision (24 Sep 2026) —
-    // every Offer must explain the price.
-    if (!note || !String(note).trim()) {
-      return res.status(400).json({
-        isSuccess: false,
-        message: "A note explaining the price is required",
-      });
-    }
-
     const existing = await ServiceRequestOffer.findOne({
       request: id,
       provider: userId,
@@ -922,7 +913,7 @@ exports.submitOffer = async (req, res) => {
       provider: userId,
       amount: amountNum,
       currency: currency || request.budget?.currency || "EUR",
-      note: note.trim(),
+      note: note ? String(note).trim() || null : null, // optional
     });
 
     notifyNewOffer(request, offer).catch((err) =>

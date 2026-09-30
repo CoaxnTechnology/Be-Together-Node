@@ -18,10 +18,9 @@ const serviceRequestOfferSchema = new mongoose.Schema(
     },
     amount: { type: Number, required: true, min: 0 },
     currency: { type: String, default: null },
-    // Required per the client's risk-mitigation decision (24 Sep 2026) —
-    // every Offer must explain the price so the customer (and admin, if
-    // disputed) has something concrete to judge.
-    note: { type: String, required: true, trim: true },
+    // Optional — the provider can explain the price, but an offer at the
+    // customer's own budget needs no explanation.
+    note: { type: String, default: null, trim: true },
     status: {
       type: String,
       enum: ["pending", "accepted", "declined", "withdrawn"],

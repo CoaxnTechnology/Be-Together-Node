@@ -1214,19 +1214,16 @@ exports.acceptOffer = async (req, res) => {
       updated.status = "fulfilled";
       await updated.save();
 
-      const stillPending = await ServiceRequestOffer.find({
-        request: id,
-        status: "pending",
-      });
-      await ServiceRequestOffer.updateMany(
-        { request: id, status: "pending" },
-        { status: "declined" },
-      );
-      stillPending.forEach((declined) => {
-        notifyOfferDeclined(request, declined).catch((err) =>
-          console.error("❌ notifyOfferDeclined error:", err),
-        );
-      });
+      // ⭐ CHANGED (client decision, 30 Sep 2026): the other pending offers
+      // are no longer auto-declined here. If this accepted offer's booking
+      // later gets cancelled (e.g. the provider finds on-site the job is
+      // bigger than quoted and it falls through), releaseServiceRequestSlot
+      // reopens this request (status back to "open") — the customer can
+      // then accept one of the other 9 offers instead of having to post a
+      // brand new request from scratch. Declining now only happens once the
+      // accepted booking actually COMPLETES (see completeService in
+      // paymentController.js) or the customer explicitly rejects one via
+      // POST /:id/offers/:offerId/reject.
     }
 
     // Reuse the exact same booking/payment function as a normal Service
@@ -1243,6 +1240,57 @@ exports.acceptOffer = async (req, res) => {
     return paymentController.bookService(req, res);
   } catch (err) {
     console.error("acceptOffer error:", err);
+    return res.status(500).json({ isSuccess: false, message: "Server error" });
+  }
+};
+
+// ⭐ NEW (client decision, 30 Sep 2026): lets the owner explicitly decline
+// one specific pending offer without accepting a different one first — the
+// other counterpart to acceptOffer no longer auto-declining everything else.
+// Doesn't touch seatsBooked/status at all, since nothing was ever reserved
+// for a merely-pending offer.
+exports.rejectOffer = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ isSuccess: false, message: "Unauthorized" });
+    }
+    const { id, offerId } = req.params;
+
+    const request = await ServiceRequest.findById(id);
+    if (!request) {
+      return res
+        .status(404)
+        .json({ isSuccess: false, message: "Service request not found" });
+    }
+    if (String(request.owner) !== String(userId)) {
+      return res.status(403).json({
+        isSuccess: false,
+        message: "You can only reject offers on your own request",
+      });
+    }
+
+    const offer = await ServiceRequestOffer.findById(offerId);
+    if (!offer || String(offer.request) !== String(id)) {
+      return res.status(404).json({ isSuccess: false, message: "Offer not found" });
+    }
+    if (offer.status !== "pending") {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Only a pending offer can be rejected",
+      });
+    }
+
+    offer.status = "declined";
+    await offer.save();
+
+    notifyOfferDeclined(request, offer).catch((err) =>
+      console.error("❌ notifyOfferDeclined error:", err),
+    );
+
+    return res.json({ isSuccess: true, message: "Offer rejected" });
+  } catch (err) {
+    console.error("rejectOffer error:", err);
     return res.status(500).json({ isSuccess: false, message: "Server error" });
   }
 };

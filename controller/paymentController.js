@@ -22,6 +22,7 @@ const {
   notifyQuotationChangeResponded,
   notifyPaymentFailed,
   notifyWalletTransaction,
+  notifyOfferDeclined,
 } = require("../controller/notificationController"); // ✅ import it
 const CancellationSetting = require("../model/CancellationSetting");
 const User = require("../model/User");
@@ -1506,6 +1507,44 @@ exports.completeService = async (req, res) => {
     });
     booking.status = "completed";
     await booking.save();
+
+    // ⭐ NEW (client decision, 30 Sep 2026): a paid_offer request's OTHER
+    // pending offers are deliberately left alone at accept-time (see
+    // acceptOffer in serviceRequestController.js) so the customer can fall
+    // back to one of them if this accepted booking gets cancelled instead
+    // of completed. Now that the job has genuinely finished, decline them —
+    // this request no longer needs another provider. No-op (empty query
+    // result) for a Service booking or any non-paid_offer Service Request.
+    if (booking.serviceRequest) {
+      try {
+        const requestId = booking.serviceRequest._id || booking.serviceRequest;
+        const stillPendingOffers = await ServiceRequestOffer.find({
+          request: requestId,
+          status: "pending",
+        });
+        if (stillPendingOffers.length) {
+          await ServiceRequestOffer.updateMany(
+            { request: requestId, status: "pending" },
+            { status: "declined" },
+          );
+          const requestDoc = await ServiceRequest.findById(requestId).select(
+            "title owner",
+          );
+          if (requestDoc) {
+            stillPendingOffers.forEach((declinedOffer) => {
+              notifyOfferDeclined(requestDoc, declinedOffer).catch((err) =>
+                console.error("❌ notifyOfferDeclined error:", err),
+              );
+            });
+          }
+        }
+      } catch (err) {
+        console.error(
+          "❌ Error declining remaining offers on completion:",
+          err.message,
+        );
+      }
+    }
 
     payment.status = "completed";
     payment.completedAt = new Date();

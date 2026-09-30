@@ -42,6 +42,13 @@ router.post(
   authMiddleware,
   serviceRequestController.acceptOffer,
 );
+// Owner explicitly declines one specific pending offer without accepting a
+// different one — accepting no longer auto-declines everything else.
+router.post(
+  "/:id/offers/:offerId/reject",
+  authMiddleware,
+  serviceRequestController.rejectOffer,
+);
 
 // Category C & D — Free (single) / Free Group: Join.
 router.post("/:id/join", authMiddleware, serviceRequestController.joinRequest);

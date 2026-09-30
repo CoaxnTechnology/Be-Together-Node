@@ -1009,6 +1009,64 @@ exports.listOffers = async (req, res) => {
   }
 };
 
+// =====================================================================
+// MY OFFERS — every Offer a provider has ever submitted, across every
+// request, with the request's own context and (once accepted) the linked
+// Booking's status — so a provider has one place to see "what did I offer,
+// and what happened to it" without hunting through individual requests.
+// =====================================================================
+exports.getMyOffers = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ isSuccess: false, message: "Unauthorized" });
+    }
+
+    const { status } = req.query;
+    const filter = { provider: userId };
+    if (["pending", "accepted", "declined", "withdrawn"].includes(status)) {
+      filter.status = status;
+    }
+
+    const offers = await ServiceRequestOffer.find(filter)
+      .populate({
+        path: "request",
+        select: "title requestMode status budget",
+        populate: { path: "owner", select: "name profile_image" },
+      })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    // Only an accepted offer has a real Booking behind it — attach its
+    // status (booked/started/completed/cancelled) so the provider can see
+    // where the job actually stands, not just that the offer was accepted.
+    const offersWithBooking = await Promise.all(
+      offers.map(async (offer) => {
+        if (offer.status !== "accepted") {
+          return { ...offer, booking: null };
+        }
+        const booking = await Booking.findOne({
+          serviceRequest: offer.request?._id || offer.request,
+          provider: userId,
+        })
+          .select("status amount createdAt")
+          .lean();
+        return { ...offer, booking: booking || null };
+      }),
+    );
+
+    return res.json({
+      isSuccess: true,
+      message: "Your offers fetched successfully",
+      total: offersWithBooking.length,
+      data: offersWithBooking,
+    });
+  } catch (err) {
+    console.error("getMyOffers error:", err);
+    return res.status(500).json({ isSuccess: false, message: "Server error" });
+  }
+};
+
 exports.withdrawOffer = async (req, res) => {
   try {
     const userId = req.user?.id;

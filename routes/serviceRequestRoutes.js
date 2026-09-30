@@ -12,6 +12,9 @@ router.post("/create", authMiddleware, serviceRequestController.createServiceReq
 router.post("/list", optionalAuth, serviceRequestController.getServiceRequests);
 
 router.get("/my", authMiddleware, serviceRequestController.getMyServiceRequests);
+// A provider's own Offer history, across every request — must come before
+// "/:id" or Express would treat "my-offers" as an :id.
+router.get("/my-offers", authMiddleware, serviceRequestController.getMyOffers);
 // Public — anyone can view a request. Pass ?userId=<viewer id> so the
 // response can tell the creator not to show the booking button.
 router.get("/:id", serviceRequestController.getServiceRequestById);

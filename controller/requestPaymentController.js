@@ -469,8 +469,10 @@ async function createRequestBooking(payment, paymentIntent) {
 }
 
 // =====================================================================
-// 2) QUOTATION CHANGE — provider proposes a higher price after the job has
-// started; the customer pays ONLY the difference through its own Checkout.
+// 2) QUOTATION CHANGE — on arrival, BEFORE starting the service (OTP), the
+// provider can propose a higher price; the customer pays ONLY the
+// difference through its own Checkout. The service can't be started while
+// a change is still open (see startService/verifyServiceOtp).
 // The full history lives on the Booking (booking.quotationChanges); every
 // paid difference is also listed on the Payment (payment.additionalCharges).
 // =====================================================================
@@ -537,12 +539,12 @@ exports.createQuotationChange = async (req, res) => {
         message: "A price change is only possible on an accepted-offer booking",
       });
     }
-    // The job must already be in progress (OTP verified).
-    if (booking.status !== "started") {
+    // Only before the service starts — once the OTP is verified the price
+    // is final.
+    if (booking.status !== "booked") {
       return res.status(400).json({
         isSuccess: false,
-        message:
-          "A price change can only be proposed once the service has started (OTP verified)",
+        message: "A price change can only be proposed before the service starts",
       });
     }
 
@@ -647,10 +649,10 @@ exports.respondToQuotationChange = async (req, res) => {
         message: "This quotation change has already been responded to",
       });
     }
-    if (booking.status !== "started") {
+    if (booking.status !== "booked") {
       return res.status(400).json({
         isSuccess: false,
-        message: "This booking is no longer in progress",
+        message: "This booking can no longer be changed",
       });
     }
 
@@ -810,7 +812,7 @@ async function applyQuotationPayment(session) {
 
   // Claim it: only one caller can move awaiting_payment → accepted.
   const claimed =
-    booking.status === "started" &&
+    booking.status === "booked" &&
     (await updateQuotationChange(bookingId, quotationChangeId, ["awaiting_payment"], {
       status: "accepted",
       paidAt: new Date(),
@@ -1141,17 +1143,10 @@ exports.cancelRequestBooking = async (req, res) => {
       });
     }
     if (booking.status === "started") {
-      // Narrow exception (client-finalized 24 Sep 2026): the provider may
-      // drop the job if the customer rejected their price change.
-      const rejectedChange =
-        cancelledBy === "provider" &&
-        booking.quotationChanges.some((q) => q.status === "rejected");
-      if (!rejectedChange) {
-        return res.status(400).json({
-          isSuccess: false,
-          message: "Service already started. Cancellation not allowed.",
-        });
-      }
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Service already started. Cancellation not allowed.",
+      });
     } else if (booking.status !== "booked") {
       return res.status(400).json({
         isSuccess: false,
@@ -1534,3 +1529,4 @@ cron.schedule("*/10 * * * *", async () => {
 });
 
 exports.releaseServiceRequestSlot = releaseServiceRequestSlot;
+exports.openQuotationChange = openQuotationChange;

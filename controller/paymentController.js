@@ -967,6 +967,16 @@ exports.updateBookingStatus = async (req, res) => {
 // ------------------------------
 // 2) START SERVICE → GENERATE OTP → EMAIL
 // ------------------------------
+// Start / verify-otp / complete are the provider's own actions — only the
+// provider of that booking may call them (normal Service and Service Request).
+function isBookingProvider(req, booking) {
+  return String(req.user?.id || "") === String(booking.provider?._id || booking.provider);
+}
+const NOT_YOUR_BOOKING = {
+  isSuccess: false,
+  message: "Only the provider of this booking can do this",
+};
+
 exports.startService = async (req, res) => {
   try {
     logPaymentFlow("startService:start", { body: req.body });
@@ -989,6 +999,32 @@ exports.startService = async (req, res) => {
     if (!booking) {
       logPaymentFlow("startService:bookingNotFound", { bookingId });
       return res.status(404).json({ message: "Booking not found" });
+    }
+
+    if (!isBookingProvider(req, booking)) {
+      return res.status(403).json(NOT_YOUR_BOOKING);
+    }
+
+    // Only a confirmed, not-yet-started booking gets an OTP — never a
+    // cancelled, completed or already-started one.
+    if (booking.status !== "booked") {
+      return res.status(400).json({
+        isSuccess: false,
+        message: `Service can't be started — this booking is ${booking.status}`,
+      });
+    }
+
+    // Request booking: the price must be settled before the service starts —
+    // no start while a price change is unanswered or unpaid.
+    const openChange = booking.serviceRequest && requestPayment.openQuotationChange(booking);
+    if (openChange) {
+      return res.status(400).json({
+        isSuccess: false,
+        message:
+          openChange.status === "awaiting_payment"
+            ? "The customer hasn't paid the updated price yet"
+            : "A price change is still waiting for the customer's answer",
+      });
     }
 
     const { customer, provider } = booking;
@@ -1066,6 +1102,32 @@ exports.verifyServiceOtp = async (req, res) => {
       return res.status(404).json({ message: "Booking not found" });
     }
 
+    if (!isBookingProvider(req, booking)) {
+      return res.status(403).json(NOT_YOUR_BOOKING);
+    }
+
+    // Same rule as startService — a cancelled/completed booking must never
+    // flip to "started" through an old OTP.
+    if (booking.status !== "booked") {
+      return res.status(400).json({
+        isSuccess: false,
+        message: `Service can't be started — this booking is ${booking.status}`,
+      });
+    }
+
+    // Request booking: the price must be settled before the service starts —
+    // no start while a price change is unanswered or unpaid.
+    const openChange = booking.serviceRequest && requestPayment.openQuotationChange(booking);
+    if (openChange) {
+      return res.status(400).json({
+        isSuccess: false,
+        message:
+          openChange.status === "awaiting_payment"
+            ? "The customer hasn't paid the updated price yet"
+            : "A price change is still waiting for the customer's answer",
+      });
+    }
+
     if (booking.otpExpiry < new Date()) {
       logPaymentFlow("verifyServiceOtp:otpExpired", {
         bookingId,
@@ -1122,10 +1184,19 @@ exports.completeService = async (req, res) => {
     logPaymentFlow("completeService:start", { body: req.body });
     const { bookingId } = req.body;
 
+    const bookingKind = await Booking.findById(bookingId)
+      .select("serviceRequest provider")
+      .lean();
+    if (!bookingKind) {
+      return res.status(404).json({ message: "Booking not found" });
+    }
+    if (!isBookingProvider(req, bookingKind)) {
+      return res.status(403).json(NOT_YOUR_BOOKING);
+    }
+
     // Service Request bookings settle with their own rules (one transfer for
     // original + paid price changes).
-    const bookingKind = await Booking.findById(bookingId).select("serviceRequest").lean();
-    if (bookingKind?.serviceRequest) {
+    if (bookingKind.serviceRequest) {
       return requestPayment.completeRequestBooking(req, res);
     }
 
@@ -1622,7 +1693,35 @@ exports.refundBooking = async (req, res) => {
   logPaymentFlow("refundBooking:start", { body: req.body });
 
   try {
-    const { bookingId, cancelledBy, reason } = req.body;
+    const { bookingId } = req.body;
+
+    const bookingKind = await Booking.findById(bookingId)
+      .select("serviceRequest customer provider")
+      .lean();
+    if (!bookingKind) {
+      return res.status(404).json({ message: "Booking not found" });
+    }
+
+    // Only the booking's own customer or provider may cancel it, and who
+    // cancelled comes from the token — never from the body (a customer
+    // sending cancelledBy:"provider" would otherwise dodge the fee). The
+    // admin report "refund" action is the one internal caller allowed to
+    // act on any booking (it sets req.adminAction, never reachable via HTTP).
+    if (!req.adminAction) {
+      const callerId = String(req.user?.id || "");
+      if (callerId === String(bookingKind.customer)) {
+        req.body.cancelledBy = "customer";
+      } else if (callerId === String(bookingKind.provider)) {
+        req.body.cancelledBy = "provider";
+      } else {
+        return res.status(403).json({
+          isSuccess: false,
+          message: "You can only cancel your own booking",
+        });
+      }
+    }
+
+    const { cancelledBy, reason } = req.body;
     logPaymentFlow("refundBooking:requestParsed", {
       bookingId,
       cancelledBy,
@@ -1631,8 +1730,7 @@ exports.refundBooking = async (req, res) => {
 
     // Service Request bookings follow the offer's cancellation policy and
     // can be paid in several charges — handled separately.
-    const bookingKind = await Booking.findById(bookingId).select("serviceRequest").lean();
-    if (bookingKind?.serviceRequest) {
+    if (bookingKind.serviceRequest) {
       return requestPayment.cancelRequestBooking(req, res);
     }
 

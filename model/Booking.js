@@ -1,9 +1,9 @@
 const mongoose = require("mongoose");
 
 // One price change on a Service Request (paid_offer) booking, proposed by the
-// provider after the job started. If the customer accepts, they pay ONLY the
-// difference in a separate Stripe Checkout; that charge is also listed on
-// the Payment (payment.additionalCharges).
+// provider on arrival BEFORE the service is started (OTP). If the customer
+// accepts, they pay ONLY the difference in a separate Stripe Checkout; that
+// charge is also listed on the Payment (payment.additionalCharges).
 //   pending          → provider proposed, customer hasn't answered
 //   awaiting_payment → customer accepted, difference not paid yet
 //   accepted         → difference paid, booking total updated

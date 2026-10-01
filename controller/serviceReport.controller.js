@@ -419,6 +419,7 @@ exports.resolveUserReport = async (req, res) => {
       // cancelledBy:"provider" gives a full refund with no cancellation fee.
       const paymentController = require("./paymentController");
       const fakeReq = {
+        adminAction: true, // allowed to cancel any booking (see refundBooking)
         body: {
           bookingId: String(report.booking._id),
           cancelledBy: "provider",

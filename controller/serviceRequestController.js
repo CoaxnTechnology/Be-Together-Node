@@ -15,7 +15,7 @@ const {
   notifyGroupFilled,
   notifyRequestExpiringNoResponse,
 } = require("./notificationController");
-const paymentController = require("./paymentController");
+const requestPaymentController = require("./requestPaymentController");
 const {
   parseDateTime,
   formatDateTime,
@@ -24,6 +24,7 @@ const {
 
 const SERVICE_TYPES = ["doorstep", "pickDrop", "atTheirPlace"];
 const REQUEST_MODES = ["paid_fixed", "paid_offer", "free_single", "free_group"];
+const CANCELLATION_POLICIES = ["late_fee", "free"];
 
 // Adds display-friendly fields to a plain (lean) ServiceRequest object:
 // - expiresAt formatted as "18/09/2026 06:00 PM" (was a raw Date)
@@ -134,6 +135,7 @@ exports.createServiceRequest = async (req, res) => {
       requestMode: requestModeInput,
       isFree,
       schedule,
+      cancellationPolicy,
     } = req.body;
 
     if (!title || !String(title).trim()) {
@@ -182,6 +184,18 @@ exports.createServiceRequest = async (req, res) => {
       });
     }
     const freeFlag = wantsFree;
+
+    // paid_fixed: the owner is the provider, so they choose how strict
+    // cancellation is for the seats booked on this request.
+    if (
+      cancellationPolicy !== undefined &&
+      !CANCELLATION_POLICIES.includes(cancellationPolicy)
+    ) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: `cancellationPolicy must be one of: ${CANCELLATION_POLICIES.join(", ")}`,
+      });
+    }
 
     // -----------------------------
     // serviceType decides which location block(s) are required
@@ -391,6 +405,9 @@ exports.createServiceRequest = async (req, res) => {
       tags: normalizedTags,
       budget: budgetPayload,
       isFree: freeFlag,
+      ...(requestMode === "paid_fixed" && {
+        cancellationPolicy: cancellationPolicy || "late_fee",
+      }),
       schedule: {
         date: schedule.date,
         startTime: schedule.startTime,
@@ -657,7 +674,7 @@ exports.getServiceRequestById = async (req, res) => {
         provider: userId,
         status: "pending",
       })
-        .select("amount currency note status createdAt")
+        .select("amount currency note cancellationPolicy status createdAt")
         .lean();
     }
 
@@ -873,8 +890,6 @@ exports.bookFixedRequest = async (req, res) => {
       }
     }
 
-    // Reuse the exact same booking/payment function as a normal Service
-    // booking — only the price/provider source differs.
     req.body.userId = userId;
     req.body.providerId = String(request.owner);
     req.body.serviceRequestId = id;
@@ -883,7 +898,10 @@ exports.bookFixedRequest = async (req, res) => {
     req.body.latitude = latitude;
     req.body.longitude = longitude;
     req.body.useWallet = useWallet;
-    return paymentController.bookService(req, res);
+    // Seat locked above only when there was no unfinished checkout holding
+    // one already — handed back if the customer can't be sent to Stripe.
+    req.body._seatReserved = !existingPayment;
+    return requestPaymentController.createRequestCheckout(req, res);
   } catch (err) {
     console.error("bookFixedRequest error:", err);
     return res.status(500).json({ isSuccess: false, message: "Server error" });
@@ -900,7 +918,7 @@ exports.submitOffer = async (req, res) => {
       return res.status(401).json({ isSuccess: false, message: "Unauthorized" });
     }
     const { id } = req.params;
-    const { amount, currency, note } = req.body;
+    const { amount, currency, note, cancellationPolicy = "late_fee" } = req.body;
 
     const request = await ServiceRequest.findById(id);
     if (!request) {
@@ -936,6 +954,15 @@ exports.submitOffer = async (req, res) => {
         .status(400)
         .json({ isSuccess: false, message: "A positive amount is required" });
     }
+    // late_fee = free until 1h before the start, then the late fee applies;
+    // free = cancel any time. Shown to the customer before they accept and
+    // locked onto the booking afterwards.
+    if (!CANCELLATION_POLICIES.includes(cancellationPolicy)) {
+      return res.status(400).json({
+        isSuccess: false,
+        message: `cancellationPolicy must be one of: ${CANCELLATION_POLICIES.join(", ")}`,
+      });
+    }
     const existing = await ServiceRequestOffer.findOne({
       request: id,
       provider: userId,
@@ -954,6 +981,7 @@ exports.submitOffer = async (req, res) => {
       amount: amountNum,
       currency: currency || request.budget?.currency || "EUR",
       note: note ? String(note).trim() || null : null, // optional
+      cancellationPolicy,
     });
 
     notifyNewOffer(request, offer).catch((err) =>
@@ -1169,7 +1197,27 @@ exports.acceptOffer = async (req, res) => {
     if (!offer || String(offer.request) !== String(id)) {
       return res.status(404).json({ isSuccess: false, message: "Offer not found" });
     }
-    if (offer.status !== "pending") {
+
+    // Accepted earlier but the customer left the Stripe page without paying
+    // — the seat is still held for this offer, so let them pay again.
+    let retryingCheckout = false;
+    if (offer.status === "accepted") {
+      const [unpaid, booked] = await Promise.all([
+        Payment.exists({
+          serviceRequestOffer: offer._id,
+          user: userId,
+          status: "pending",
+        }),
+        Booking.exists({
+          serviceRequest: id,
+          customer: userId,
+          provider: offer.provider,
+          status: { $in: ["booked", "started", "completed"] },
+        }),
+      ]);
+      retryingCheckout = Boolean(unpaid) && !booked;
+    }
+    if (offer.status !== "pending" && !retryingCheckout) {
       return res
         .status(400)
         .json({ isSuccess: false, message: "This offer is no longer available" });
@@ -1184,50 +1232,51 @@ exports.acceptOffer = async (req, res) => {
         .json({ isSuccess: false, message: "Provider stripe account missing" });
     }
 
-    // Same atomic seat-style lock as Category A — also naturally supports
-    // accepting more than one Offer when numberOfParticipants > 1 (e.g.
-    // "need 2 painters").
-    const updated = await ServiceRequest.findOneAndUpdate(
-      {
-        _id: id,
-        status: "open",
-        $expr: { $lt: ["$seatsBooked", "$numberOfParticipants"] },
-      },
-      { $inc: { seatsBooked: 1 } },
-      { new: true },
-    );
-    if (!updated) {
-      return res.status(400).json({
-        isSuccess: false,
-        message: "This request is already fully booked",
-      });
+    if (!retryingCheckout) {
+      // Same atomic seat-style lock as Category A — also naturally supports
+      // accepting more than one Offer when numberOfParticipants > 1 (e.g.
+      // "need 2 painters").
+      const updated = await ServiceRequest.findOneAndUpdate(
+        {
+          _id: id,
+          status: "open",
+          $expr: { $lt: ["$seatsBooked", "$numberOfParticipants"] },
+        },
+        { $inc: { seatsBooked: 1 } },
+        { new: true },
+      );
+      if (!updated) {
+        return res.status(400).json({
+          isSuccess: false,
+          message: "This request is already fully booked",
+        });
+      }
+
+      offer.status = "accepted";
+      await offer.save();
+
+      notifyOfferAccepted(request, offer).catch((err) =>
+        console.error("❌ notifyOfferAccepted error:", err),
+      );
+
+      if (updated.seatsBooked >= updated.numberOfParticipants) {
+        updated.status = "fulfilled";
+        await updated.save();
+
+        // ⭐ CHANGED (client decision, 30 Sep 2026): the other pending offers
+        // are no longer auto-declined here. If this accepted offer's booking
+        // later gets cancelled (e.g. the provider finds on-site the job is
+        // bigger than quoted and it falls through), releaseServiceRequestSlot
+        // reopens this request (status back to "open") — the customer can
+        // then accept one of the other 9 offers instead of having to post a
+        // brand new request from scratch. Declining now only happens once the
+        // accepted booking actually COMPLETES (see completeRequestBooking in
+        // requestPaymentController.js) or the customer explicitly rejects one via
+        // POST /:id/offers/:offerId/reject.
+      }
     }
 
-    offer.status = "accepted";
-    await offer.save();
-
-    notifyOfferAccepted(request, offer).catch((err) =>
-      console.error("❌ notifyOfferAccepted error:", err),
-    );
-
-    if (updated.seatsBooked >= updated.numberOfParticipants) {
-      updated.status = "fulfilled";
-      await updated.save();
-
-      // ⭐ CHANGED (client decision, 30 Sep 2026): the other pending offers
-      // are no longer auto-declined here. If this accepted offer's booking
-      // later gets cancelled (e.g. the provider finds on-site the job is
-      // bigger than quoted and it falls through), releaseServiceRequestSlot
-      // reopens this request (status back to "open") — the customer can
-      // then accept one of the other 9 offers instead of having to post a
-      // brand new request from scratch. Declining now only happens once the
-      // accepted booking actually COMPLETES (see completeService in
-      // paymentController.js) or the customer explicitly rejects one via
-      // POST /:id/offers/:offerId/reject.
-    }
-
-    // Reuse the exact same booking/payment function as a normal Service
-    // booking — the price/provider come from the accepted Offer.
+    // Price, provider and cancellation policy come from the accepted Offer.
     req.body.userId = userId;
     req.body.providerId = String(offer.provider);
     req.body.serviceRequestId = id;
@@ -1237,7 +1286,10 @@ exports.acceptOffer = async (req, res) => {
     req.body.latitude = latitude;
     req.body.longitude = longitude;
     req.body.useWallet = useWallet;
-    return paymentController.bookService(req, res);
+    // A fresh accept locked the seat + offer just now — handed back if the
+    // customer can't be sent to Stripe. A retry reuses the held seat.
+    req.body._seatReserved = !retryingCheckout;
+    return requestPaymentController.createRequestCheckout(req, res);
   } catch (err) {
     console.error("acceptOffer error:", err);
     return res.status(500).json({ isSuccess: false, message: "Server error" });

@@ -21,6 +21,16 @@ const serviceRequestOfferSchema = new mongoose.Schema(
     // Optional — the provider can explain the price, but an offer at the
     // customer's own budget needs no explanation.
     note: { type: String, default: null, trim: true },
+    // Chosen by the provider when sending the offer, shown to the customer
+    // before they accept, and frozen onto the Booking once accepted:
+    // - late_fee: free cancellation until 1 hour before the start time,
+    //   after that the admin-set late cancellation fee applies.
+    // - free: the customer can cancel any time with a full refund.
+    cancellationPolicy: {
+      type: String,
+      enum: ["late_fee", "free"],
+      default: "late_fee",
+    },
     status: {
       type: String,
       enum: ["pending", "accepted", "declined", "withdrawn"],

@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const paymentController = require("../controller/paymentController");
+const requestPaymentController = require("../controller/requestPaymentController");
 const authMiddleware = require("../Middleware/authMiddleware");
 
 router.post("/book", authMiddleware, paymentController.bookService);
@@ -30,12 +31,12 @@ router.post("/booking-preview", authMiddleware, paymentController.bookingPreview
 router.post(
   "/bookings/:bookingId/quotation-change",
   authMiddleware,
-  paymentController.createQuotationChange,
+  requestPaymentController.createQuotationChange,
 );
 router.post(
   "/bookings/:bookingId/quotation-change/:id/respond",
   authMiddleware,
-  paymentController.respondToQuotationChange,
+  requestPaymentController.respondToQuotationChange,
 );
 
 module.exports = router;

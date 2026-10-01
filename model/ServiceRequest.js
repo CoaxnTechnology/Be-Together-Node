@@ -60,6 +60,15 @@ const serviceRequestSchema = new mongoose.Schema(
     // numberOfParticipants) and for paid_offer's "accept N offers" case.
     seatsBooked: { type: Number, default: 0, min: 0 },
 
+    // paid_fixed only — the owner is the provider here, so they pick the
+    // cancellation policy for every seat booked on this request (same
+    // options as a paid_offer Offer's cancellationPolicy).
+    cancellationPolicy: {
+      type: String,
+      enum: ["late_fee", "free"],
+      default: "late_fee",
+    },
+
     // Only set for free_single once someone Joins (first Join wins).
     joinedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
 

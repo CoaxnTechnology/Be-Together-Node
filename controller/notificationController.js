@@ -1339,6 +1339,93 @@ async function notifyOfferWithdrawn(request, offer) {
   );
 }
 
+// =====================================================================
+// SERVICE REQUEST BOOKING CANCELLED — kept separate from the normal
+// "Service Cancelled" push so the app can tell it's a request booking and
+// who cancelled it. Each side gets its own wording:
+//   free join  → booking.customer = the participant, booking.provider = the
+//                request owner (host)
+//   paid       → booking.customer = customer, booking.provider = provider
+// data.type = "request_booking_cancelled" for every one of them.
+// =====================================================================
+async function notifyRequestBookingCancelled({
+  booking,
+  customer,
+  provider,
+  request,
+  cancelledBy,
+  byAdmin = false,
+  reason = "",
+  refundAmount = 0,
+  cancellationFee = 0,
+  providerFeeShare = 0,
+  currency = "",
+}) {
+  const title = request?.title || "your request";
+  const isFree = !booking.amount;
+  const money = (n) => `${Number(n || 0)} ${String(currency || "").toUpperCase()}`.trim();
+  const customerCancelled = cancelledBy !== "provider";
+  const by = byAdmin ? "BeTogether support" : null;
+
+  let toCustomer;
+  let toProvider;
+  if (isFree) {
+    toCustomer = customerCancelled
+      ? ["You left the request", `You cancelled your spot in "${title}".`]
+      : [
+          "❌ Request cancelled by host",
+          `${by || provider.name} cancelled your spot in "${title}".`,
+        ];
+    toProvider = customerCancelled
+      ? ["👋 A participant left", `${customer.name} cancelled their spot in your request "${title}".`]
+      : by
+        ? ["❌ Participant removed", `${by} removed ${customer.name} from your request "${title}".`]
+        : ["Participant removed", `You cancelled ${customer.name}'s spot in "${title}".`];
+  } else if (customerCancelled) {
+    toCustomer = [
+      "Request booking cancelled",
+      cancellationFee > 0
+        ? `You cancelled "${title}". Refund: ${money(refundAmount)} (late cancellation fee ${money(cancellationFee)}).`
+        : `You cancelled "${title}". Full refund: ${money(refundAmount)}.`,
+    ];
+    toProvider = [
+      "❌ Request booking cancelled by customer",
+      providerFeeShare > 0
+        ? `${customer.name} cancelled "${title}". You'll receive ${money(providerFeeShare)} from the late cancellation fee.`
+        : `${customer.name} cancelled "${title}".`,
+    ];
+  } else {
+    toCustomer = [
+      by ? "❌ Request booking cancelled" : "❌ Request booking cancelled by provider",
+      `${by || provider.name} cancelled "${title}". You'll get a full refund of ${money(refundAmount)}.`,
+    ];
+    toProvider = by
+      ? ["❌ Request booking cancelled", `${by} cancelled "${title}". The customer gets a full refund.`]
+      : ["Request booking cancelled", `You cancelled "${title}". The customer gets a full refund.`];
+  }
+
+  const data = {
+    type: "request_booking_cancelled",
+    pageType: "BookingDetailsPage",
+    bookingId: booking._id,
+    serviceRequestId: request?._id || booking.serviceRequest,
+    requestMode: request?.requestMode || "",
+    cancelledBy: byAdmin ? "admin" : cancelledBy,
+    reason,
+    refundAmount,
+    cancellationFee,
+  };
+
+  await sendUserNotification(customer, toCustomer[0], toCustomer[1], {
+    ...data,
+    userType: "customer",
+  });
+  await sendUserNotification(provider, toProvider[0], toProvider[1], {
+    ...data,
+    userType: "provider",
+  });
+}
+
 async function notifyQuotationChangeSubmitted(quotationChange, booking) {
   const customer = await User.findById(booking.customer).select("fcmToken");
   if (!customer) return;
@@ -1683,6 +1770,7 @@ exports.notifyOfferWithdrawn = notifyOfferWithdrawn;
 exports.notifyGroupFilled = notifyGroupFilled;
 exports.notifyQuotationChangeSubmitted = notifyQuotationChangeSubmitted;
 exports.notifyQuotationChangeResponded = notifyQuotationChangeResponded;
+exports.notifyRequestBookingCancelled = notifyRequestBookingCancelled;
 exports.notifyOnNewServiceRequest = notifyNearbyUsersForRequest;
 exports.notifyOnNewService = (service) => notifyUsersForService(service, "new");
 exports.notifyOnUpdate = (service) => notifyUsersForService(service, "update");

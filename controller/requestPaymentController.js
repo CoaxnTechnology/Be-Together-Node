@@ -31,13 +31,14 @@ const CommissionSetting = require("../model/CommissionSetting");
 const updateProviderPerformance = require("../utils/providerPerformance");
 const { parseDateTime } = require("../utils/dateTimeFormat");
 const {
-  sendServiceCompletedEmail,
-  sendServiceCancelledEmail,
+  sendRequestBookedEmail,
+  sendRequestCompletedEmail,
+  sendRequestCancelledEmail,
 } = require("../utils/email");
 const {
   sendBookingNotification,
   sendServiceCompletedNotification,
-  sendServiceCancelledNotification,
+  notifyRequestBookingCancelled,
   notifyQuotationChangeSubmitted,
   notifyQuotationChangeResponded,
   notifyOfferDeclined,
@@ -418,7 +419,7 @@ async function createRequestBooking(payment, paymentIntent) {
   const [customer, provider, request] = await Promise.all([
     User.findById(customerId),
     User.findById(providerId),
-    ServiceRequest.findById(payment.serviceRequest).select("title"),
+    ServiceRequest.findById(payment.serviceRequest).select("title schedule"),
   ]);
   if (!customer || !provider) return null;
 
@@ -464,6 +465,9 @@ async function createRequestBooking(payment, paymentIntent) {
       { _id: request._id, title: request.title },
       booking,
     ).catch((err) => logError("createRequestBooking:notification", err));
+    sendRequestBookedEmail({ customer, provider, request, booking, payment }).catch((err) =>
+      logError("createRequestBooking:email", err),
+    );
   }
   return booking;
 }
@@ -963,7 +967,7 @@ exports.completeRequestBooking = async (req, res) => {
     const booking = await Booking.findById(bookingId)
       .populate("customer")
       .populate("provider")
-      .populate("serviceRequest", "title isFree location_name");
+      .populate("serviceRequest", "title isFree location_name schedule");
 
     if (!booking) {
       return res.status(404).json({ message: "Booking not found" });
@@ -980,7 +984,12 @@ exports.completeRequestBooking = async (req, res) => {
       booking.status = "completed";
       await booking.save();
       await updateProviderPerformance(provider._id, 1, 0);
-      await sendServiceCompletedEmail(customer, provider, subject, booking);
+      await sendRequestCompletedEmail({
+        customer,
+        provider,
+        request: booking.serviceRequest,
+        booking,
+      });
       await sendServiceCompletedNotification(customer, provider, subject, booking);
       return res.json({ isSuccess: true, message: "Free service completed successfully" });
     }
@@ -1101,7 +1110,13 @@ exports.completeRequestBooking = async (req, res) => {
     // No ambassador commission on Service Request bookings.
 
     await updateProviderPerformance(provider._id, 1, 0);
-    await sendServiceCompletedEmail(customer, provider, subject, booking);
+    await sendRequestCompletedEmail({
+      customer,
+      provider,
+      request: booking.serviceRequest,
+      booking,
+      payment,
+    });
     await sendServiceCompletedNotification(customer, provider, subject, booking);
 
     log("completeRequestBooking:done", { bookingId: booking._id, transferId });
@@ -1131,7 +1146,7 @@ exports.cancelRequestBooking = async (req, res) => {
     const booking = await Booking.findById(bookingId)
       .populate("customer")
       .populate("provider")
-      .populate("serviceRequest", "title isFree location_name schedule");
+      .populate("serviceRequest", "title isFree location_name schedule requestMode");
 
     if (!booking) {
       return res.status(404).json({ message: "Booking not found" });
@@ -1157,30 +1172,37 @@ exports.cancelRequestBooking = async (req, res) => {
     const subject = bookingSubject(booking);
     const whoCancelled = cancelledBy || "customer";
 
-    const notifyCancellation = async () => {
+    // Request-specific email + push: they say it's a request booking, who
+    // cancelled it and (paid) the refund / late fee.
+    const notifyCancellation = async (amounts = {}) => {
+      const details = {
+        booking,
+        customer: booking.customer,
+        provider: booking.provider,
+        request: booking.serviceRequest,
+        cancelledBy: whoCancelled,
+        byAdmin: Boolean(req.adminAction),
+        reason: reason || "",
+        ...amounts,
+      };
       try {
-        await sendServiceCancelledEmail(
-          booking.customer,
-          booking.provider,
-          subject,
-          booking,
-          reason,
-        );
+        await sendRequestCancelledEmail(details);
       } catch (err) {
         logError("cancelRequestBooking:email", err);
       }
       try {
-        await sendServiceCancelledNotification(
-          booking.customer,
-          booking.provider,
-          subject,
-          booking,
-          reason || "",
-        );
+        await notifyRequestBookingCancelled(details);
       } catch (err) {
         logError("cancelRequestBooking:notification", err);
       }
     };
+
+    // Free join: the joiner is the "participant", the request owner the
+    // "host". Paid: plain customer / provider.
+    const cancelledByRole =
+      booking.amount === 0
+        ? whoCancelled === "provider" ? "host" : "participant"
+        : whoCancelled;
 
     // ---------- Free join (free_single / free_group) ----------
     if (booking.amount === 0) {
@@ -1197,8 +1219,14 @@ exports.cancelRequestBooking = async (req, res) => {
       await notifyCancellation();
       return res.json({
         isSuccess: true,
-        message: "Free service cancelled successfully",
+        message:
+          cancelledByRole === "host"
+            ? "Participant removed from your request"
+            : "You have left this request",
+        bookingType: "request",
+        requestMode: booking.serviceRequest?.requestMode || null,
         cancelledBy: booking.cancelledBy,
+        cancelledByRole,
         reason: booking.cancelReason,
       });
     }
@@ -1411,11 +1439,22 @@ exports.cancelRequestBooking = async (req, res) => {
     if (cancelledBy === "provider") {
       await updateProviderPerformance(booking.provider._id, 0, 1);
     }
-    await notifyCancellation();
+    await notifyCancellation({
+      refundAmount,
+      cancellationFee,
+      providerFeeShare: providerShare,
+      currency: payment.currency,
+    });
 
     return res.json({
       isSuccess: true,
-      message: "Booking cancelled & refund processed.",
+      message:
+        cancelledByRole === "provider"
+          ? "Request booking cancelled by provider — customer fully refunded."
+          : "Request booking cancelled & refund processed.",
+      bookingType: "request",
+      requestMode: booking.serviceRequest?.requestMode || null,
+      cancelledByRole,
       refundAmount,
       cancellationFee,
       cancellationPolicy: policy,

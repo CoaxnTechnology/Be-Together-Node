@@ -1055,12 +1055,16 @@ exports.startService = async (req, res) => {
       providerId: provider?._id,
       serviceId: service?._id,
     });
+    const otpCurrency =
+      booking.service?.currency ||
+      (await Payment.findById(booking.paymentId).select("currency"))?.currency;
     await sendServiceOtpEmail(customer.email, {
       customerName: customer.name,
       providerName: provider.name,
       serviceName: service.title,
       bookingId: booking._id,
       amount: booking.amount,
+      currency: otpCurrency,
       otp,
     });
     logPaymentFlow("startService:otpEmailSent", { bookingId });
@@ -1530,7 +1534,10 @@ exports.completeService = async (req, res) => {
       bookingId,
       customerId: customer?._id,
     });
-    await sendServiceCompletedEmail(customer, provider, service, booking);
+    await sendServiceCompletedEmail(customer, provider, service, booking, {
+      currency: payment.currency,
+      providerAmount: payment.providerAmount,
+    });
     logPaymentFlow("completeService:paidCompletionEmailSent", { bookingId });
 
     // ⬇ Send Notification (customer + provider)
@@ -1843,6 +1850,7 @@ exports.refundBooking = async (req, res) => {
           bookingSubject(booking),
           booking,
           reason,
+          { cancelledBy: booking.cancelledBy },
         );
 
         console.log("✅ [EMAIL] Email function executed");
@@ -2190,6 +2198,12 @@ exports.refundBooking = async (req, res) => {
         bookingSubject(booking),
         booking,
         reason,
+        {
+          cancelledBy: booking.cancelledBy,
+          refundAmount,
+          cancellationFee,
+          currency: payment.currency,
+        },
       );
 
       console.log("✅ [EMAIL] Email function executed");

@@ -52,203 +52,505 @@ async function sendServiceOtpEmail(to, data) {
     .replace(/{{providerName}}/g, data.providerName)
     .replace(/{{serviceName}}/g, data.serviceName)
     .replace(/{{bookingId}}/g, data.bookingId)
-    .replace(/{{amount}}/g, data.amount)
+    .replace(/{{amount}}/g, formatMoney(data.amount, data.currency))
     .replace(/{{otp}}/g, data.otp)
     .replace(/{{date}}/g, new Date().toLocaleDateString());
 
   await sendEmail({
     to,
-    subject: "Your Service Start OTP",
+    subject: `Your start code for "${data.serviceName}"`,
     html,
   });
 }
-async function sendServiceBookedEmail(
-  customer,
-  service,
-  provider,
-  booking,
-  type = "customer",
-) {
-  console.log("📧 sendServiceBookedEmail called for:", type);
+// ---------------- BOOKING EMAILS (shared helpers) ----------------
+// Every booking email (normal Service and Service Request) is rendered from
+// one template, templates/booking_status.html — only the wording, colour and
+// detail rows change per case.
+const CURRENCY_SYMBOLS = { EUR: "€", INR: "₹", USD: "$", GBP: "£" };
 
-  try {
-    // Load template
-    const templatePath = path.join(__dirname, "../templates/service_book.html");
-    let html = fs.readFileSync(templatePath, "utf-8");
-    console.log("📂 Template loaded, length:", html.length);
+function formatMoney(amount, currency) {
+  const value = Number(amount || 0).toFixed(2);
+  const code = String(currency || "EUR").toUpperCase();
+  return CURRENCY_SYMBOLS[code] ? `${CURRENCY_SYMBOLS[code]}${value}` : `${value} ${code}`;
+}
 
-    let toEmail;
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
 
-    if (type === "customer") {
-      toEmail = customer.email;
+// [["Service", "Plumbing"], ["Date", null], …] → <p> rows; empty values skipped.
+function detailRows(rows) {
+  return rows
+    .filter(([, value]) => value !== null && value !== undefined && value !== "")
+    .map(
+      ([label, value]) =>
+        `<p style="margin: 6px 0; font-size: 15px"><strong>${escapeHtml(label)}:</strong> ${escapeHtml(value)}</p>`,
+    )
+    .join("\n");
+}
 
-      // Only show provider info
-      const providerSection = `
-        <p><strong>Provider:</strong> ${provider.name}</p>
-        <p><strong>Provider Email:</strong> ${provider.email}</p>
-      `;
-      html = html.replace("{{provider_section}}", providerSection);
-      html = html.replace("{{customer_section}}", ""); // hide customer section
+function noteBox(text, color = "#16a34a") {
+  if (!text) return "";
+  return `<div style="margin-top: 20px; border-left: 4px solid ${color}; background: #f8fafc; border-radius: 12px; padding: 14px 16px; text-align: left; font-size: 15px; color: #333">${escapeHtml(text)}</div>`;
+}
 
-      html = html.replace(/{{name}}/g, customer.name);
-    } else {
-      toEmail = provider.email;
+const BOOKING_TEMPLATE = path.join(__dirname, "../templates/booking_status.html");
 
-      // Only show customer info
-      const customerSection = `
-        <p><strong>Customer:</strong> ${customer.name}</p>
-        <p><strong>Customer Email:</strong> ${customer.email}</p>
-      `;
-      html = html.replace("{{customer_section}}", customerSection);
-      html = html.replace("{{provider_section}}", ""); // hide provider section
+async function sendBookingStatusEmail({
+  to,
+  subject,
+  titleText,
+  titleColor = "#1f1f1f",
+  name,
+  introText,
+  detailsTitle = "Booking Details",
+  rows = [],
+  note = "",
+  noteColor,
+  closingText = "Thank you for using BeTogether.",
+}) {
+  if (!to) return;
+  const html = fs
+    .readFileSync(BOOKING_TEMPLATE, "utf8")
+    .replace(/{{email_title}}/g, escapeHtml(subject))
+    .replace(/{{title_text}}/g, escapeHtml(titleText))
+    .replace(/{{title_color}}/g, titleColor)
+    .replace(/{{name}}/g, escapeHtml(name || "there"))
+    .replace(/{{intro_text}}/g, escapeHtml(introText))
+    .replace(/{{details_title}}/g, escapeHtml(detailsTitle))
+    .replace(/{{details_rows}}/g, detailRows(rows))
+    .replace(/{{note_html}}/g, noteBox(note, noteColor))
+    .replace(/{{closing_text}}/g, escapeHtml(closingText))
+    .replace(/{{year}}/g, String(new Date().getFullYear()));
+  await sendEmail({ to, subject, html });
+}
 
-      html = html.replace(/{{name}}/g, provider.name);
+// Sends each email; one failed address never stops the others.
+async function sendBoth(...emails) {
+  for (const options of emails) {
+    try {
+      await sendBookingStatusEmail(options);
+    } catch (err) {
+      console.error("❌ Booking email error:", err.message);
     }
+  }
+}
 
-    // Replace other common placeholders
-    html = html
-      .replace(/{{service_name}}/g, service.title)
-      .replace(
-        /{{date}}/g,
-        service.date ? new Date(service.date).toLocaleString() : "-",
-      )
-      .replace(/{{amount}}/g, booking.amount);
+const POLICY_TEXT = {
+  late_fee: "Free until 1 hour before the start — a late cancellation fee applies after that",
+  free: "Free cancellation at any time",
+};
 
-    console.log("📩 Placeholders replaced");
+function serviceWhen(service) {
+  if (!service?.date) return null;
+  return [service.date, service.start_time].filter(Boolean).join(" ");
+}
 
-    // --- Debug: Send plain text test email first ---
+function requestWhen(request) {
+  if (!request?.schedule?.date) return null;
+  return [request.schedule.date, request.schedule.startTime].filter(Boolean).join(" ");
+}
 
-    // --- Send actual HTML email ---
-    const info = await sendEmail({
-      to: toEmail,
-      subject: "Service Booked",
-      html,
-    });
-    console.log("✅ HTML Email sent successfully to:", toEmail);
-    console.log("📬 Message ID:", info.messageId);
+// =====================================================================
+// NORMAL SERVICE BOOKINGS
+// =====================================================================
+async function sendServiceBookedEmail(customer, service, provider, booking, type = "customer") {
+  try {
+    const currency = service?.currency;
+    const common = [
+      ["Service", service?.title],
+      ["Date", serviceWhen(service)],
+      ["Booking ID", booking?._id],
+    ];
+    if (type === "customer") {
+      await sendBookingStatusEmail({
+        to: customer.email,
+        subject: `Booking confirmed — ${service?.title}`,
+        titleText: "Your Booking Is Confirmed 🎉",
+        name: customer.name,
+        introText: `Your payment was successful and your booking with ${provider.name} is confirmed.`,
+        rows: [
+          ...common,
+          ["Provider", provider.name],
+          ["Provider email", provider.email],
+          ["Service price", formatMoney(booking?.amount, currency)],
+        ],
+        closingText:
+          "Your provider will share a start code (OTP) with you on the day — keep this booking handy.",
+      });
+    } else {
+      await sendBookingStatusEmail({
+        to: provider.email,
+        subject: `New booking — ${service?.title}`,
+        titleText: "You Have a New Booking 🎉",
+        name: provider.name,
+        introText: `${customer.name} has booked your service.`,
+        rows: [
+          ...common,
+          ["Customer", customer.name],
+          ["Customer phone", booking?.contactPhone],
+          ["Service price", formatMoney(booking?.amount, currency)],
+        ],
+        closingText:
+          "Start the service from the app when you arrive — the customer gets an OTP to confirm. Your payout is sent when you complete it.",
+      });
+    }
+    console.log("✅ Booked email sent:", type);
   } catch (err) {
     console.log("❌ Email sending failed:", err.message);
   }
 }
-async function sendServiceCompletedEmail(customer, provider, service, booking) {
-  try {
-    const templatePath = path.join(
-      __dirname,
-      "../templates/service_completed.html",
-    );
 
-    let html = fs.readFileSync(templatePath, "utf8");
-    // 📌 Service completed time (NOW)
-
-    // Provider section (for customer)
-    const providerHTML = `
-      <p style="margin: 6px 0; font-size: 15px">
-        <strong>Provider:</strong> ${provider.name}
-      </p>
-      <p style="margin: 6px 0; font-size: 15px">
-       <strong>Phone:</strong> ${provider.mobile || "Not available"}
-
-      </p>
-    `;
-
-    // No customer section for customer email
-    const customerHTML = ``;
-
-    html = html
-      .replace("{{name}}", customer.name)
-      .replace("{{service_name}}", service.title)
-      .replace("{{provider_section}}", providerHTML)
-      .replace("{{customer_section}}", customerHTML)
-
-      .replace("{{amount}}", booking.amount);
-
-    await sendEmail({
+// extra: { currency, providerAmount } — providerAmount = the payout sent.
+async function sendServiceCompletedEmail(customer, provider, service, booking, extra = {}) {
+  const currency = extra.currency || service?.currency;
+  const rows = [
+    ["Service", service?.title],
+    ["Booking ID", booking?._id],
+    ["Service price", formatMoney(booking?.amount, currency)],
+  ];
+  const isFree = !booking?.amount;
+  await sendBoth(
+    {
       to: customer.email,
-      subject: "Service Completed",
-      html,
-    });
-
-    console.log("📧 Email sent to customer");
-  } catch (err) {
-    console.error("❌ Email error:", err.message);
-  }
+      subject: `Service completed — ${service?.title}`,
+      titleText: "Service Completed ✅",
+      titleColor: "#16a34a",
+      name: customer.name,
+      introText: `${provider.name} has marked your service as completed.`,
+      rows: [...rows, ["Provider", provider.name], ["Provider phone", provider.mobile]],
+      closingText: "We hope it went well! You can now rate your provider in the app.",
+    },
+    {
+      to: provider.email,
+      subject: `Service completed — ${service?.title}`,
+      titleText: "Service Completed ✅",
+      titleColor: "#16a34a",
+      name: provider.name,
+      introText: `You completed the service for ${customer.name}.`,
+      rows,
+      note:
+        !isFree && extra.providerAmount !== undefined
+          ? `Payout of ${formatMoney(extra.providerAmount, currency)} has been sent to your Stripe account (after platform commission).`
+          : "",
+      closingText: "Thank you for providing a great service on BeTogether.",
+    },
+  );
 }
+
+// extra: { cancelledBy: "customer"|"provider", refundAmount, cancellationFee, currency }
 async function sendServiceCancelledEmail(
   customer,
   provider,
   service,
   booking,
   reason = "",
+  extra = {},
 ) {
-  console.log("📧 [EMAIL] Function Called");
-
-  try {
-    const templatePath = path.join(
-      __dirname,
-      "../templates/service_cancel.html",
-    );
-
-    console.log("📧 Loading Template…");
-    let htmlTemplate = fs.readFileSync(templatePath, "utf8");
-    console.log("📧 Template Loaded");
-
-    const reasonSection = reason
-      ? `
-        <p style="margin: 6px 0; font-size: 15px">
-          <strong>Reason:</strong> ${reason}
-        </p>
-      `
-      : "";
-
-    // ===============================
-    // 📧 CUSTOMER EMAIL
-    // ===============================
-    console.log("📧 Preparing CUSTOMER email…");
-
-    let customerHtml = htmlTemplate
-      .replace("{{name}}", customer.name)
-      .replace("{{service_name}}", service.title)
-      .replace("{{provider_name}}", provider.name)
-      .replace("{{date}}", new Date().toLocaleString("en-IN"))
-      .replace("{{refund_amount}}", booking.amount)
-      .replace("{{reason_section}}", reasonSection);
-
-    await sendEmail({
+  const currency = extra.currency || service?.currency;
+  const byProvider = extra.cancelledBy === "provider";
+  const isFree = !booking?.amount;
+  const refundAmount = extra.refundAmount ?? (isFree ? 0 : booking?.amount);
+  const fee = Number(extra.cancellationFee || 0);
+  const rows = [
+    ["Service", service?.title],
+    ["Date", serviceWhen(service)],
+    ["Booking ID", booking?._id],
+    ["Cancelled by", byProvider ? `${provider.name} (provider)` : `${customer.name} (customer)`],
+    ["Reason", reason],
+  ];
+  const moneyRows = isFree
+    ? []
+    : [
+        ["Refund to customer", formatMoney(refundAmount, currency)],
+        ["Cancellation fee", fee > 0 ? formatMoney(fee, currency) : null],
+      ];
+  await sendBoth(
+    {
       to: customer.email,
-      subject: "Service Cancelled",
-      html: customerHtml,
-    });
-
-    console.log("✅ Email sent to CUSTOMER:", customer.email);
-
-    // ===============================
-    // 📧 PROVIDER EMAIL
-    // ===============================
-    console.log("📧 Preparing PROVIDER email…");
-
-    let providerHtml = htmlTemplate
-      .replace("{{name}}", provider.name)
-      .replace("{{service_name}}", service.title)
-      .replace("{{provider_name}}", provider.name)
-      .replace("{{date}}", new Date().toLocaleString("en-IN"))
-      .replace("{{refund_amount}}", booking.amount)
-      .replace(
-        "{{reason_section}}",
-        `<p style="margin:6px 0;font-size:15px">
-          <strong>Cancelled By:</strong> Customer
-        </p>${reasonSection}`,
-      );
-
-    await sendEmail({
+      subject: byProvider
+        ? `Your booking was cancelled by the provider — ${service?.title}`
+        : `Booking cancelled — ${service?.title}`,
+      titleText: "Booking Cancelled ❌",
+      titleColor: "#e63946",
+      name: customer.name,
+      introText: byProvider
+        ? `${provider.name} had to cancel your booking.`
+        : "Your booking has been cancelled as requested.",
+      rows: [...rows, ...moneyRows],
+      note: isFree
+        ? ""
+        : `${formatMoney(refundAmount, currency)} is being refunded to your original payment method. It usually appears within 5–10 business days.`,
+      closingText: "You can book another service anytime on BeTogether.",
+    },
+    {
       to: provider.email,
-      subject: "Service Cancelled by Customer",
-      html: providerHtml,
-    });
+      subject: byProvider
+        ? `You cancelled a booking — ${service?.title}`
+        : `Booking cancelled by customer — ${service?.title}`,
+      titleText: "Booking Cancelled ❌",
+      titleColor: "#e63946",
+      name: provider.name,
+      introText: byProvider
+        ? `You cancelled ${customer.name}'s booking. The customer receives a full refund.`
+        : `${customer.name} cancelled their booking.`,
+      rows: [...rows, ...moneyRows],
+      closingText: "This time slot is free again.",
+    },
+  );
+}
 
-    console.log("✅ Email sent to PROVIDER:", provider.email);
-  } catch (err) {
-    console.error("❌ Cancel Email Error:", err.message);
+// =====================================================================
+// SERVICE REQUEST BOOKINGS
+// Paid (paid_fixed / paid_offer): booking.customer = customer,
+// booking.provider = provider. Free join (free_single / free_group):
+// booking.customer = the participant, booking.provider = the host.
+// =====================================================================
+function requestRows(request, booking) {
+  return [
+    ["Request", request?.title],
+    ["When", requestWhen(request)],
+    ["Booking ID", booking?._id],
+  ];
+}
+
+// After the first payment (paid) or a successful join (free).
+async function sendRequestBookedEmail({ customer, provider, request, booking, payment }) {
+  const isFree = !booking?.amount;
+  const rows = requestRows(request, booking);
+  if (isFree) {
+    await sendBoth(
+      {
+        to: customer.email,
+        subject: `You joined "${request?.title}"`,
+        titleText: "You're In! 🎉",
+        titleColor: "#16a34a",
+        name: customer.name,
+        introText: `You have joined ${provider.name}'s request.`,
+        detailsTitle: "Request Details",
+        rows: [...rows, ["Host", provider.name]],
+        closingText: "Changed your plans? You can leave the request from the app.",
+      },
+      {
+        to: provider.email,
+        subject: `New participant — ${request?.title}`,
+        titleText: "Someone Joined Your Request 🎉",
+        titleColor: "#16a34a",
+        name: provider.name,
+        introText: `${customer.name} joined your request.`,
+        detailsTitle: "Request Details",
+        rows: [...rows, ["Participant", customer.name], ["Participant phone", booking?.contactPhone]],
+        closingText: "You'll see every participant in the app.",
+      },
+    );
+    return;
   }
+
+  const currency = payment?.currency;
+  const policy = POLICY_TEXT[booking?.cancellationPolicy || payment?.cancellationPolicy];
+  await sendBoth(
+    {
+      to: customer.email,
+      subject: `Request booking confirmed — ${request?.title}`,
+      titleText: "Your Request Is Booked 🎉",
+      name: customer.name,
+      introText: `Your payment was successful and ${provider.name} is booked for your request.`,
+      detailsTitle: "Request Booking Details",
+      rows: [
+        ...rows,
+        ["Provider", provider.name],
+        ["Price", formatMoney(payment?.originalAmount ?? booking?.amount, currency)],
+        ["You paid", formatMoney(payment?.customerPaidAmount, currency)],
+        ["Cancellation", policy],
+      ],
+      note: "Your payment is held safely by BeTogether and only released to the provider once the job is completed.",
+      closingText:
+        "When the provider arrives they'll start the job with a code (OTP) sent to you. If the job turns out different, they may propose a new price — you'll be asked to approve it first.",
+    },
+    {
+      to: provider.email,
+      subject: `New request booking — ${request?.title}`,
+      titleText: "You Have a New Request Booking 🎉",
+      name: provider.name,
+      introText: `${customer.name} booked you for their request.`,
+      detailsTitle: "Request Booking Details",
+      rows: [
+        ...rows,
+        ["Customer", customer.name],
+        ["Customer phone", booking?.contactPhone],
+        ["Price", formatMoney(payment?.originalAmount ?? booking?.amount, currency)],
+        ["Your payout", formatMoney(payment?.providerAmount, currency)],
+        ["Cancellation", policy],
+      ],
+      closingText:
+        "On arrival, either start the job (the customer gets an OTP) or propose a new price first if the work is different. Your payout is sent when you complete it.",
+    },
+  );
+}
+
+async function sendRequestCompletedEmail({ customer, provider, request, booking, payment }) {
+  const isFree = !booking?.amount;
+  const currency = payment?.currency;
+  const rows = requestRows(request, booking);
+  const priceRows = isFree
+    ? []
+    : [
+        ["Original price", booking?.initialAmount && booking.initialAmount !== booking.amount
+          ? formatMoney(booking.initialAmount, currency)
+          : null],
+        ["Final price", formatMoney(booking?.amount, currency)],
+      ];
+  await sendBoth(
+    {
+      to: customer.email,
+      subject: `Completed — ${request?.title}`,
+      titleText: isFree ? "Request Completed ✅" : "Job Completed ✅",
+      titleColor: "#16a34a",
+      name: customer.name,
+      introText: isFree
+        ? `${provider.name} marked "${request?.title}" as completed.`
+        : `${provider.name} has completed your request.`,
+      detailsTitle: "Request Details",
+      rows: [...rows, [isFree ? "Host" : "Provider", provider.name], ...priceRows],
+      closingText: "We hope it went well! You can now leave a rating in the app.",
+    },
+    {
+      to: provider.email,
+      subject: `Completed — ${request?.title}`,
+      titleText: isFree ? "Request Completed ✅" : "Job Completed ✅",
+      titleColor: "#16a34a",
+      name: provider.name,
+      introText: isFree
+        ? `"${request?.title}" with ${customer.name} is marked as completed.`
+        : `You completed ${customer.name}'s request.`,
+      detailsTitle: "Request Details",
+      rows: [...rows, [isFree ? "Participant" : "Customer", customer.name], ...priceRows],
+      note: isFree
+        ? ""
+        : `Payout of ${formatMoney(payment?.providerAmount, currency)} has been sent to your Stripe account in one transfer (after platform commission).`,
+      closingText: "Thank you for using BeTogether.",
+    },
+  );
+}
+
+// Same cases as the "request_booking_cancelled" push notification.
+async function sendRequestCancelledEmail({
+  customer,
+  provider,
+  request,
+  booking,
+  cancelledBy,
+  byAdmin = false,
+  reason = "",
+  refundAmount = 0,
+  cancellationFee = 0,
+  providerFeeShare = 0,
+  currency = "",
+}) {
+  const isFree = !booking?.amount;
+  const customerCancelled = cancelledBy !== "provider";
+  const title = request?.title;
+  const by = byAdmin ? "BeTogether support" : null;
+  const rows = [
+    ...requestRows(request, booking),
+    [
+      "Cancelled by",
+      by ||
+        (customerCancelled
+          ? `${customer.name} (${isFree ? "participant" : "customer"})`
+          : `${provider.name} (${isFree ? "host" : "provider"})`),
+    ],
+    ["Reason", reason],
+  ];
+  const red = "#e63946";
+
+  if (isFree) {
+    await sendBoth(
+      {
+        to: customer.email,
+        subject: customerCancelled ? `You left "${title}"` : `Your spot in "${title}" was cancelled`,
+        titleText: customerCancelled ? "You Left the Request" : "Your Spot Was Cancelled ❌",
+        titleColor: red,
+        name: customer.name,
+        introText: customerCancelled
+          ? `You cancelled your spot in "${title}".`
+          : `${by || provider.name} cancelled your spot in "${title}".`,
+        detailsTitle: "Request Details",
+        rows,
+        closingText: "You can join other requests anytime on BeTogether.",
+      },
+      {
+        to: provider.email,
+        subject: customerCancelled
+          ? `A participant left "${title}"`
+          : `Participant removed from "${title}"`,
+        titleText: customerCancelled ? "A Participant Left 👋" : "Participant Removed",
+        titleColor: red,
+        name: provider.name,
+        introText: customerCancelled
+          ? `${customer.name} cancelled their spot in your request.`
+          : `${by || "You"} removed ${customer.name} from your request.`,
+        detailsTitle: "Request Details",
+        rows,
+        closingText: "The spot is open again for someone else to join.",
+      },
+    );
+    return;
+  }
+
+  const moneyRows = [
+    ["Refund to customer", formatMoney(refundAmount, currency)],
+    ["Late cancellation fee", cancellationFee > 0 ? formatMoney(cancellationFee, currency) : null],
+  ];
+  await sendBoth(
+    {
+      to: customer.email,
+      subject: customerCancelled
+        ? `Request booking cancelled — ${title}`
+        : `Your request booking was cancelled — ${title}`,
+      titleText: "Request Booking Cancelled ❌",
+      titleColor: red,
+      name: customer.name,
+      introText: customerCancelled
+        ? `Your request booking for "${title}" has been cancelled as requested.`
+        : `${by || provider.name} cancelled your request booking for "${title}".`,
+      detailsTitle: "Request Booking Details",
+      rows: [...rows, ...moneyRows],
+      note:
+        cancellationFee > 0
+          ? `${formatMoney(refundAmount, currency)} is being refunded (a late cancellation fee of ${formatMoney(cancellationFee, currency)} applied because you cancelled less than 1 hour before the start). It usually appears within 5–10 business days.`
+          : `${formatMoney(refundAmount, currency)} is being refunded in full to your original payment method. It usually appears within 5–10 business days.`,
+      noteColor: cancellationFee > 0 ? "#d97706" : "#16a34a",
+      closingText: customerCancelled
+        ? "You can post a new request anytime."
+        : "Your request is open again — you can accept another offer or post a new request.",
+    },
+    {
+      to: provider.email,
+      subject: customerCancelled
+        ? `Request booking cancelled by customer — ${title}`
+        : `Request booking cancelled — ${title}`,
+      titleText: "Request Booking Cancelled ❌",
+      titleColor: red,
+      name: provider.name,
+      introText: customerCancelled
+        ? `${customer.name} cancelled their request booking.`
+        : by
+          ? `${by} cancelled this request booking. The customer receives a full refund.`
+          : "You cancelled this request booking. The customer receives a full refund.",
+      detailsTitle: "Request Booking Details",
+      rows: [...rows, ...moneyRows],
+      note:
+        providerFeeShare > 0
+          ? `You'll receive ${formatMoney(providerFeeShare, currency)} from the late cancellation fee.`
+          : "",
+      closingText: "Thank you for using BeTogether.",
+    },
+  );
 }
 
 // ---------------- PROMOTION SUBSCRIPTION EMAIL ----------------
@@ -609,6 +911,9 @@ module.exports = {
   sendServiceBookedEmail,
   sendServiceCompletedEmail,
   sendServiceCancelledEmail,
+  sendRequestBookedEmail,
+  sendRequestCompletedEmail,
+  sendRequestCancelledEmail,
   sendServiceDeleteApprovedEmail,
   sendServiceForceDeletedEmail,
   sendCredentialsEmail,

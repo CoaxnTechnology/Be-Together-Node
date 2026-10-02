@@ -16,6 +16,7 @@ const {
   notifyRequestExpiringNoResponse,
 } = require("./notificationController");
 const requestPaymentController = require("./requestPaymentController");
+const { sendRequestBookedEmail } = require("../utils/email");
 const {
   parseDateTime,
   formatDateTime,
@@ -696,12 +697,25 @@ exports.getServiceRequestById = async (req, res) => {
         .lean();
     }
 
+    // Owner only — how many providers have offered on this request. Withdrawn
+    // offers don't count (the owner's offer list hides them too). Never sent
+    // to anyone else, so these keys are simply absent for guests/providers.
+    let ownerOfferCounts = null;
+    if (isOwner && request.requestMode === "paid_offer") {
+      const [offersCount, pendingOffersCount] = await Promise.all([
+        ServiceRequestOffer.countDocuments({ request: id, status: { $ne: "withdrawn" } }),
+        ServiceRequestOffer.countDocuments({ request: id, status: "pending" }),
+      ]);
+      ownerOfferCounts = { offersCount, pendingOffersCount };
+    }
+
     return res.json({
       isSuccess: true,
       message: "Service request fetched successfully",
       data: {
         ...decorateRequest(request),
         isOwner,
+        ...ownerOfferCounts,
         hasSubmittedOffer: Boolean(myOffer),
         myOffer,
         hasJoined: Boolean(myBooking),
@@ -1455,6 +1469,18 @@ exports.joinRequest = async (req, res) => {
           },
         }),
     });
+
+    // Fire-and-forget — an email failure never breaks the join.
+    Promise.all([
+      User.findById(userId).select("name email"),
+      User.findById(request.owner).select("name email"),
+    ])
+      .then(([participant, host]) =>
+        participant && host
+          ? sendRequestBookedEmail({ customer: participant, provider: host, request, booking })
+          : null,
+      )
+      .catch((err) => console.error("❌ join email error:", err.message));
 
     return res.status(201).json({
       isSuccess: true,

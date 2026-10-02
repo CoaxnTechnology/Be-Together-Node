@@ -2,7 +2,23 @@ const express = require("express");
 const router = express.Router();
 const authMiddleware = require("../Middleware/authMiddleware");
 const { optionalAuth } = require("../Middleware/optionalAuth");
+const mongoose = require("mongoose");
 const serviceRequestController = require("../controller/serviceRequestController");
+
+// A missing/garbage id in the URL (e.g. the app sending "null" as :offerId)
+// gets a clear 400 instead of a Mongo CastError → 500.
+router.param("id", (req, res, next, value) => {
+  if (mongoose.Types.ObjectId.isValid(value)) return next();
+  return res
+    .status(400)
+    .json({ isSuccess: false, message: "Invalid service request id" });
+});
+router.param("offerId", (req, res, next, value) => {
+  if (mongoose.Types.ObjectId.isValid(value)) return next();
+  return res
+    .status(400)
+    .json({ isSuccess: false, message: "offerId is missing or invalid" });
+});
 
 router.post("/create", authMiddleware, serviceRequestController.createServiceRequest);
 

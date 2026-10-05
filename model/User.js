@@ -42,6 +42,13 @@ const userSchema = new mongoose.Schema(
   ],
   default: "pending_verification",
 },
+    // ⭐ Unverified sign-ups (status "pending_verification"): when the person
+    // last did something on their sign-up (register / login attempt / resend
+    // OTP — null = created_at) and how many reminder emails have gone out
+    // since then (0–4). The registration reminder cron runs from these; the
+    // account is deleted 90 days after the last activity.
+    verificationActivityAt: { type: Date, default: null },
+    verificationReminderStage: { type: Number, default: 0 },
     // ⭐ Set only for a temporary (e.g. 7-day) ban from a resolved Report —
     // null for a permanent block. authMiddleware/authController self-heal
     // the account back to "active" once this passes, no cron needed.

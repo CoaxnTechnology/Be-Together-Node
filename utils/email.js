@@ -553,6 +553,119 @@ async function sendRequestCancelledEmail({
   );
 }
 
+// ---------------- UNFINISHED REGISTRATION REMINDERS ----------------
+// Sign-ups still in "pending_verification" get up to 4 reminders, then the
+// account is removed 90 days after their last activity (see
+// services/registrationReminderCron.js). One template for all of them.
+const REGISTRATION_TEMPLATE = path.join(__dirname, "../templates/registration_reminder.html");
+
+const REGISTRATION_REMINDERS = {
+  1: {
+    subject: "Complete your registration",
+    titleText: "Complete Your Registration",
+    introText:
+      "You started creating your BeTogether account but haven't verified your email yet. It only takes a minute to finish.",
+  },
+  2: {
+    subject: "Your registration is still incomplete",
+    titleText: "Your Registration Is Still Incomplete",
+    introText:
+      "Your BeTogether account is almost ready — just verify your email to start booking and offering services near you.",
+  },
+  3: {
+    subject: "Complete your BeTogether account",
+    titleText: "Complete Your BeTogether Account",
+    introText:
+      "We're still keeping your sign-up for you. Verify your email to join the people already meeting up on BeTogether.",
+  },
+  4: {
+    subject: "Final reminder: your BeTogether sign-up will be removed",
+    titleText: "Final Reminder ⏳",
+    titleColor: "#d97706",
+    introText: "This is our last reminder about your unfinished BeTogether sign-up.",
+  },
+};
+
+function formatLongDate(date) {
+  return new Date(date).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+}
+
+function registrationSteps(email) {
+  return `<div style="margin-top: 25px; background: #f4f7ff; border-radius: 20px; padding: 22px 20px; text-align: left">
+    <h3 style="margin: 0 0 12px 0; font-size: 18px; color: #333">How to finish</h3>
+    <ol style="margin: 0; padding-left: 20px; font-size: 15px; color: #444; line-height: 1.8">
+      <li>Open the BeTogether app.</li>
+      <li>Log in with <strong>${escapeHtml(email)}</strong> and your password.</li>
+      <li>Enter the verification code we email you — done!</li>
+    </ol>
+  </div>`;
+}
+
+function appButton() {
+  const url = process.env.APP_DOWNLOAD_URL;
+  if (!url) return "";
+  return `<div style="margin-top: 25px"><a href="${escapeHtml(url)}" style="display: inline-block; background: #2563eb; color: #fff; text-decoration: none; padding: 12px 28px; border-radius: 12px; font-size: 15px; font-weight: 600">Open BeTogether</a></div>`;
+}
+
+function renderRegistrationEmail(fields) {
+  return fs
+    .readFileSync(REGISTRATION_TEMPLATE, "utf8")
+    .replace(/{{email_title}}/g, escapeHtml(fields.subject))
+    .replace(/{{title_text}}/g, escapeHtml(fields.titleText))
+    .replace(/{{title_color}}/g, fields.titleColor || "#1f1f1f")
+    .replace(/{{name}}/g, escapeHtml(fields.name || "there"))
+    .replace(/{{intro_text}}/g, escapeHtml(fields.introText))
+    .replace(/{{steps_section}}/g, fields.stepsHtml || "")
+    .replace(/{{deadline_html}}/g, fields.deadlineHtml || "")
+    .replace(/{{cta_html}}/g, fields.ctaHtml || "")
+    .replace(/{{closing_text}}/g, escapeHtml(fields.closingText))
+    .replace(/{{year}}/g, String(new Date().getFullYear()));
+}
+
+// stage 1–4 (24h, 3 days, 7 days, 30 days); deleteOn = when the unfinished
+// sign-up will be removed if still not verified.
+async function sendRegistrationReminderEmail(user, stage, deleteOn) {
+  const cfg = REGISTRATION_REMINDERS[stage];
+  if (!user?.email || !cfg) return;
+  const isFinal = stage === 4;
+  const html = renderRegistrationEmail({
+    ...cfg,
+    name: user.name,
+    stepsHtml: registrationSteps(user.email),
+    deadlineHtml: noteBox(
+      `If you don't verify your email, this unfinished sign-up will be removed on ${formatLongDate(deleteOn)}.`,
+      isFinal ? "#d97706" : "#2563eb",
+    ),
+    ctaHtml: appButton(),
+    closingText: isFinal
+      ? "After that date you'd need to sign up again from the start."
+      : "See you on BeTogether!",
+  });
+  await sendEmail({ to: user.email, subject: cfg.subject, html });
+}
+
+// Sent right before an unfinished sign-up is deleted (90 days).
+async function sendRegistrationRemovedEmail(user) {
+  if (!user?.email) return;
+  const subject = "Your unfinished BeTogether sign-up has been removed";
+  const html = renderRegistrationEmail({
+    subject,
+    titleText: "Sign-up Removed",
+    titleColor: "#e63946",
+    name: user.name,
+    introText:
+      "Your email was never verified, so we've removed your unfinished BeTogether sign-up and the details you entered.",
+    deadlineHtml: noteBox(`Removed sign-up: ${user.email}`, "#e63946"),
+    ctaHtml: appButton(),
+    closingText: "You're welcome to sign up again anytime — it only takes a minute.",
+  });
+  await sendEmail({ to: user.email, subject, html });
+}
+
 // ---------------- PROMOTION SUBSCRIPTION EMAIL ----------------
 // One shared template (promotion_status.html) for all three subscription
 // events — only the text/color per eventType changes, same structure as
@@ -914,6 +1027,8 @@ module.exports = {
   sendRequestBookedEmail,
   sendRequestCompletedEmail,
   sendRequestCancelledEmail,
+  sendRegistrationReminderEmail,
+  sendRegistrationRemovedEmail,
   sendServiceDeleteApprovedEmail,
   sendServiceForceDeletedEmail,
   sendCredentialsEmail,

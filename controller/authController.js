@@ -371,6 +371,12 @@ exports.register = async (req, res) => {
       // Optional
      // existing.lastResendAt = new Date();
 
+      // Activity on an unverified sign-up restarts the reminder clock.
+      if (existing.status === "pending_verification") {
+        existing.verificationActivityAt = new Date();
+        existing.verificationReminderStage = 0;
+      }
+
       await existing.save();
 
       try {
@@ -815,6 +821,9 @@ exports.login = async (req, res) => {
   user.otp_code = otpObj.otp;
   user.otp_expiry = otpObj.expiry;
   user.otp_verified = false;
+  // Activity on an unverified sign-up restarts the reminder clock.
+  user.verificationActivityAt = new Date();
+  user.verificationReminderStage = 0;
 
  await user.save();
 await saveGdprData(user, req);
@@ -894,6 +903,7 @@ return res.json({
           name: userName,
           register_type: "google_auth",
           login_type: "google_auth", // ✅ ADD
+          status: "active", // Google already verified the email
           provider_id: provider_id || null,
           provider_uid: provider_uid || null,
           otp_verified: true,
@@ -956,6 +966,9 @@ return res.json({
       user.access_token = access_token;
       user.otp_verified = true;
       user.login_type = "google_auth";
+      // Social sign-ups created before the fix were saved as
+      // "pending_verification" by mistake — they're verified, so heal it.
+      if (user.status === "pending_verification") user.status = "active";
       user.last_login = new Date();
       await user.save();
       await saveGdprData(user, req);
@@ -1037,6 +1050,7 @@ return res.json({
           name: name || "Apple User",
           register_type: "apple_auth",
           login_type: "apple_auth", // ✅ ADD
+          status: "active", // Apple already verified the email
           provider_uid: appleUserId,
           otp_verified: true,
           fcmTokens: [],
@@ -1084,6 +1098,8 @@ return res.json({
       appleUser.access_token = access_token;
       appleUser.otp_verified = true;
       appleUser.login_type = "apple_auth";
+      // Same heal as Google — verified by Apple, never pending.
+      if (appleUser.status === "pending_verification") appleUser.status = "active";
       appleUser.last_login = new Date();
 
       await appleUser.save();
@@ -1365,6 +1381,11 @@ exports.resendOtp = async (req, res) => {
     user.otp_expiry = expiry;
     user.otp_verified = false;
     user.lastResendAt = new Date();
+    // Activity on an unverified sign-up restarts the reminder clock.
+    if (user.status === "pending_verification") {
+      user.verificationActivityAt = new Date();
+      user.verificationReminderStage = 0;
+    }
 
     await user.save();
 

@@ -37,6 +37,8 @@ const blogRoutes = require("./routes/blogRoutes");
 const serviceRequestRoutes = require("./routes/serviceRequestRoutes");
 const homeFeedRoutes = require("./routes/homeFeedRoutes");
 const adminNotificationRoutes = require("./routes/adminNotificationRoutes");
+// Hourly reminders for unverified sign-ups + removal after 90 days.
+require("./services/registrationReminderCron");
 // --- KEEP RAW ONLY FOR GITHUB ---
 app.post(
   "/webhook/github",

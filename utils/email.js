@@ -628,10 +628,14 @@ function registrationSteps(email) {
   </div>`;
 }
 
+// "Open the BeTogether app" button — hidden until APP_OPEN_URL is set in
+// .env (planned: https://betogetherapp.com/open-app, an App Link that opens
+// the app if installed, otherwise the store).
+const APP_OPEN_URL = process.env.APP_OPEN_URL;
+
 function appButton() {
-  const url = process.env.APP_DOWNLOAD_URL;
-  if (!url) return "";
-  return `<div style="margin-top: 25px"><a href="${escapeHtml(url)}" style="display: inline-block; background: #2563eb; color: #fff; text-decoration: none; padding: 12px 28px; border-radius: 12px; font-size: 15px; font-weight: 600">Open BeTogether</a></div>`;
+  if (!APP_OPEN_URL) return "";
+  return `<div style="margin-top: 25px"><a href="${escapeHtml(APP_OPEN_URL)}" style="display: inline-block; background: #2563eb; color: #fff; text-decoration: none; padding: 12px 28px; border-radius: 12px; font-size: 15px; font-weight: 600">Open the BeTogether app</a></div>`;
 }
 
 function renderRegistrationEmail(fields) {

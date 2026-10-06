@@ -80,6 +80,13 @@ const pendingAmbassadorAssignmentSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+
+    // Set when the "you haven't answered yet" reminder (3 days) went out —
+    // it's sent once per invitation. See utils/ambassadorInvitation.js.
+    reminderSentAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,

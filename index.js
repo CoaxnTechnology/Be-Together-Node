@@ -39,6 +39,8 @@ const homeFeedRoutes = require("./routes/homeFeedRoutes");
 const adminNotificationRoutes = require("./routes/adminNotificationRoutes");
 // Hourly reminders for unverified sign-ups + removal after 90 days.
 require("./services/registrationReminderCron");
+// Hourly reminder (3 days) and expiry (7 days) for ambassador invitations.
+require("./services/ambassadorInvitationCron");
 // --- KEEP RAW ONLY FOR GITHUB ---
 app.post(
   "/webhook/github",

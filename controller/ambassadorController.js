@@ -10,6 +10,10 @@ const fs = require("fs");
 const crypto = require("crypto");
 const AmbassadorWithdrawal = require("../model/AmbassadorWithdrawal");
 const PendingAmbassadorAssignment = require("../model/PendingAmbassadorAssignment");
+const {
+  INVITATION_VALID_FOR,
+  isInvitationExpired,
+} = require("../utils/ambassadorInvitation");
 const path = require("path");
 const mongoose = require("mongoose");
 const AmbassadorWallet = require("../model/AmbassadorWallet");
@@ -193,7 +197,11 @@ if (requestedUser.isAmbassador) {
         status: "pending",
       });
 
-      if (pendingInvitation) {
+      // Past its 7 days → close it now instead of waiting for the cron.
+      if (pendingInvitation && isInvitationExpired(pendingInvitation)) {
+        pendingInvitation.status = "expired";
+        await pendingInvitation.save();
+      } else if (pendingInvitation) {
         console.log("[applyForAmbassador] Pending invitation exists", {
           requestedUserId,
           createdByUser: user._id,
@@ -346,7 +354,7 @@ if (lastRejectedApplication) {
         territories: [],
 
         status: "pending",
-        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        expiresAt: new Date(Date.now() + INVITATION_VALID_FOR),
       });
       console.log("[applyForAmbassador] Created exclusive invitation", {
         invitationId: invitation._id,
@@ -935,7 +943,11 @@ exports.makeAmbassador = async (req, res) => {
       pendingExists: Boolean(existingPendingAssignment),
     });
 
-    if (existingPendingAssignment) {
+    // Past its 7 days → close it now so the admin can invite again.
+    if (existingPendingAssignment && isInvitationExpired(existingPendingAssignment)) {
+      existingPendingAssignment.status = "expired";
+      await existingPendingAssignment.save();
+    } else if (existingPendingAssignment) {
       return res.status(400).json({
         isSuccess: false,
         message: "User already has a pending ambassador invitation.",
@@ -1122,7 +1134,7 @@ exports.makeAmbassador = async (req, res) => {
 
       status: "pending",
 
-      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // optional
+      expiresAt: new Date(Date.now() + INVITATION_VALID_FOR),
     });
 
     console.log("[makeAmbassador] Pending assignment created", {
@@ -3611,8 +3623,14 @@ if (!selfApplication && pendingAssignment) {
     });
   }
 
-  if (pendingAssignment.status === "expired") {
+  if (pendingAssignment.status === "expired" || isInvitationExpired(pendingAssignment)) {
     await session.abortTransaction();
+    if (pendingAssignment.status === "pending") {
+      await PendingAmbassadorAssignment.updateOne(
+        { _id: pendingAssignment._id, status: "pending" },
+        { $set: { status: "expired" } },
+      );
+    }
 
     return res.status(400).json({
       isSuccess: false,
@@ -3982,7 +4000,7 @@ if (assignment.status !== "pending") {
     // CHECK INVITATION EXPIRY
     // =====================================
 
-    if (assignment.expiresAt && assignment.expiresAt < new Date()) {
+    if (isInvitationExpired(assignment)) {
       assignment.status = "expired";
       await assignment.save({ session });
 

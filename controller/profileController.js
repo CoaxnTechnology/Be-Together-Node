@@ -9,6 +9,7 @@ const fs = require("fs");
 const BASE_URL = process.env.BASE_URL;
 const AmbassadorApplication = require("../model/AmbassadorApplication");
 const PendingAmbassadorAssignment = require("../model/PendingAmbassadorAssignment");
+const { openInvitationFilter } = require("../utils/ambassadorInvitation");
 const { getRequestsByOwner } = require("./serviceRequestController");
 // ---------------- UPDATE Profile ----------------
 exports.editProfile = async (req, res) => {
@@ -356,7 +357,7 @@ exports.getUserProfileByEmail = async (req, res) => {
   .select("status rejectionReason rejectionCooldownUntil");
 const pendingAssignment = await PendingAmbassadorAssignment.findOne({
   user: user._id,
-  status: "pending",
+  ...openInvitationFilter(), // past 7 days = expired, not pending
 }).select(`
   status
   ambassadorType

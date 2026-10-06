@@ -553,6 +553,29 @@ async function sendRequestCancelledEmail({
   );
 }
 
+// ---------------- AMBASSADOR INVITATION REMINDER ----------------
+// Invitation unanswered for 3 days (it expires after 7).
+async function sendAmbassadorInvitationReminderEmail(user, invitation, { inviterName, expiresAt }) {
+  if (!user?.email) return;
+  await sendBookingStatusEmail({
+    to: user.email,
+    subject: "Your BeTogether Ambassador invitation is waiting",
+    titleText: "Your Ambassador Invitation Is Waiting ⏳",
+    name: user.name,
+    introText: `${inviterName || "BeTogether"} invited you to become a BeTogether Ambassador, and we haven't heard back from you yet.`,
+    detailsTitle: "Invitation Details",
+    rows: [
+      ["Invited by", inviterName || "BeTogether"],
+      ["Ambassador type", invitation.ambassadorType === "exclusive" ? "Exclusive" : "Standard"],
+      ["Commission rate", `${invitation.commissionRate}%`],
+      ["Valid until", formatLongDate(expiresAt)],
+    ],
+    note: `Open the BeTogether app and accept the Ambassador Agreement before ${formatLongDate(expiresAt)}. After that the invitation expires.`,
+    noteColor: "#d97706",
+    closingText: "Not interested? No action needed — the invitation simply expires.",
+  });
+}
+
 // ---------------- UNFINISHED REGISTRATION REMINDERS ----------------
 // Sign-ups still in "pending_verification" get up to 4 reminders, then the
 // account is removed 90 days after their last activity (see
@@ -1029,6 +1052,7 @@ module.exports = {
   sendRequestCancelledEmail,
   sendRegistrationReminderEmail,
   sendRegistrationRemovedEmail,
+  sendAmbassadorInvitationReminderEmail,
   sendServiceDeleteApprovedEmail,
   sendServiceForceDeletedEmail,
   sendCredentialsEmail,

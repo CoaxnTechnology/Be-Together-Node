@@ -23,6 +23,7 @@ const Booking = require("../model/Booking");
 const Payment = require("../model/Payment");
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const PendingAmbassadorAssignment = require("../model/PendingAmbassadorAssignment");
+const { openInvitationFilter } = require("../utils/ambassadorInvitation");
 const { banUser } = require("../utils/banUser");
 // ------------------ Cloudinary Config ------------------
 cloudinary.config({
@@ -522,7 +523,7 @@ exports.getAllUsers = async (req, res) => {
 
 const pendingAssignments = await PendingAmbassadorAssignment.find({
   user: { $in: userIds },
-  status: "pending",
+  ...openInvitationFilter(), // expired after 7 days → button shows again
 }).select("user");
 
 const pendingMap = new Set(
@@ -2359,7 +2360,7 @@ exports.searchUsers = async (req, res) => {
 
 const pendingAssignments = await PendingAmbassadorAssignment.find({
   user: { $in: userIds },
-  status: "pending",
+  ...openInvitationFilter(), // expired after 7 days → button shows again
 }).select("user");
 
 const pendingMap = new Set(

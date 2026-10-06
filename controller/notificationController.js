@@ -985,6 +985,40 @@ async function sendExclusiveAmbassadorInvitationNotification(
     );
   }
 }
+// Ambassador invitation still unanswered after 3 days — same payload as the
+// original invitation so tapping it opens the Agreement again.
+async function sendAmbassadorInvitationReminderNotification(invitedUser, expiresAt) {
+  const date = new Date(expiresAt).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "long",
+  });
+  await sendUserNotification(
+    invitedUser,
+    "⏳ Your Ambassador invitation is waiting",
+    `You haven't answered your BeTogether Ambassador invitation yet. Review and accept the Agreement before ${date} — after that it expires.`,
+    {
+      type: "exclusive_ambassador_invitation",
+      pageType: "WebView",
+      agreementUrl: `${process.env.BASE_URL}/api/ambassador-terms`,
+      userId: invitedUser._id,
+      reminder: "true",
+    },
+  );
+}
+
+// Tells the exclusive ambassador who sent it that their invitation lapsed.
+async function notifyAmbassadorInvitationExpired(inviter, invitedUser) {
+  await sendUserNotification(
+    inviter,
+    "Ambassador invitation expired",
+    `${invitedUser?.name || "The user"} didn't accept your Ambassador invitation within 7 days. You can send a new one.`,
+    {
+      type: "ambassador_invitation_expired",
+      invitedUserId: invitedUser?._id || "",
+    },
+  );
+}
+
 async function sendAmbassadorInvitationNotification(invitedUser) {
   try {
     console.log("[sendAmbassadorInvitationNotification] Starting", {
@@ -1795,6 +1829,8 @@ module.exports.sendAmbassadorRejectedNotification =
 module.exports.sendExclusiveAmbassadorInvitationNotification =
   sendExclusiveAmbassadorInvitationNotification;
   module.exports.sendAmbassadorInvitationNotification=sendAmbassadorInvitationNotification
+module.exports.sendAmbassadorInvitationReminderNotification = sendAmbassadorInvitationReminderNotification;
+module.exports.notifyAmbassadorInvitationExpired = notifyAmbassadorInvitationExpired;
 //module.exports.notifyOnServiceSubscription = notifyServiceOwnerOnSubscription;
 //module.exports.notifyServiceOwnerOnSubscription = notifyServiceOwnerOnSubscription;
 //notificaton addd

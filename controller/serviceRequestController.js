@@ -17,6 +17,7 @@ const {
 } = require("./notificationController");
 const requestPaymentController = require("./requestPaymentController");
 const { sendRequestBookedEmail } = require("../utils/email");
+const { ensurePayoutAccount } = require("../utils/stripeConnect");
 const {
   parseDateTime,
   formatDateTime,
@@ -986,6 +987,24 @@ exports.submitOffer = async (req, res) => {
       return res.status(400).json({
         isSuccess: false,
         message: "You already have an active offer on this request",
+      });
+    }
+
+    // The provider gets paid through Stripe if the offer is accepted — so
+    // their payout account must be set up before they can offer. If it
+    // isn't, no offer is created; the app opens onboardingUrl instead.
+    const provider = await User.findById(userId);
+    if (!provider) {
+      return res.status(404).json({ isSuccess: false, message: "User not found" });
+    }
+    const payout = await ensurePayoutAccount(provider);
+    if (!payout.ready) {
+      return res.status(200).json({
+        isSuccess: false,
+        requiresStripeOnboarding: true,
+        message:
+          "Please complete your Stripe account setup to receive payments, then send your offer.",
+        onboardingUrl: payout.onboardingUrl,
       });
     }
 

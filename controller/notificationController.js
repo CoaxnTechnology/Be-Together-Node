@@ -985,17 +985,21 @@ async function sendExclusiveAmbassadorInvitationNotification(
     );
   }
 }
-// Ambassador invitation still unanswered after 3 days — same payload as the
-// original invitation so tapping it opens the Agreement again.
-async function sendAmbassadorInvitationReminderNotification(invitedUser, expiresAt) {
+// Daily push while an Ambassador invitation is unanswered — same payload as
+// the original invitation so tapping it opens the Agreement again.
+async function sendAmbassadorInvitationReminderNotification(invitedUser, expiresAt, daysLeft) {
   const date = new Date(expiresAt).toLocaleDateString("en-GB", {
     day: "numeric",
     month: "long",
   });
+  const when =
+    daysLeft <= 1 ? "It expires tomorrow" : `It expires in ${daysLeft} days (${date})`;
   await sendUserNotification(
     invitedUser,
-    "⏳ Your Ambassador invitation is waiting",
-    `You haven't answered your BeTogether Ambassador invitation yet. Review and accept the Agreement before ${date} — after that it expires.`,
+    daysLeft <= 1
+      ? "⏳ Last day for your Ambassador invitation"
+      : "⏳ Your Ambassador invitation is waiting",
+    `You haven't answered your BeTogether Ambassador invitation yet. ${when} — review and accept the Agreement to become an Ambassador.`,
     {
       type: "exclusive_ambassador_invitation",
       pageType: "WebView",

@@ -1,16 +1,19 @@
 // =====================================================================
 // AMBASSADOR INVITATIONS — reminder + expiry (rules in
 // utils/ambassadorInvitation.js)
-//   3 days unanswered → one reminder to the invited user (push + email)
-//   7 days unanswered → status "expired": the user stays a normal user, the
+//   every 24h unanswered → a reminder push to the invited user (days 1–6)
+//   3 days unanswered    → one reminder email (the pushes carry on daily)
+//   7 days unanswered    → status "expired": the user stays a normal user, the
 //                       admin's "Send Invitation" button shows again, and an
 //                       exclusive ambassador who sent it is told it lapsed
-// Runs every hour. Each invitation is reminded at most once.
+// Runs every hour. At most one push per 24h and one email per invitation;
+// after downtime only the latest due push goes out, never a burst.
 // =====================================================================
 const cron = require("node-cron");
 const PendingAmbassadorAssignment = require("../model/PendingAmbassadorAssignment");
 const User = require("../model/User");
 const {
+  INVITATION_PUSH_EVERY,
   INVITATION_REMINDER_AFTER,
   INVITATION_VALID_FOR,
   invitationExpiresAt,
@@ -55,7 +58,53 @@ async function runAmbassadorInvitationJobs(now = new Date()) {
     }
   }
 
-  // ---- 3 days: one reminder ----
+  // The invited user, or null if they can't be reminded any more.
+  const loadInvitedUser = async (invitation) => {
+    const user = await User.findById(invitation.user).select("name email fcmToken isAmbassador");
+    return user && !user.isAmbassador ? user : null;
+  };
+
+  // ---- every 24h: reminder push ----
+  const open = await PendingAmbassadorAssignment.find({
+    status: "pending",
+    createdAt: { $lte: new Date(now.getTime() - INVITATION_PUSH_EVERY), $gt: expireBefore },
+  });
+
+  let pushed = 0;
+  for (const invitation of open) {
+    try {
+      const age = now - new Date(invitation.createdAt);
+      const daysElapsed = Math.floor(age / INVITATION_PUSH_EVERY);
+      const sent = invitation.pushRemindersSent || 0;
+      if (daysElapsed <= sent) continue;
+
+      // Claim this day's push first so an overlapping run can't send it twice.
+      const claimed = await PendingAmbassadorAssignment.updateOne(
+        {
+          _id: invitation._id,
+          status: "pending",
+          $or: [
+            { pushRemindersSent: { $lt: daysElapsed } },
+            { pushRemindersSent: { $exists: false } },
+          ],
+        },
+        { $set: { pushRemindersSent: daysElapsed } },
+      );
+      if (!claimed.modifiedCount) continue;
+
+      const user = await loadInvitedUser(invitation);
+      if (!user) continue;
+
+      const expiresAt = invitationExpiresAt(invitation);
+      const daysLeft = Math.max(1, Math.ceil((expiresAt - now) / INVITATION_PUSH_EVERY));
+      await sendAmbassadorInvitationReminderNotification(user, expiresAt, daysLeft);
+      pushed++;
+    } catch (err) {
+      log("push error", { invitationId: invitation._id, error: err.message });
+    }
+  }
+
+  // ---- 3 days: one reminder email ----
   const waiting = await PendingAmbassadorAssignment.find({
     status: "pending",
     reminderSentAt: null,
@@ -65,7 +114,7 @@ async function runAmbassadorInvitationJobs(now = new Date()) {
   let reminded = 0;
   for (const invitation of waiting) {
     try {
-      // Claim first so an overlapping run can't remind twice.
+      // Claim first so an overlapping run can't email twice.
       const claimed = await PendingAmbassadorAssignment.updateOne(
         { _id: invitation._id, status: "pending", reminderSentAt: null },
         { $set: { reminderSentAt: now } },
@@ -73,29 +122,25 @@ async function runAmbassadorInvitationJobs(now = new Date()) {
       if (!claimed.modifiedCount) continue;
 
       const [user, inviter] = await Promise.all([
-        User.findById(invitation.user).select("name email fcmToken isAmbassador"),
+        loadInvitedUser(invitation),
         invitation.createdByUser
           ? User.findById(invitation.createdByUser).select("name")
           : null,
       ]);
-      if (!user || user.isAmbassador) continue;
+      if (!user) continue;
 
-      const expiresAt = invitationExpiresAt(invitation);
-      await sendAmbassadorInvitationReminderNotification(user, expiresAt).catch((err) =>
-        log("reminder push failed", { error: err.message }),
-      );
       await sendAmbassadorInvitationReminderEmail(user, invitation, {
         inviterName: inviter?.name || "BeTogether",
-        expiresAt,
-      }).catch((err) => log("reminder email failed", { error: err.message }));
+        expiresAt: invitationExpiresAt(invitation),
+      });
       reminded++;
     } catch (err) {
-      log("error", { invitationId: invitation._id, error: err.message });
+      log("email error", { invitationId: invitation._id, error: err.message });
     }
   }
 
-  if (expired || reminded) log("run finished", { reminded, expired });
-  return { reminded, expired };
+  if (expired || pushed || reminded) log("run finished", { pushed, reminded, expired });
+  return { pushed, reminded, expired };
 }
 
 // Every hour, at minute 45.

@@ -1357,6 +1357,34 @@ exports.rejectOffer = async (req, res) => {
     if (!offer || String(offer.request) !== String(id)) {
       return res.status(404).json({ isSuccess: false, message: "Offer not found" });
     }
+    // Paid → it's a booking now. Rejecting is not possible; the customer
+    // cancels the booking instead (POST /api/payments/refund), which applies
+    // the offer's cancellation policy and refunds them.
+    if (offer.status === "accepted") {
+      const booking = await Booking.findOne({
+        serviceRequest: id,
+        customer: userId,
+        provider: offer.provider,
+        status: { $in: ["booked", "started", "completed"] },
+      }).select("_id status");
+      return res.status(400).json({
+        isSuccess: false,
+        cannotReject: true,
+        message:
+          "You've already accepted and paid for this offer. To back out, cancel the booking instead — a refund is issued according to the cancellation policy.",
+        bookingId: booking?._id || null,
+        bookingStatus: booking?.status || null,
+        cancellationPolicy: offer.cancellationPolicy,
+      });
+    }
+    if (offer.status === "payment_pending") {
+      return res.status(400).json({
+        isSuccess: false,
+        cannotReject: true,
+        message:
+          "You've accepted this offer and its payment is in progress. If you don't complete the payment, the offer becomes available again automatically.",
+      });
+    }
     if (offer.status !== "pending") {
       return res.status(400).json({
         isSuccess: false,

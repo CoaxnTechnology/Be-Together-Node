@@ -33,7 +33,10 @@ const serviceRequestOfferSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["pending", "accepted", "declined", "withdrawn"],
+      // payment_pending = the customer pressed Accept and is on the Stripe
+      // page (seat held); it only becomes "accepted" once they've paid, and
+      // goes back to "pending" if they leave without paying.
+      enum: ["pending", "payment_pending", "accepted", "declined", "withdrawn"],
       default: "pending",
     },
   },

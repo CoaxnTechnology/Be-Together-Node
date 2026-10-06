@@ -42,6 +42,7 @@ const {
   notifyQuotationChangeSubmitted,
   notifyQuotationChangeResponded,
   notifyOfferDeclined,
+  notifyOfferAccepted,
 } = require("./notificationController");
 const {
   round2,
@@ -90,7 +91,7 @@ async function releaseSeatAndOffer(serviceRequestId, offerId) {
   );
   if (offerId) {
     await ServiceRequestOffer.updateOne(
-      { _id: offerId, status: "accepted" },
+      { _id: offerId, status: { $in: ["payment_pending", "accepted"] } },
       { status: "pending" },
     );
   }
@@ -457,6 +458,20 @@ async function createRequestBooking(payment, paymentIntent) {
       },
     })
     .catch((err) => logError("createRequestBooking:tagIntent", err));
+
+  // Paid → only now is the offer really accepted and the provider told.
+  if (payment.serviceRequestOffer) {
+    const offer = await ServiceRequestOffer.findOneAndUpdate(
+      { _id: payment.serviceRequestOffer, status: { $in: ["payment_pending", "pending"] } },
+      { $set: { status: "accepted" } },
+      { new: true },
+    );
+    if (offer && request) {
+      notifyOfferAccepted(request, offer).catch((err) =>
+        logError("createRequestBooking:notifyOfferAccepted", err),
+      );
+    }
+  }
 
   if (request) {
     sendBookingNotification(

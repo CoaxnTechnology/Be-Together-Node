@@ -9,7 +9,6 @@ const Category = require("../model/Category");
 const {
   notifyOnNewServiceRequest,
   notifyNewOffer,
-  notifyOfferAccepted,
   notifyOfferDeclined,
   notifyOfferWithdrawn,
   notifyGroupFilled,
@@ -674,7 +673,7 @@ exports.getServiceRequestById = async (req, res) => {
       myOffer = await ServiceRequestOffer.findOne({
         request: id,
         provider: userId,
-        status: "pending",
+        status: { $in: ["pending", "payment_pending"] },
       })
         .select("amount currency note cancellationPolicy status createdAt")
         .lean();
@@ -981,7 +980,7 @@ exports.submitOffer = async (req, res) => {
     const existing = await ServiceRequestOffer.findOne({
       request: id,
       provider: userId,
-      status: "pending",
+      status: { $in: ["pending", "payment_pending"] },
     });
     if (existing) {
       return res.status(400).json({
@@ -1111,7 +1110,7 @@ exports.getMyOffers = async (req, res) => {
 
     const { status } = req.query;
     const filter = { provider: userId };
-    if (["pending", "accepted", "declined", "withdrawn"].includes(status)) {
+    if (["pending", "payment_pending", "accepted", "declined", "withdrawn"].includes(status)) {
       filter.status = status;
     }
 
@@ -1231,10 +1230,11 @@ exports.acceptOffer = async (req, res) => {
       return res.status(404).json({ isSuccess: false, message: "Offer not found" });
     }
 
-    // Accepted earlier but the customer left the Stripe page without paying
-    // — the seat is still held for this offer, so let them pay again.
+    // Accept pressed earlier but the customer left the Stripe page without
+    // paying — the seat is still held for this offer, so let them pay again.
+    // ("accepted" = offers from before payment_pending existed.)
     let retryingCheckout = false;
-    if (offer.status === "accepted") {
+    if (offer.status === "payment_pending" || offer.status === "accepted") {
       const [unpaid, booked] = await Promise.all([
         Payment.exists({
           serviceRequestOffer: offer._id,
@@ -1285,12 +1285,10 @@ exports.acceptOffer = async (req, res) => {
         });
       }
 
-      offer.status = "accepted";
+      // Not "accepted" yet — that happens when the payment succeeds (the
+      // provider is notified then, see requestPaymentController).
+      offer.status = "payment_pending";
       await offer.save();
-
-      notifyOfferAccepted(request, offer).catch((err) =>
-        console.error("❌ notifyOfferAccepted error:", err),
-      );
 
       if (updated.seatsBooked >= updated.numberOfParticipants) {
         updated.status = "fulfilled";

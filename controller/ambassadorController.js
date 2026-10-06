@@ -176,6 +176,14 @@ exports.applyForAmbassador = async (req, res) => {
           message: "Requested user not found",
         });
       }
+      // Only a verified, active account can be invited (not pending
+      // verification, inactive or banned).
+      if (requestedUser.status !== "active") {
+        return res.status(400).json({
+          isSuccess: false,
+          message: "Only active users can be invited to become an ambassador.",
+        });
+      }
 if (requestedUser.isAmbassador) {
   return res.status(400).json({
     isSuccess: false,
@@ -925,6 +933,15 @@ exports.makeAmbassador = async (req, res) => {
       return res.status(400).json({
         isSuccess: false,
         message: "User is already ambassador",
+      });
+    }
+
+    // Only a verified, active account can be invited (not pending
+    // verification, inactive or banned).
+    if (user.status !== "active") {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Only active users can be invited to become an ambassador.",
       });
     }
 

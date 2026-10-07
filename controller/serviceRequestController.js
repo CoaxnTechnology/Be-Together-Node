@@ -700,6 +700,21 @@ exports.getServiceRequestById = async (req, res) => {
         .lean();
     }
 
+    // Provider's view of their own offer: has the customer accepted (and
+    // paid)? If so, hand back the booking so the app can open it (start /
+    // update price / complete).
+    let offerBooking = null;
+    if (myOffer?.status === "accepted") {
+      offerBooking = await Booking.findOne({
+        serviceRequest: id,
+        provider: userId,
+        status: { $in: ["booked", "started", "completed", "cancelled"] },
+      })
+        .sort({ createdAt: -1 })
+        .select("status amount createdAt")
+        .lean();
+    }
+
     // Owner only — how many providers have offered on this request. Withdrawn
     // offers don't count (the owner's offer list hides them too). Never sent
     // to anyone else, so these keys are simply absent for guests/providers.
@@ -721,6 +736,10 @@ exports.getServiceRequestById = async (req, res) => {
         ...ownerOfferCounts,
         hasSubmittedOffer: Boolean(myOffer),
         myOffer,
+        // pending → "payment_pending" (customer paying) → "accepted" (paid)
+        myOfferStatus: myOffer?.status || null,
+        isOfferAccepted: myOffer?.status === "accepted",
+        offerBooking, // { _id, status, amount } once accepted, else null
         hasJoined: Boolean(myBooking),
         myBooking,
         showBookingButton: !isOwner && !myOffer && !myBooking,

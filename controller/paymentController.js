@@ -1566,125 +1566,77 @@ exports.completeService = async (req, res) => {
   }
 };
 
-// GET USER BOOKINGS (Customer & Provider)
+// GET USER BOOKINGS (Customer & Provider) — "My Bookings"
+// Every booking of the logged-in user, both sides, newest first. The user
+// always comes from the token: a userId sent in the body is ignored, so no
+// one can read another user's bookings.
+const USER_BOOKING_SERVICE_POPULATE = {
+  path: "service",
+  populate: { path: "category", select: "categoryId name" },
+};
+const USER_BOOKING_PERSON_FIELDS = "name email profile_image ambassadorType";
+
+// One booking as the app's list item; role = this user's side of it.
+function toUserBookingItem(b, role) {
+  return {
+    bookingId: b._id,
+    role,
+    bookingType: b.serviceRequest ? "request" : "service",
+    service: b.service,
+    serviceRequest: b.serviceRequest,
+    otherUser: role === "customer" ? b.provider : b.customer,
+    contactPhone: b.contactPhone,
+    location_name: b.location_name,
+    location: b.location,
+    cancelledBy: b.cancelledBy,
+    cancelReason: b.cancelReason,
+    refundAmount: b.refundAmount,
+    cancellationFee: b.cancellationFee,
+    cancellationPolicy: b.cancellationPolicy,
+    serviceStartAt: b.serviceStartAt,
+    initialAmount: b.initialAmount,
+    quotationChanges: b.quotationChanges,
+    status: b.status,
+    amount: b.amount,
+    createdAt: b.createdAt,
+  };
+}
+
 exports.getUserBookings = async (req, res) => {
   try {
-    logPaymentFlow("getUserBookings:start", { body: req.body });
-    const { userId } = req.body; // ⭐ Body se userId
-
+    const userId = req.user?.id;
     if (!userId) {
-      logPaymentFlow("getUserBookings:missingUserId");
-      return res.status(400).json({ message: "userId is required" });
+      return res.status(401).json({ isSuccess: false, message: "Unauthorized" });
     }
+    logPaymentFlow("getUserBookings:start", { userId });
 
-    // Customer bookings
-    logPaymentFlow("getUserBookings:fetchingCustomerBookings", { userId });
-    const customerBookings = await Booking.find({ customer: userId })
-      .populate({
-        path: "service",
-        populate: {
-          path: "category",
-          select: "categoryId name",
-        },
-      })
-      // ⭐ Set instead of `service` for a Service Request booking — lets
-      // the app label this history entry "Request Booking".
-      .populate("serviceRequest", "title requestMode")
-      .populate("provider", "name email profile_image ambassadorType")
-      .sort({ createdAt: -1 });
-    logPaymentFlow("getUserBookings:customerBookingsFetched", {
-      userId,
-      count: customerBookings.length,
-    });
-    // Provider bookings
-    logPaymentFlow("getUserBookings:fetchingProviderBookings", { userId });
-    const providerBookings = await Booking.find({ provider: userId })
-      .populate({
-        path: "service",
-        populate: {
-          path: "category",
-          select: "categoryId name",
-        },
-      })
-      .populate("serviceRequest", "title requestMode")
-      .populate("customer", "name email profile_image ambassadorType")
-      .sort({ createdAt: -1 });
-    logPaymentFlow("getUserBookings:providerBookingsFetched", {
-      userId,
-      count: providerBookings.length,
-    });
+    const [customerBookings, providerBookings] = await Promise.all([
+      Booking.find({ customer: userId })
+        .populate(USER_BOOKING_SERVICE_POPULATE)
+        // Set instead of `service` for a Service Request booking.
+        .populate("serviceRequest", "title requestMode")
+        .populate("provider", USER_BOOKING_PERSON_FIELDS),
+      Booking.find({ provider: userId })
+        .populate(USER_BOOKING_SERVICE_POPULATE)
+        .populate("serviceRequest", "title requestMode")
+        .populate("customer", USER_BOOKING_PERSON_FIELDS),
+    ]);
 
-    const bookings = [];
-    logPaymentFlow("getUserBookings:buildingResponseList", {
+    const bookings = [
+      ...customerBookings.map((b) => toUserBookingItem(b, "customer")),
+      ...providerBookings.map((b) => toUserBookingItem(b, "provider")),
+    ].sort((a, b) => b.createdAt - a.createdAt);
+
+    logPaymentFlow("getUserBookings:successResponse", {
+      userId,
       customerCount: customerBookings.length,
       providerCount: providerBookings.length,
     });
 
-    customerBookings.forEach((b) => {
-      bookings.push({
-        bookingId: b._id,
-        role: "customer",
-        bookingType: b.serviceRequest ? "request" : "service",
-        service: b.service,
-        serviceRequest: b.serviceRequest,
-        otherUser: b.provider,
-        // ✅ ADD THESE
-        contactPhone: b.contactPhone,
-        location_name: b.location_name,
-        location: b.location,
-        // 🔴 ADD THESE
-        cancelledBy: b.cancelledBy,
-        cancelReason: b.cancelReason,
-        refundAmount: b.refundAmount,
-        cancellationFee: b.cancellationFee,
-        cancellationPolicy: b.cancellationPolicy,
-        serviceStartAt: b.serviceStartAt,
-        initialAmount: b.initialAmount,
-        quotationChanges: b.quotationChanges,
-
-        status: b.status,
-        amount: b.amount,
-        createdAt: b.createdAt,
-      });
-    });
-
-    providerBookings.forEach((b) => {
-      bookings.push({
-        bookingId: b._id,
-        role: "provider",
-        bookingType: b.serviceRequest ? "request" : "service",
-        service: b.service,
-        serviceRequest: b.serviceRequest,
-        otherUser: b.customer,
-        // ✅ ADD THESE
-        contactPhone: b.contactPhone,
-        location_name: b.location_name,
-        location: b.location,
-        // 🔴 ADD THESE
-        cancelledBy: b.cancelledBy,
-        cancelReason: b.cancelReason,
-        refundAmount: b.refundAmount,
-        cancellationFee: b.cancellationFee,
-        cancellationPolicy: b.cancellationPolicy,
-        serviceStartAt: b.serviceStartAt,
-        initialAmount: b.initialAmount,
-        quotationChanges: b.quotationChanges,
-        status: b.status,
-        amount: b.amount,
-        createdAt: b.createdAt,
-      });
-    });
-
-    bookings.sort((a, b) => b.createdAt - a.createdAt);
-    logPaymentFlow("getUserBookings:successResponse", {
-      userId,
-      totalCount: bookings.length,
-    });
-
-    return res.json({ isSuccess: true, bookings });
+    return res.json({ isSuccess: true, total: bookings.length, bookings });
   } catch (err) {
     logPaymentError("getUserBookings:error", err);
-    return res.status(500).json({ message: err.message });
+    return res.status(500).json({ isSuccess: false, message: err.message });
   }
 };
 

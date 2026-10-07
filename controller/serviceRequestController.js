@@ -673,8 +673,11 @@ exports.getServiceRequestById = async (req, res) => {
       myOffer = await ServiceRequestOffer.findOne({
         request: id,
         provider: userId,
-        status: { $in: ["pending", "payment_pending"] },
+        // accepted stays here too — the provider has offered (and been
+        // booked); the app keeps the request in their list and the button off.
+        status: { $in: ["pending", "payment_pending", "accepted"] },
       })
+        .sort({ createdAt: -1 })
         .select("amount currency note cancellationPolicy status createdAt")
         .lean();
     }
@@ -980,12 +983,15 @@ exports.submitOffer = async (req, res) => {
     const existing = await ServiceRequestOffer.findOne({
       request: id,
       provider: userId,
-      status: { $in: ["pending", "payment_pending"] },
+      status: { $in: ["pending", "payment_pending", "accepted"] },
     });
     if (existing) {
       return res.status(400).json({
         isSuccess: false,
-        message: "You already have an active offer on this request",
+        message:
+          existing.status === "accepted"
+            ? "Your offer on this request has already been accepted"
+            : "You already have an active offer on this request",
       });
     }
 

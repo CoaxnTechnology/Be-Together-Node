@@ -636,6 +636,46 @@ exports.getMyServiceRequests = async (req, res) => {
 // =====================================================================
 // GET SERVICE REQUEST BY ID
 // =====================================================================
+// The latest price change on a booking, in the shape the request detail
+// screen shows — null when the provider never proposed one.
+//   pending → awaiting_payment (customer accepted, paying the difference)
+//   → accepted (paid) | rejected | cancelled (booking cancelled first)
+function latestQuotationChange(booking) {
+  const changes = booking?.quotationChanges || [];
+  if (!changes.length) return null;
+  const q = changes[changes.length - 1];
+  return {
+    _id: q._id,
+    status: q.status,
+    previousAmount: q.previousAmount,
+    proposedAmount: q.proposedAmount,
+    reason: q.reason,
+    amountToPay: q.customerPayable || null, // set once the customer accepts
+    currency: q.currency,
+    createdAt: q.createdAt,
+    respondedAt: q.respondedAt,
+    paidAt: q.paidAt,
+  };
+}
+
+// Booking summary + its price-change state, for the request detail screen.
+function bookingWithQuotation(booking, extra = {}) {
+  if (!booking) return null;
+  const quotationChange = latestQuotationChange(booking);
+  return {
+    _id: booking._id,
+    status: booking.status,
+    amount: booking.amount,
+    initialAmount: booking.initialAmount ?? booking.amount,
+    createdAt: booking.createdAt,
+    ...extra,
+    hasQuotationChange: Boolean(quotationChange),
+    quotationChangeStatus: quotationChange?.status || null,
+    quotationChange,
+    quotationChanges: booking.quotationChanges || [],
+  };
+}
+
 exports.getServiceRequestById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -705,14 +745,32 @@ exports.getServiceRequestById = async (req, res) => {
     // update price / complete).
     let offerBooking = null;
     if (myOffer?.status === "accepted") {
-      offerBooking = await Booking.findOne({
+      offerBooking = bookingWithQuotation(
+        await Booking.findOne({
+          serviceRequest: id,
+          provider: userId,
+          status: { $in: ["booked", "started", "completed", "cancelled"] },
+        })
+          .sort({ createdAt: -1 })
+          .select("status amount initialAmount quotationChanges createdAt")
+          .lean(),
+      );
+    }
+
+    // Owner (customer) of a paid request: their booking(s) on it, each with
+    // the provider and any price change waiting for their answer.
+    let ownerBookings = null;
+    if (isOwner && ["paid_offer", "paid_fixed"].includes(request.requestMode)) {
+      const bookings = await Booking.find({
         serviceRequest: id,
-        provider: userId,
+        customer: userId,
         status: { $in: ["booked", "started", "completed", "cancelled"] },
       })
         .sort({ createdAt: -1 })
-        .select("status amount createdAt")
+        .select("status amount initialAmount quotationChanges createdAt provider")
+        .populate("provider", "name profile_image")
         .lean();
+      ownerBookings = bookings.map((b) => bookingWithQuotation(b, { provider: b.provider }));
     }
 
     // Owner only — how many providers have offered on this request. Withdrawn
@@ -739,7 +797,16 @@ exports.getServiceRequestById = async (req, res) => {
         // pending → "payment_pending" (customer paying) → "accepted" (paid)
         myOfferStatus: myOffer?.status || null,
         isOfferAccepted: myOffer?.status === "accepted",
-        offerBooking, // { _id, status, amount } once accepted, else null
+        offerBooking, // provider: their booking + price-change state, once accepted
+        // provider shortcut — the latest price change they sent on it
+        quotationChange: offerBooking?.quotationChange || null,
+        quotationChangeStatus: offerBooking?.quotationChangeStatus || null,
+        ...(ownerBookings && {
+          ownerBookings, // owner: their bookings on this request + price changes
+          hasPendingQuotationChange: ownerBookings.some(
+            (b) => b.quotationChangeStatus === "pending" || b.quotationChangeStatus === "awaiting_payment",
+          ),
+        }),
         hasJoined: Boolean(myBooking),
         myBooking,
         showBookingButton: !isOwner && !myOffer && !myBooking,

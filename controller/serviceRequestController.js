@@ -1180,6 +1180,35 @@ exports.listOffers = async (req, res) => {
     });
     const rankedOffers = withRating.map(({ _rankScore, ...rest }) => rest);
 
+    // An accepted (paid) offer is a booking now — attach it with its
+    // price-change state, so the customer sees a new quotation from the
+    // provider right here and can accept/reject it.
+    const accepted = rankedOffers.filter((o) => o.status === "accepted");
+    if (accepted.length) {
+      const bookings = await Booking.find({
+        serviceRequest: id,
+        customer: userId,
+        provider: { $in: accepted.map((o) => o.provider?._id || o.provider) },
+      })
+        .sort({ createdAt: -1 })
+        .select("status amount initialAmount quotationChanges createdAt provider")
+        .lean();
+      for (const offer of accepted) {
+        const providerId = String(offer.provider?._id || offer.provider);
+        const booking = bookingWithQuotation(
+          bookings.find((b) => String(b.provider) === providerId),
+        );
+        offer.booking = booking;
+        // Shortcuts on the offer itself for the offer card.
+        offer.bookingId = booking?._id || null;
+        offer.bookingStatus = booking?.status || null;
+        offer.currentAmount = booking?.amount ?? offer.amount;
+        offer.hasQuotationChange = Boolean(booking?.hasQuotationChange);
+        offer.quotationChangeStatus = booking?.quotationChangeStatus || null;
+        offer.quotationChange = booking?.quotationChange || null;
+      }
+    }
+
     return res.json({ isSuccess: true, data: rankedOffers });
   } catch (err) {
     console.error("listOffers error:", err);

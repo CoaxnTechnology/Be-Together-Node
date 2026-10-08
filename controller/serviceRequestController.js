@@ -637,6 +637,16 @@ exports.getMyServiceRequests = async (req, res) => {
 // =====================================================================
 // GET SERVICE REQUEST BY ID
 // =====================================================================
+// An accepted offer's status as the app shows it — it follows its booking
+// once that ends: booking cancelled → "cancelled", completed → "completed".
+// The stored offer stays "accepted"; this is only for responses.
+function displayOfferStatus(offerStatus, bookingStatus) {
+  if (offerStatus === "accepted" && ["cancelled", "completed"].includes(bookingStatus)) {
+    return bookingStatus;
+  }
+  return offerStatus;
+}
+
 // The latest price change on a booking, in the shape the request detail
 // screen shows — null when the provider never proposed one.
 //   pending → awaiting_payment (customer accepted, paying the difference)
@@ -794,6 +804,10 @@ exports.getServiceRequestById = async (req, res) => {
         await commissionForPendingChanges([providerBooking]),
       );
     }
+    // The customer accepted (and paid) — from then on the offer follows its
+    // booking: cancelled / completed.
+    const isOfferAccepted = myOffer?.status === "accepted";
+    if (myOffer) myOffer.status = displayOfferStatus(myOffer.status, offerBooking?.status);
 
     // Owner (customer) of a paid request: their booking(s) on it, each with
     // the provider and any price change waiting for their answer.
@@ -836,8 +850,9 @@ exports.getServiceRequestById = async (req, res) => {
         hasSubmittedOffer: Boolean(myOffer),
         myOffer,
         // pending → "payment_pending" (customer paying) → "accepted" (paid)
+        //   → "completed" | "cancelled" (follows the booking)
         myOfferStatus: myOffer?.status || null,
-        isOfferAccepted: myOffer?.status === "accepted",
+        isOfferAccepted,
         offerBooking, // provider: their booking + price-change state, once accepted
         // provider shortcut — the latest price change they sent on it
         quotationChange: offerBooking?.quotationChange || null,
@@ -1246,6 +1261,7 @@ exports.listOffers = async (req, res) => {
         // Shortcuts on the offer itself for the offer card.
         offer.bookingId = booking?._id || null;
         offer.bookingStatus = booking?.status || null;
+        offer.status = displayOfferStatus(offer.status, booking?.status);
         offer.currentAmount = booking?.amount ?? offer.amount;
         offer.hasQuotationChange = Boolean(booking?.hasQuotationChange);
         offer.quotationChangeStatus = booking?.quotationChangeStatus || null;
@@ -1277,6 +1293,9 @@ exports.getMyOffers = async (req, res) => {
     const filter = { provider: userId };
     if (["pending", "payment_pending", "accepted", "declined", "withdrawn"].includes(status)) {
       filter.status = status;
+    } else if (["completed", "cancelled"].includes(status)) {
+      // shown statuses of an accepted offer whose booking ended
+      filter.status = "accepted";
     }
 
     const offers = await ServiceRequestOffer.find(filter)
@@ -1300,17 +1319,27 @@ exports.getMyOffers = async (req, res) => {
           serviceRequest: offer.request?._id || offer.request,
           provider: userId,
         })
+          .sort({ createdAt: -1 })
           .select("status amount createdAt")
           .lean();
-        return { ...offer, booking: booking || null };
+        return {
+          ...offer,
+          status: displayOfferStatus(offer.status, booking?.status),
+          booking: booking || null,
+        };
       }),
     );
+
+    // ?status= matches what the app shows (accepted ≠ completed/cancelled)
+    const data = status
+      ? offersWithBooking.filter((o) => o.status === status || !filter.status)
+      : offersWithBooking;
 
     return res.json({
       isSuccess: true,
       message: "Your offers fetched successfully",
-      total: offersWithBooking.length,
-      data: offersWithBooking,
+      total: data.length,
+      data,
     });
   } catch (err) {
     console.error("getMyOffers error:", err);

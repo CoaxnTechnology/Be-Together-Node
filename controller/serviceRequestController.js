@@ -17,6 +17,7 @@ const {
 const requestPaymentController = require("./requestPaymentController");
 const { sendRequestBookedEmail } = require("../utils/email");
 const { ensurePayoutAccount } = require("../utils/stripeConnect");
+const { getCommissionPercents, splitCommission } = require("../utils/paymentHelpers");
 const {
   parseDateTime,
   formatDateTime,
@@ -640,17 +641,43 @@ exports.getMyServiceRequests = async (req, res) => {
 // screen shows — null when the provider never proposed one.
 //   pending → awaiting_payment (customer accepted, paying the difference)
 //   → accepted (paid) | rejected | cancelled (booking cancelled first)
-function latestQuotationChange(booking) {
+// commission = { providerCommissionPercent, customerCommissionPercent } —
+// the admin's current values, used to estimate a still-unanswered change.
+function latestQuotationChange(booking, commission) {
   const changes = booking?.quotationChanges || [];
   if (!changes.length) return null;
   const q = changes[changes.length - 1];
+
+  // Accepted / paid: the exact difference payment fixed at accept time.
+  // Still pending: an estimate with the same formula respondToQuotationChange
+  // uses (difference to the current price + customer commission), so the
+  // customer sees what Accept will cost before pressing it.
+  let amountToPay = q.customerPayable || null;
+  let differenceAmount = q.deltaAmount || null;
+  let isAmountEstimate = false;
+  if (q.status === "pending" && commission) {
+    const delta = Number((q.proposedAmount - (booking.amount ?? q.previousAmount)).toFixed(2));
+    if (delta > 0) {
+      const split = splitCommission(
+        delta,
+        commission.providerCommissionPercent,
+        commission.customerCommissionPercent,
+      );
+      amountToPay = split.customerPayable;
+      differenceAmount = delta;
+      isAmountEstimate = true;
+    }
+  }
+
   return {
     _id: q._id,
     status: q.status,
     previousAmount: q.previousAmount,
     proposedAmount: q.proposedAmount,
     reason: q.reason,
-    amountToPay: q.customerPayable || null, // set once the customer accepts
+    differenceAmount, // new price − current price
+    amountToPay, // difference + customer commission (what the customer pays)
+    isAmountEstimate, // true while pending — confirmed when they accept
     currency: q.currency,
     createdAt: q.createdAt,
     respondedAt: q.respondedAt,
@@ -658,10 +685,18 @@ function latestQuotationChange(booking) {
   };
 }
 
+// Loaded only when some booking has a change still waiting for an answer.
+async function commissionForPendingChanges(bookings) {
+  const hasPending = bookings.some((b) =>
+    (b?.quotationChanges || []).some((q) => q.status === "pending"),
+  );
+  return hasPending ? getCommissionPercents() : null;
+}
+
 // Booking summary + its price-change state, for the request detail screen.
-function bookingWithQuotation(booking, extra = {}) {
+function bookingWithQuotation(booking, extra = {}, commission = null) {
   if (!booking) return null;
-  const quotationChange = latestQuotationChange(booking);
+  const quotationChange = latestQuotationChange(booking, commission);
   return {
     _id: booking._id,
     status: booking.status,
@@ -745,15 +780,18 @@ exports.getServiceRequestById = async (req, res) => {
     // update price / complete).
     let offerBooking = null;
     if (myOffer?.status === "accepted") {
+      const providerBooking = await Booking.findOne({
+        serviceRequest: id,
+        provider: userId,
+        status: { $in: ["booked", "started", "completed", "cancelled"] },
+      })
+        .sort({ createdAt: -1 })
+        .select("status amount initialAmount quotationChanges createdAt")
+        .lean();
       offerBooking = bookingWithQuotation(
-        await Booking.findOne({
-          serviceRequest: id,
-          provider: userId,
-          status: { $in: ["booked", "started", "completed", "cancelled"] },
-        })
-          .sort({ createdAt: -1 })
-          .select("status amount initialAmount quotationChanges createdAt")
-          .lean(),
+        providerBooking,
+        {},
+        await commissionForPendingChanges([providerBooking]),
       );
     }
 
@@ -770,7 +808,10 @@ exports.getServiceRequestById = async (req, res) => {
         .select("status amount initialAmount quotationChanges createdAt provider")
         .populate("provider", "name profile_image")
         .lean();
-      ownerBookings = bookings.map((b) => bookingWithQuotation(b, { provider: b.provider }));
+      const commission = await commissionForPendingChanges(bookings);
+      ownerBookings = bookings.map((b) =>
+        bookingWithQuotation(b, { provider: b.provider }, commission),
+      );
     }
 
     // Owner only — how many providers have offered on this request. Withdrawn
@@ -1193,10 +1234,13 @@ exports.listOffers = async (req, res) => {
         .sort({ createdAt: -1 })
         .select("status amount initialAmount quotationChanges createdAt provider")
         .lean();
+      const commission = await commissionForPendingChanges(bookings);
       for (const offer of accepted) {
         const providerId = String(offer.provider?._id || offer.provider);
         const booking = bookingWithQuotation(
           bookings.find((b) => String(b.provider) === providerId),
+          {},
+          commission,
         );
         offer.booking = booking;
         // Shortcuts on the offer itself for the offer card.

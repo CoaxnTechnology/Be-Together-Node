@@ -19,6 +19,12 @@ const { sendRequestBookedEmail } = require("../utils/email");
 const { ensurePayoutAccount } = require("../utils/stripeConnect");
 const { getCommissionPercents, splitCommission } = require("../utils/paymentHelpers");
 const {
+  bookingStatus,
+  offerStatus,
+  loadRequestStatuses,
+  withRequestStatuses,
+} = require("../utils/requestStatus");
+const {
   parseDateTime,
   formatDateTime,
   timeAgo,
@@ -594,7 +600,10 @@ exports.getServiceRequests = async (req, res) => {
     });
 
     const start = (pageNum - 1) * limitNum;
-    const paginated = listCandidates.slice(start, start + limitNum).map(decorateRequest);
+    const paginated = await withRequestStatuses(
+      listCandidates.slice(start, start + limitNum).map(decorateRequest),
+      userId,
+    );
 
     return res.json({
       isSuccess: true,
@@ -620,7 +629,7 @@ exports.getMyServiceRequests = async (req, res) => {
       return res.status(401).json({ isSuccess: false, message: "Unauthorized" });
     }
 
-    const requests = await getRequestsByOwner(userId);
+    const requests = await withRequestStatuses(await getRequestsByOwner(userId), userId);
 
     return res.json({
       isSuccess: true,
@@ -714,6 +723,7 @@ function bookingWithQuotation(booking, extra = {}, commission = null) {
     initialAmount: booking.initialAmount ?? booking.amount,
     createdAt: booking.createdAt,
     ...extra,
+    myStatus: bookingStatus(booking),
     hasQuotationChange: Boolean(quotationChange),
     quotationChangeStatus: quotationChange?.status || null,
     quotationChange,
@@ -783,6 +793,7 @@ exports.getServiceRequestById = async (req, res) => {
       })
         .select("status createdAt")
         .lean();
+      if (myBooking) myBooking.myStatus = bookingStatus(myBooking);
     }
 
     // Provider's view of their own offer: has the customer accepted (and
@@ -840,11 +851,20 @@ exports.getServiceRequestById = async (req, res) => {
       ownerOfferCounts = { offersCount, pendingOffersCount };
     }
 
+    // The one status the app switches on (utils/requestStatus.js).
+    const statusOf = await loadRequestStatuses(
+      [request],
+      mongoose.Types.ObjectId.isValid(userId) ? userId : null,
+    );
+    const { role, myStatus } = statusOf(request);
+
     return res.json({
       isSuccess: true,
       message: "Service request fetched successfully",
       data: {
         ...decorateRequest(request),
+        role, // "customer" | "provider" | null (guest)
+        myStatus,
         isOwner,
         ...ownerOfferCounts,
         hasSubmittedOffer: Boolean(myOffer),
@@ -1234,7 +1254,10 @@ exports.listOffers = async (req, res) => {
       if (a._rankScore !== b._rankScore) return b._rankScore - a._rankScore;
       return a.amount - b.amount;
     });
-    const rankedOffers = withRating.map(({ _rankScore, ...rest }) => rest);
+    const rankedOffers = withRating.map(({ _rankScore, ...rest }) => ({
+      ...rest,
+      myStatus: offerStatus(rest, null, "customer"),
+    }));
 
     // An accepted (paid) offer is a booking now — attach it with its
     // price-change state, so the customer sees a new quotation from the
@@ -1262,6 +1285,7 @@ exports.listOffers = async (req, res) => {
         offer.bookingId = booking?._id || null;
         offer.bookingStatus = booking?.status || null;
         offer.status = displayOfferStatus(offer.status, booking?.status);
+        offer.myStatus = offerStatus({ status: "accepted" }, booking, "customer");
         offer.currentAmount = booking?.amount ?? offer.amount;
         offer.hasQuotationChange = Boolean(booking?.hasQuotationChange);
         offer.quotationChangeStatus = booking?.quotationChangeStatus || null;
@@ -1313,19 +1337,26 @@ exports.getMyOffers = async (req, res) => {
     const offersWithBooking = await Promise.all(
       offers.map(async (offer) => {
         if (offer.status !== "accepted") {
-          return { ...offer, booking: null };
+          return {
+            ...offer,
+            myStatus: offerStatus(offer, null, "provider"),
+            booking: null,
+          };
         }
         const booking = await Booking.findOne({
           serviceRequest: offer.request?._id || offer.request,
           provider: userId,
         })
           .sort({ createdAt: -1 })
-          .select("status amount createdAt")
+          .select("status amount createdAt quotationChanges")
           .lean();
         return {
           ...offer,
           status: displayOfferStatus(offer.status, booking?.status),
-          booking: booking || null,
+          myStatus: offerStatus(offer, booking, "provider"),
+          booking: booking
+            ? { _id: booking._id, status: booking.status, amount: booking.amount, createdAt: booking.createdAt }
+            : null,
         };
       }),
     );
@@ -1338,6 +1369,7 @@ exports.getMyOffers = async (req, res) => {
     return res.json({
       isSuccess: true,
       message: "Your offers fetched successfully",
+      role: "provider",
       total: data.length,
       data,
     });

@@ -43,6 +43,7 @@ const {
 // cron below forward those bookings there. This file handles normal Services.
 const requestPayment = require("./requestPaymentController");
 const { bookingSubject } = require("../utils/paymentHelpers");
+const { bookingStatus } = require("../utils/requestStatus");
 const logPaymentFlow = (step, data = {}) => {
   console.log(`[paymentController] ${step}`, data);
 };
@@ -1576,15 +1577,20 @@ const USER_BOOKING_SERVICE_POPULATE = {
 };
 const USER_BOOKING_PERSON_FIELDS = "name email profile_image ambassadorType";
 
-// One booking as the app's list item; role = this user's side of it.
-function toUserBookingItem(b, role) {
+// One booking as the app's list item; side = which field of the booking
+// this user is in. role = their real-world side — the same as side, except
+// a free request join: the owner needs the help (customer) and the joiner
+// gives it (provider), though the booking stores them the other way round.
+function toUserBookingItem(b, side) {
+  const isFreeJoin = ["free_single", "free_group"].includes(b.serviceRequest?.requestMode);
+  const role = isFreeJoin ? (side === "customer" ? "provider" : "customer") : side;
   return {
     bookingId: b._id,
     role,
     bookingType: b.serviceRequest ? "request" : "service",
     service: b.service,
     serviceRequest: b.serviceRequest,
-    otherUser: role === "customer" ? b.provider : b.customer,
+    otherUser: side === "customer" ? b.provider : b.customer,
     contactPhone: b.contactPhone,
     location_name: b.location_name,
     location: b.location,
@@ -1597,6 +1603,8 @@ function toUserBookingItem(b, role) {
     initialAmount: b.initialAmount,
     quotationChanges: b.quotationChanges,
     status: b.status,
+    // the one status the app switches on — same values as the request APIs
+    myStatus: bookingStatus(b),
     amount: b.amount,
     createdAt: b.createdAt,
   };

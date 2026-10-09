@@ -836,7 +836,7 @@ exports.getServiceRequestById = async (req, res) => {
       const [offersCount, pendingOffersCount] = await Promise.all([
         ServiceRequestOffer.countDocuments({
           request: id,
-          status: { $nin: ["withdrawn", "declined"] },
+          status: { $nin: ["withdrawn", "declined", "cancelled"] },
         }),
         ServiceRequestOffer.countDocuments({ request: id, status: "pending" }),
       ]);
@@ -1200,13 +1200,14 @@ exports.listOffers = async (req, res) => {
       });
     }
 
-    // ⭐ A withdrawn (provider cancelled it) or declined (customer rejected
-    // it / it lost out to an accepted one) offer is no longer actionable —
-    // hide both from the owner's list. The provider's own history (GET
-    // /my-offers) still keeps a full record either way.
+    // ⭐ A withdrawn (provider cancelled it), declined (customer rejected
+    // it / it lost out to an accepted one) or cancelled (its paid booking
+    // was cancelled) offer is no longer actionable — hide them from the
+    // owner's list. The cancelled booking itself stays in My Bookings, and
+    // the provider's own history (GET /my-offers) keeps a full record.
     const offers = await ServiceRequestOffer.find({
       request: id,
-      status: { $nin: ["withdrawn", "declined"] },
+      status: { $nin: ["withdrawn", "declined", "cancelled"] },
     })
       .populate("provider", "name profile_image")
       .lean();
@@ -1273,7 +1274,11 @@ exports.listOffers = async (req, res) => {
       }
     }
 
-    return res.json({ isSuccess: true, data: rankedOffers });
+    // Older offers whose booking was cancelled before the "cancelled" offer
+    // status existed are still stored as accepted — hide them too.
+    const visibleOffers = rankedOffers.filter((o) => o.status !== "cancelled");
+
+    return res.json({ isSuccess: true, data: visibleOffers });
   } catch (err) {
     console.error("listOffers error:", err);
     return res.status(500).json({ isSuccess: false, message: "Server error" });
@@ -1297,9 +1302,12 @@ exports.getMyOffers = async (req, res) => {
     const filter = { provider: userId };
     if (["pending", "payment_pending", "accepted", "declined", "withdrawn"].includes(status)) {
       filter.status = status;
-    } else if (["completed", "cancelled"].includes(status)) {
-      // shown statuses of an accepted offer whose booking ended
+    } else if (status === "completed") {
+      // an accepted offer whose booking was completed
       filter.status = "accepted";
+    } else if (status === "cancelled") {
+      // stored as cancelled — or, for older ones, accepted with a cancelled booking
+      filter.status = { $in: ["cancelled", "accepted"] };
     }
 
     const offers = await ServiceRequestOffer.find(filter)
@@ -1316,13 +1324,22 @@ exports.getMyOffers = async (req, res) => {
     // where the job actually stands, not just that the offer was accepted.
     const offersWithBooking = await Promise.all(
       offers.map(async (offer) => {
-        if (offer.status !== "accepted") {
+        // accepted / cancelled — there's a (paid) Booking behind it
+        if (!["accepted", "cancelled"].includes(offer.status)) {
           return { ...offer, booking: null };
         }
-        const booking = await Booking.findOne({
-          serviceRequest: offer.request?._id || offer.request,
-          provider: userId,
-        })
+        // This offer's own booking (via its payment) — after a cancellation
+        // the provider may offer again, so the latest booking on the request
+        // can belong to a newer offer.
+        const payment = await Payment.findOne({ serviceRequestOffer: offer._id, bookingId: { $ne: null } })
+          .sort({ createdAt: -1 })
+          .select("bookingId")
+          .lean();
+        const booking = await Booking.findOne(
+          payment?.bookingId
+            ? { _id: payment.bookingId }
+            : { serviceRequest: offer.request?._id || offer.request, provider: userId },
+        )
           .sort({ createdAt: -1 })
           .select("status amount createdAt")
           .lean();

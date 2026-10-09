@@ -135,6 +135,26 @@ async function releaseServiceRequestSlot(serviceRequestId, customerId) {
   }
 }
 
+// A paid offer's booking was cancelled — the offer becomes "cancelled":
+// it drops out of the customer's offer list, and the provider can send a
+// new offer on the (reopened) request and go through the flow again.
+// Never blocks the cancellation that already went through.
+async function cancelBookingOffer(booking, payment) {
+  try {
+    const requestId = booking.serviceRequest?._id || booking.serviceRequest;
+    const providerId = booking.provider?._id || booking.provider;
+    const filter = payment?.serviceRequestOffer
+      ? { _id: payment.serviceRequestOffer }
+      : { request: requestId, provider: providerId };
+    await ServiceRequestOffer.updateOne(
+      { ...filter, status: "accepted" },
+      { status: "cancelled" },
+    );
+  } catch (err) {
+    console.error("cancelBookingOffer error:", err);
+  }
+}
+
 // A pending checkout the customer never finished. Checks Stripe first — if
 // money is (or may be) moving, it is NOT released. Returns true if released.
 // keepSeat: the caller is retrying the same seat/offer, so the seat passes to
@@ -1423,6 +1443,7 @@ exports.cancelRequestBooking = async (req, res) => {
     booking.refundAmount = refundAmount;
     await booking.save();
     await releaseServiceRequestSlot(booking.serviceRequest, booking.customer._id);
+    await cancelBookingOffer(booking, payment);
 
     if (payment.usedWallet && payment.walletCoinsUsed > 0) {
       await releaseReservedWalletCoins(booking.customer._id, payment.walletCoinsUsed, {

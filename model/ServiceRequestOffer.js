@@ -36,7 +36,9 @@ const serviceRequestOfferSchema = new mongoose.Schema(
       // payment_pending = the customer pressed Accept and is on the Stripe
       // page (seat held); it only becomes "accepted" once they've paid, and
       // goes back to "pending" if they leave without paying.
-      enum: ["pending", "payment_pending", "accepted", "declined", "withdrawn"],
+      // cancelled = it was accepted and paid, then the booking was cancelled
+      // — the request reopens and the provider may send a new offer.
+      enum: ["pending", "payment_pending", "accepted", "declined", "withdrawn", "cancelled"],
       default: "pending",
     },
   },

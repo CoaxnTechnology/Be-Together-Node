@@ -107,6 +107,10 @@ promotionStatus: {
   default: null,
 },
 promotionCancelledAt: { type: Date, default: null },
+// ⭐ De-dupes the "expiring soon" reminder cron — reset to false whenever
+// the promotion (re)activates (purchase or renewal), set true once the
+// reminder has actually been sent, so it only ever fires once per cycle.
+promotionExpiryReminderSent: { type: Boolean, default: false },
 
 });
 

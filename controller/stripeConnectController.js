@@ -1,5 +1,6 @@
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const User = require("../model/User");
+const { createOnboardingLink } = require("../utils/stripeConnect");
 
 // Create a connected account for provider
 exports.createConnectedAccount = async (req, res) => {
@@ -96,17 +97,13 @@ exports.createOnboardingLink = async (req, res) => {
     if (!user || !user.stripeAccountId)
       return res.status(404).json({ message: "Stripe account not found" });
 
-    const accountLink = await stripe.accountLinks.create({
-      account: user.stripeAccountId,
-      refresh_url: "https://example.com/refresh",
-      return_url: "https://example.com/success",
-      type: "account_onboarding",
-    });
+    // refresh_url re-issues an expired link instead of a dead page.
+    const url = await createOnboardingLink(user.stripeAccountId);
 
     res.status(200).json({
       isSuccess: true,
       message: "Onboarding link created",
-      url: accountLink.url,
+      url,
     });
   } catch (err) {
     res.status(500).json({ message: err.message });

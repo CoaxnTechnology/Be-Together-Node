@@ -1,4 +1,5 @@
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
+const cron = require("node-cron");
 const endpointSecret = process.env.STRIPE_PAYMENT_WEBHOOK_SECRET;
 const ambassadorEndpointSecret = process.env.STRIPE_AMBASSADOR_WEBHOOK_SECRET;
 console.log("Stripe Webhook Secret:", endpointSecret);
@@ -17,6 +18,8 @@ const {
   sendServiceStartedNotification,
   sendServiceCompletedNotification,
   sendServiceCancelledNotification,
+  notifyPaymentFailed,
+  notifyWalletTransaction,
 } = require("../controller/notificationController"); // ✅ import it
 const CancellationSetting = require("../model/CancellationSetting");
 const User = require("../model/User");
@@ -35,6 +38,11 @@ const {
   processAmbassadorCommission,
   creditAmbassador,
 } = require("../services/ambassadorCommissionService");
+// Service Request bookings (paid_fixed / paid_offer / free joins) have their
+// own payment rules — /complete, /refund, the webhook and the reconciliation
+// cron below forward those bookings there. This file handles normal Services.
+const requestPayment = require("./requestPaymentController");
+const { bookingSubject } = require("../utils/paymentHelpers");
 const logPaymentFlow = (step, data = {}) => {
   console.log(`[paymentController] ${step}`, data);
 };
@@ -48,8 +56,11 @@ const logPaymentError = (step, err) => {
 // -----------------------------
 // 1️⃣ Create Stripe Checkout Session (Booking not yet confirmed)
 // -----------------------------
+console.log("🔖🔖🔖 paymentController.js FILE LOADED — FIX_MARKER: STALE_PAYMENT_RELEASE_V1 🔖🔖🔖");
+
 exports.bookService = async (req, res) => {
   try {
+    console.log("🔥🔥🔥 bookService HIT — running FIX_MARKER: STALE_PAYMENT_RELEASE_V1 🔥🔥🔥");
     logPaymentFlow("bookService:start", {
       body: req.body,
     });
@@ -187,14 +198,130 @@ exports.bookService = async (req, res) => {
     });
 
     if (existingPayment) {
-      logPaymentFlow("bookService:blockingDuplicatePayment", {
-        paymentId: existingPayment._id,
-      });
-      return res.status(400).json({
-        isSuccess: false,
-        message: "Payment already in progress. Please do not pay again.",
-        paymentId: existingPayment._id,
-      });
+      // ⭐ Don't trust the DB blindly — verify with Stripe whether the
+      // customer actually completed (or is mid-way through) the checkout,
+      // or whether they simply abandoned it and came back without paying.
+      let releasedStalePayment = false;
+
+      try {
+        if (existingPayment.status === "pending") {
+          let intentId = existingPayment.paymentIntentId;
+
+          // ⭐ Some older/edge-case records were saved without paymentIntentId
+          // (e.g. Stripe didn't return it synchronously at creation time).
+          // Recover it from the checkout session before giving up.
+          if (!intentId && existingPayment.checkoutSessionId) {
+            const existingSession = await stripe.checkout.sessions.retrieve(
+              existingPayment.checkoutSessionId,
+            );
+            intentId = existingSession.payment_intent || null;
+            logPaymentFlow("bookService:existingPaymentIntentRecoveredFromSession", {
+              paymentId: existingPayment._id,
+              checkoutSessionId: existingPayment.checkoutSessionId,
+              recoveredIntentId: intentId,
+              sessionStatus: existingSession.status,
+            });
+
+            // ⭐ No PaymentIntent exists on Stripe's side at all → the customer
+            // never got as far as submitting payment details, so no money can
+            // possibly be in flight. Safe to release regardless of whether the
+            // session itself still shows "open" (it stays "open" for up to 24h
+            // by default no matter what the customer actually did).
+            if (!intentId) {
+              if (existingSession.status === "open") {
+                try {
+                  await stripe.checkout.sessions.expire(
+                    existingPayment.checkoutSessionId,
+                  );
+                } catch (expireErr) {
+                  logPaymentError(
+                    "bookService:existingSessionExpireFailed",
+                    expireErr,
+                  );
+                }
+              }
+
+              existingPayment.status = "canceled";
+              existingPayment.failureReason =
+                "No payment was ever initiated for this checkout — released to allow rebooking";
+              await existingPayment.save();
+
+              if (existingPayment.walletCoinsUsed > 0) {
+                const staleWallet = await Wallet.findOne({ user: userId });
+                if (staleWallet) {
+                  staleWallet.reservedPoints = Math.max(
+                    0,
+                    (staleWallet.reservedPoints || 0) -
+                      existingPayment.walletCoinsUsed,
+                  );
+                  await staleWallet.save();
+                }
+              }
+
+              logPaymentFlow("bookService:staleExistingPaymentReleasedNoIntent", {
+                paymentId: existingPayment._id,
+                sessionStatus: existingSession.status,
+              });
+              releasedStalePayment = true;
+            }
+          }
+
+          if (!releasedStalePayment && intentId) {
+            const existingIntent = await stripe.paymentIntents.retrieve(intentId);
+            logPaymentFlow("bookService:existingPaymentIntentStatus", {
+              paymentId: existingPayment._id,
+              intentStatus: existingIntent.status,
+            });
+
+            // Customer never finished paying on the Stripe page → safe to release
+            if (
+              ["requires_payment_method", "requires_action", "canceled"].includes(
+                existingIntent.status,
+              )
+            ) {
+              existingPayment.status = "canceled";
+              existingPayment.paymentIntentId = intentId; // backfill for future checks
+              existingPayment.failureReason =
+                "Checkout abandoned by customer — released to allow rebooking";
+              await existingPayment.save();
+
+            if (existingPayment.walletCoinsUsed > 0) {
+              const staleWallet = await Wallet.findOne({ user: userId });
+              if (staleWallet) {
+                staleWallet.reservedPoints = Math.max(
+                  0,
+                  (staleWallet.reservedPoints || 0) -
+                    existingPayment.walletCoinsUsed,
+                );
+                await staleWallet.save();
+              }
+            }
+
+            logPaymentFlow("bookService:staleExistingPaymentReleased", {
+              paymentId: existingPayment._id,
+              intentStatus: existingIntent.status,
+            });
+            releasedStalePayment = true;
+            }
+          }
+        }
+      } catch (stripeCheckErr) {
+        logPaymentError(
+          "bookService:existingPaymentStripeCheckFailed",
+          stripeCheckErr,
+        );
+      }
+
+      if (!releasedStalePayment) {
+        logPaymentFlow("bookService:blockingDuplicatePayment", {
+          paymentId: existingPayment._id,
+        });
+        return res.status(400).json({
+          isSuccess: false,
+          message: "Payment already in progress. Please do not pay again.",
+          paymentId: existingPayment._id,
+        });
+      }
     }
 
     if (serviceDetails.isFree) {
@@ -284,6 +411,13 @@ exports.bookService = async (req, res) => {
               referralUserId: customer._id,
               points: 50,
             });
+            notifyWalletTransaction(
+              referralOwner,
+              "referral_booking_bonus",
+              50,
+            ).catch((err) =>
+              console.error("❌ notifyWalletTransaction error:", err.message),
+            );
           }
         }
       }
@@ -491,8 +625,9 @@ exports.bookService = async (req, res) => {
         },
       ],
       payment_intent_data: {
-        capture_method: "manual",
-
+        // ⭐ Automatic capture — customer is charged immediately at booking.
+        // Funds sit in the platform's Stripe balance until completeService()
+        // transfers the provider's share when the job is finished.
         metadata: {
           event: "service_booking",
 
@@ -647,9 +782,9 @@ exports.updateBookingStatus = async (req, res) => {
       metadata: paymentIntent.metadata,
     });
 
-    if (paymentIntent.status !== "requires_capture") {
-      console.log("❌ Payment NOT in requires_capture state.");
-      logPaymentFlow("updateBookingStatus:paymentNotRequiresCapture", {
+    if (paymentIntent.status !== "succeeded") {
+      console.log("❌ Payment NOT in succeeded state.");
+      logPaymentFlow("updateBookingStatus:paymentNotSucceeded", {
         status: paymentIntent.status,
       });
       return res.status(400).json({ message: "Payment not completed" });
@@ -832,6 +967,16 @@ exports.updateBookingStatus = async (req, res) => {
 // ------------------------------
 // 2) START SERVICE → GENERATE OTP → EMAIL
 // ------------------------------
+// Start / verify-otp / complete are the provider's own actions — only the
+// provider of that booking may call them (normal Service and Service Request).
+function isBookingProvider(req, booking) {
+  return String(req.user?.id || "") === String(booking.provider?._id || booking.provider);
+}
+const NOT_YOUR_BOOKING = {
+  isSuccess: false,
+  message: "Only the provider of this booking can do this",
+};
+
 exports.startService = async (req, res) => {
   try {
     logPaymentFlow("startService:start", { body: req.body });
@@ -840,7 +985,8 @@ exports.startService = async (req, res) => {
     const booking = await Booking.findById(bookingId)
       .populate("customer")
       .populate("provider")
-      .populate("service");
+      .populate("service")
+      .populate("serviceRequest", "title isFree location_name");
 
     logPaymentFlow("startService:bookingFetched", {
       bookingId: booking?._id,
@@ -855,7 +1001,34 @@ exports.startService = async (req, res) => {
       return res.status(404).json({ message: "Booking not found" });
     }
 
-    const { customer, provider, service } = booking;
+    if (!isBookingProvider(req, booking)) {
+      return res.status(403).json(NOT_YOUR_BOOKING);
+    }
+
+    // Only a confirmed, not-yet-started booking gets an OTP — never a
+    // cancelled, completed or already-started one.
+    if (booking.status !== "booked") {
+      return res.status(400).json({
+        isSuccess: false,
+        message: `Service can't be started — this booking is ${booking.status}`,
+      });
+    }
+
+    // Request booking: the price must be settled before the service starts —
+    // no start while a price change is unanswered or unpaid.
+    const openChange = booking.serviceRequest && requestPayment.openQuotationChange(booking);
+    if (openChange) {
+      return res.status(400).json({
+        isSuccess: false,
+        message:
+          openChange.status === "awaiting_payment"
+            ? "The customer hasn't paid the updated price yet"
+            : "A price change is still waiting for the customer's answer",
+      });
+    }
+
+    const { customer, provider } = booking;
+    const service = bookingSubject(booking);
     if (!customer || !customer.email) {
       logPaymentFlow("startService:customerEmailMissing", {
         bookingId,
@@ -882,12 +1055,16 @@ exports.startService = async (req, res) => {
       providerId: provider?._id,
       serviceId: service?._id,
     });
+    const otpCurrency =
+      booking.service?.currency ||
+      (await Payment.findById(booking.paymentId).select("currency"))?.currency;
     await sendServiceOtpEmail(customer.email, {
       customerName: customer.name,
       providerName: provider.name,
       serviceName: service.title,
       bookingId: booking._id,
       amount: booking.amount,
+      currency: otpCurrency,
       otp,
     });
     logPaymentFlow("startService:otpEmailSent", { bookingId });
@@ -915,7 +1092,8 @@ exports.verifyServiceOtp = async (req, res) => {
     const booking = await Booking.findById(bookingId)
       .populate("customer")
       .populate("provider")
-      .populate("service");
+      .populate("service")
+      .populate("serviceRequest", "title isFree location_name");
 
     logPaymentFlow("verifyServiceOtp:bookingFetched", {
       bookingId: booking?._id,
@@ -926,6 +1104,32 @@ exports.verifyServiceOtp = async (req, res) => {
     if (!booking) {
       logPaymentFlow("verifyServiceOtp:bookingNotFound", { bookingId });
       return res.status(404).json({ message: "Booking not found" });
+    }
+
+    if (!isBookingProvider(req, booking)) {
+      return res.status(403).json(NOT_YOUR_BOOKING);
+    }
+
+    // Same rule as startService — a cancelled/completed booking must never
+    // flip to "started" through an old OTP.
+    if (booking.status !== "booked") {
+      return res.status(400).json({
+        isSuccess: false,
+        message: `Service can't be started — this booking is ${booking.status}`,
+      });
+    }
+
+    // Request booking: the price must be settled before the service starts —
+    // no start while a price change is unanswered or unpaid.
+    const openChange = booking.serviceRequest && requestPayment.openQuotationChange(booking);
+    if (openChange) {
+      return res.status(400).json({
+        isSuccess: false,
+        message:
+          openChange.status === "awaiting_payment"
+            ? "The customer hasn't paid the updated price yet"
+            : "A price change is still waiting for the customer's answer",
+      });
     }
 
     if (booking.otpExpiry < new Date()) {
@@ -960,7 +1164,7 @@ exports.verifyServiceOtp = async (req, res) => {
     await sendServiceStartedNotification(
       booking.customer,
       booking.provider,
-      booking.service,
+      bookingSubject(booking),
       booking,
     );
     logPaymentFlow("verifyServiceOtp:startedNotificationSent", { bookingId });
@@ -983,6 +1187,22 @@ exports.completeService = async (req, res) => {
   try {
     logPaymentFlow("completeService:start", { body: req.body });
     const { bookingId } = req.body;
+
+    const bookingKind = await Booking.findById(bookingId)
+      .select("serviceRequest provider")
+      .lean();
+    if (!bookingKind) {
+      return res.status(404).json({ message: "Booking not found" });
+    }
+    if (!isBookingProvider(req, bookingKind)) {
+      return res.status(403).json(NOT_YOUR_BOOKING);
+    }
+
+    // Service Request bookings settle with their own rules (one transfer for
+    // original + paid price changes).
+    if (bookingKind.serviceRequest) {
+      return requestPayment.completeRequestBooking(req, res);
+    }
 
     logPaymentFlow("completeService:fetchingBooking", { bookingId });
     const booking = await Booking.findById(bookingId)
@@ -1014,14 +1234,14 @@ exports.completeService = async (req, res) => {
 
     const customer = booking.customer;
     const provider = booking.provider;
-    const service = booking.service;
+    const service = bookingSubject(booking);
 
     // Free service check first
-    if (booking.amount === 0 || booking.service.isFree) {
+    if (booking.amount === 0 || service?.isFree) {
       logPaymentFlow("completeService:freeServiceBranch", {
         bookingId,
         amount: booking.amount,
-        isFree: booking.service.isFree,
+        isFree: service?.isFree,
       });
       booking.status = "completed";
       await booking.save();
@@ -1234,7 +1454,7 @@ exports.completeService = async (req, res) => {
 
           type: "wallet_spent",
 
-          service: booking.service._id,
+          service: booking.service?._id || null,
 
           note: "Wallet used during booking",
         });
@@ -1242,6 +1462,13 @@ exports.completeService = async (req, res) => {
           customerId: booking.customer._id,
           points: -payment.walletCoinsUsed,
         });
+        notifyWalletTransaction(
+          booking.customer,
+          "wallet_spent",
+          payment.walletCoinsUsed,
+        ).catch((err) =>
+          console.error("❌ notifyWalletTransaction error:", err.message),
+        );
       }
     } else {
       logPaymentFlow("completeService:walletDeductionSkipped", {
@@ -1307,7 +1534,10 @@ exports.completeService = async (req, res) => {
       bookingId,
       customerId: customer?._id,
     });
-    await sendServiceCompletedEmail(customer, provider, service, booking);
+    await sendServiceCompletedEmail(customer, provider, service, booking, {
+      currency: payment.currency,
+      providerAmount: payment.providerAmount,
+    });
     logPaymentFlow("completeService:paidCompletionEmailSent", { bookingId });
 
     // ⬇ Send Notification (customer + provider)
@@ -1336,111 +1566,80 @@ exports.completeService = async (req, res) => {
   }
 };
 
-// GET USER BOOKINGS (Customer & Provider)
+// GET USER BOOKINGS (Customer & Provider) — "My Bookings"
+// Every booking of the logged-in user, both sides, newest first. The user
+// always comes from the token: a userId sent in the body is ignored, so no
+// one can read another user's bookings.
+const USER_BOOKING_SERVICE_POPULATE = {
+  path: "service",
+  populate: { path: "category", select: "categoryId name" },
+};
+const USER_BOOKING_PERSON_FIELDS = "name email profile_image ambassadorType";
+
+// One booking as the app's list item; role = this user's side of it.
+function toUserBookingItem(b, role) {
+  return {
+    bookingId: b._id,
+    role,
+    bookingType: b.serviceRequest ? "request" : "service",
+    service: b.service,
+    serviceRequest: b.serviceRequest,
+    otherUser: role === "customer" ? b.provider : b.customer,
+    contactPhone: b.contactPhone,
+    location_name: b.location_name,
+    location: b.location,
+    cancelledBy: b.cancelledBy,
+    cancelReason: b.cancelReason,
+    refundAmount: b.refundAmount,
+    cancellationFee: b.cancellationFee,
+    cancellationPolicy: b.cancellationPolicy,
+    serviceStartAt: b.serviceStartAt,
+    initialAmount: b.initialAmount,
+    quotationChanges: b.quotationChanges,
+    status: b.status,
+    amount: b.amount,
+    createdAt: b.createdAt,
+  };
+}
+
 exports.getUserBookings = async (req, res) => {
   try {
-    logPaymentFlow("getUserBookings:start", { body: req.body });
-    const { userId } = req.body; // ⭐ Body se userId
-
+    const userId = req.user?.id;
     if (!userId) {
-      logPaymentFlow("getUserBookings:missingUserId");
-      return res.status(400).json({ message: "userId is required" });
+      return res.status(401).json({ isSuccess: false, message: "Unauthorized" });
     }
+    logPaymentFlow("getUserBookings:start", { userId });
 
-    // Customer bookings
-    logPaymentFlow("getUserBookings:fetchingCustomerBookings", { userId });
-    const customerBookings = await Booking.find({ customer: userId })
-      .populate({
-        path: "service",
-        populate: {
-          path: "category",
-          select: "categoryId name",
-        },
-      })
-      .populate("provider", "name email profile_image ambassadorType")
-      .sort({ createdAt: -1 });
-    logPaymentFlow("getUserBookings:customerBookingsFetched", {
-      userId,
-      count: customerBookings.length,
-    });
-    // Provider bookings
-    logPaymentFlow("getUserBookings:fetchingProviderBookings", { userId });
-    const providerBookings = await Booking.find({ provider: userId })
-      .populate({
-        path: "service",
-        populate: {
-          path: "category",
-          select: "categoryId name",
-        },
-      })
-      .populate("customer", "name email profile_image ambassadorType")
-      .sort({ createdAt: -1 });
-    logPaymentFlow("getUserBookings:providerBookingsFetched", {
-      userId,
-      count: providerBookings.length,
-    });
+    const [customerBookings, providerBookings] = await Promise.all([
+      Booking.find({ customer: userId })
+        .populate(USER_BOOKING_SERVICE_POPULATE)
+        // Set instead of `service` for a Service Request booking.
+        .populate("serviceRequest", "title requestMode")
+        .populate("provider", USER_BOOKING_PERSON_FIELDS),
+      Booking.find({ provider: userId })
+        .populate(USER_BOOKING_SERVICE_POPULATE)
+        .populate("serviceRequest", "title requestMode")
+        .populate("customer", USER_BOOKING_PERSON_FIELDS),
+    ]);
 
-    const bookings = [];
-    logPaymentFlow("getUserBookings:buildingResponseList", {
+    const bookings = [
+      ...customerBookings.map((b) => toUserBookingItem(b, "customer")),
+      ...providerBookings.map((b) => toUserBookingItem(b, "provider")),
+    ].sort((a, b) => b.createdAt - a.createdAt);
+
+    logPaymentFlow("getUserBookings:successResponse", {
+      userId,
       customerCount: customerBookings.length,
       providerCount: providerBookings.length,
     });
 
-    customerBookings.forEach((b) => {
-      bookings.push({
-        bookingId: b._id,
-        role: "customer",
-        service: b.service,
-        otherUser: b.provider,
-        // ✅ ADD THESE
-        contactPhone: b.contactPhone,
-        location_name: b.location_name,
-        location: b.location,
-        // 🔴 ADD THESE
-        cancelledBy: b.cancelledBy,
-        cancelReason: b.cancelReason,
-        refundAmount: b.refundAmount,
-        cancellationFee: b.cancellationFee,
-
-        status: b.status,
-        amount: b.amount,
-        createdAt: b.createdAt,
-      });
-    });
-
-    providerBookings.forEach((b) => {
-      bookings.push({
-        bookingId: b._id,
-        role: "provider",
-        service: b.service,
-        otherUser: b.customer,
-        // ✅ ADD THESE
-        contactPhone: b.contactPhone,
-        location_name: b.location_name,
-        location: b.location,
-        // 🔴 ADD THESE
-        cancelledBy: b.cancelledBy,
-        cancelReason: b.cancelReason,
-        refundAmount: b.refundAmount,
-        cancellationFee: b.cancellationFee,
-        status: b.status,
-        amount: b.amount,
-        createdAt: b.createdAt,
-      });
-    });
-
-    bookings.sort((a, b) => b.createdAt - a.createdAt);
-    logPaymentFlow("getUserBookings:successResponse", {
-      userId,
-      totalCount: bookings.length,
-    });
-
-    return res.json({ isSuccess: true, bookings });
+    return res.json({ isSuccess: true, total: bookings.length, bookings });
   } catch (err) {
     logPaymentError("getUserBookings:error", err);
-    return res.status(500).json({ message: err.message });
+    return res.status(500).json({ isSuccess: false, message: err.message });
   }
 };
+
 // ------------------------------
 // CANCEL BOOKING + PARTIAL REFUND
 // ------------------------------
@@ -1453,12 +1652,46 @@ exports.refundBooking = async (req, res) => {
   logPaymentFlow("refundBooking:start", { body: req.body });
 
   try {
-    const { bookingId, cancelledBy, reason } = req.body;
+    const { bookingId } = req.body;
+
+    const bookingKind = await Booking.findById(bookingId)
+      .select("serviceRequest customer provider")
+      .lean();
+    if (!bookingKind) {
+      return res.status(404).json({ message: "Booking not found" });
+    }
+
+    // Only the booking's own customer or provider may cancel it, and who
+    // cancelled comes from the token — never from the body (a customer
+    // sending cancelledBy:"provider" would otherwise dodge the fee). The
+    // admin report "refund" action is the one internal caller allowed to
+    // act on any booking (it sets req.adminAction, never reachable via HTTP).
+    if (!req.adminAction) {
+      const callerId = String(req.user?.id || "");
+      if (callerId === String(bookingKind.customer)) {
+        req.body.cancelledBy = "customer";
+      } else if (callerId === String(bookingKind.provider)) {
+        req.body.cancelledBy = "provider";
+      } else {
+        return res.status(403).json({
+          isSuccess: false,
+          message: "You can only cancel your own booking",
+        });
+      }
+    }
+
+    const { cancelledBy, reason } = req.body;
     logPaymentFlow("refundBooking:requestParsed", {
       bookingId,
       cancelledBy,
       hasReason: Boolean(reason),
     });
+
+    // Service Request bookings follow the offer's cancellation policy and
+    // can be paid in several charges — handled separately.
+    if (bookingKind.serviceRequest) {
+      return requestPayment.cancelRequestBooking(req, res);
+    }
 
     // ---------------------------------------------------------
     // 1️⃣ FETCH BOOKING
@@ -1509,9 +1742,7 @@ exports.refundBooking = async (req, res) => {
         isSuccess: false,
         message: "Service already started. Cancellation not allowed.",
       });
-    }
-
-    if (booking.status !== "booked") {
+    } else if (booking.status !== "booked") {
       logPaymentFlow("refundBooking:blockedNonBookedStatus", {
         bookingId,
         status: booking.status,
@@ -1568,9 +1799,10 @@ exports.refundBooking = async (req, res) => {
         const emailResponse = await sendServiceCancelledEmail(
           booking.customer,
           booking.provider,
-          booking.service,
+          bookingSubject(booking),
           booking,
           reason,
+          { cancelledBy: booking.cancelledBy },
         );
 
         console.log("✅ [EMAIL] Email function executed");
@@ -1588,7 +1820,7 @@ exports.refundBooking = async (req, res) => {
         await sendServiceCancelledNotification(
           booking.customer,
           booking.provider,
-          booking.service,
+          bookingSubject(booking),
           booking,
           reason || "",
         );
@@ -1772,8 +2004,8 @@ exports.refundBooking = async (req, res) => {
 
         bookingId: booking._id.toString(),
 
-        serviceId: booking.service._id.toString(),
-        serviceTitle: booking.service.title,
+        serviceId: booking.service?._id?.toString() || "N/A",
+        serviceTitle: booking.service?.title || "N/A",
 
         customerId: booking.customer._id.toString(),
         customerName: booking.customer.name,
@@ -1845,9 +2077,16 @@ exports.refundBooking = async (req, res) => {
           points: payment.walletCoinsUsed,
           transactionType: "credit",
           type: "wallet_refund",
-          service: booking.service._id,
+          service: booking.service?._id || null,
           note: "Wallet coins released after cancellation",
         });
+        notifyWalletTransaction(
+          booking.customer,
+          "wallet_refund",
+          payment.walletCoinsUsed,
+        ).catch((err) =>
+          console.error("❌ notifyWalletTransaction error:", err.message),
+        );
       }
     }
     // ✅ UPDATE PAYMENT
@@ -1908,9 +2147,15 @@ exports.refundBooking = async (req, res) => {
       const emailResponse = await sendServiceCancelledEmail(
         booking.customer,
         booking.provider,
-        booking.service,
+        bookingSubject(booking),
         booking,
         reason,
+        {
+          cancelledBy: booking.cancelledBy,
+          refundAmount,
+          cancellationFee,
+          currency: payment.currency,
+        },
       );
 
       console.log("✅ [EMAIL] Email function executed");
@@ -1930,7 +2175,7 @@ exports.refundBooking = async (req, res) => {
     await sendServiceCancelledNotification(
       booking.customer,
       booking.provider,
-      booking.service,
+      bookingSubject(booking),
       booking,
       reason,
     );
@@ -1958,7 +2203,7 @@ exports.refundBooking = async (req, res) => {
     return res.status(500).json({ message: err.message });
   }
 };
-//new code add
+
 exports.bookingPreview = async (req, res) => {
   try {
     logPaymentFlow("bookingPreview:start", { body: req.body });
@@ -2190,6 +2435,11 @@ exports.stripeWebhook = async (req, res) => {
 
         console.log("Checkout Completed :", session.id);
 
+        // Service Request booking / price-difference payment
+        if (await requestPayment.handleCheckoutSessionCompleted(session)) {
+          break;
+        }
+
         const payment = await Payment.findOne({
           checkoutSessionId: session.id,
         });
@@ -2222,8 +2472,8 @@ exports.stripeWebhook = async (req, res) => {
         const paymentIntent = await stripe.paymentIntents.retrieve(
           session.payment_intent,
         );
-        if (paymentIntent.status !== "requires_capture") {
-          console.log("Payment not authorized");
+        if (paymentIntent.status !== "succeeded") {
+          console.log("Payment not completed");
           break;
         }
 
@@ -2300,6 +2550,11 @@ exports.stripeWebhook = async (req, res) => {
         break;
       }
 
+      case "checkout.session.expired": {
+        await requestPayment.handleCheckoutSessionExpired(event.data.object);
+        break;
+      }
+
       case "charge.refunded": {
         console.log("Refund Success");
 
@@ -2309,7 +2564,9 @@ exports.stripeWebhook = async (req, res) => {
           paymentIntentId: charge.payment_intent,
         });
 
-        if (payment) {
+        // Request bookings record their (possibly multi-charge) refunds
+        // themselves — don't overwrite those totals with one charge's view.
+        if (payment && !payment.serviceRequest) {
           payment.status = "refunded";
           payment.refundId = charge.refunds?.data?.[0]?.id || null;
 
@@ -2330,17 +2587,73 @@ exports.stripeWebhook = async (req, res) => {
 
         const paymentIntent = event.data.object;
 
-        const payment = await Payment.findOne({
-          paymentIntentId: paymentIntent.id,
-        });
+        // ⭐ FIX: our Payment.paymentIntentId is still null at this point for
+        // a Checkout-based booking — it's only ever filled in once
+        // checkout.session.completed runs (a *successful* payment), so
+        // matching on paymentIntentId here almost never finds the record.
+        // Look it up via the Checkout Session instead, the same correlation
+        // key every other handler in this file already relies on.
+        let payment = null;
+        try {
+          const sessions = await stripe.checkout.sessions.list({
+            payment_intent: paymentIntent.id,
+            limit: 1,
+          });
+          const session = sessions.data[0];
+          if (session) {
+            payment = await Payment.findOne({ checkoutSessionId: session.id })
+              .populate("user")
+              .populate("service", "title")
+              .populate("serviceRequest", "title");
+          }
+        } catch (lookupErr) {
+          console.error(
+            "❌ payment_intent.payment_failed session lookup error:",
+            lookupErr.message,
+          );
+        }
 
         if (payment) {
           payment.status = "failed";
+          payment.paymentIntentId = payment.paymentIntentId || paymentIntent.id;
           payment.failureReason =
             paymentIntent.last_payment_error?.message || null;
           await payment.save();
 
           console.log("Payment marked as failed");
+
+          const itemTitle =
+            payment.service?.title || payment.serviceRequest?.title || "your booking";
+          notifyPaymentFailed(
+            payment.user,
+            itemTitle,
+            payment.amount,
+            payment.currency,
+            payment.failureReason,
+          ).catch((err) =>
+            console.error("❌ notifyPaymentFailed error:", err.message),
+          );
+        } else {
+          // ⭐ Fallback — even if we couldn't correlate this PaymentIntent to
+          // a DB record, it carries the same metadata we set at Checkout
+          // creation (customerId, serviceTitle, totalPaidByCustomer, …), so
+          // the customer still gets notified instead of hearing nothing.
+          console.log(
+            "⚠️ No Payment record matched — notifying from PaymentIntent metadata instead",
+          );
+          const meta = paymentIntent.metadata || {};
+          if (meta.customerId) {
+            const customer = await User.findById(meta.customerId);
+            notifyPaymentFailed(
+              customer,
+              meta.serviceTitle || "your booking",
+              meta.totalPaidByCustomer ? Number(meta.totalPaidByCustomer) : null,
+              meta.currency ? meta.currency.toUpperCase() : null,
+              paymentIntent.last_payment_error?.message || null,
+            ).catch((err) =>
+              console.error("❌ notifyPaymentFailed error:", err.message),
+            );
+          }
         }
 
         break;
@@ -2462,4 +2775,228 @@ exports.stripeWebhook = async (req, res) => {
       message: err.message,
     });
   }
+
 };
+
+// =====================================================================
+// PAYMENT RECONCILIATION — safety net for "customer was charged but no
+// booking was ever created" (e.g. a missed/delayed Stripe webhook).
+//
+// Since bookService now charges the customer immediately (automatic
+// capture), a lost webhook is no longer harmless — real money has already
+// moved. This runs on a schedule and, for any Payment stuck at
+// status:"pending" for too long:
+//   1. Asks Stripe directly whether the PaymentIntent actually succeeded.
+//      If not, leaves it alone — still genuinely pending/abandoned.
+//   2. If succeeded and a Booking already exists, just repairs the
+//      Payment record (self-heals a partial write).
+//   3. If succeeded and no Booking exists, RETRIES the exact booking
+//      creation the webhook would have done.
+//   4. If that retry can't succeed (customer/provider/service no longer
+//      valid), automatically refunds the customer and marks the Payment
+//      so the outcome is fully traceable from the DB — never leaves a
+//      charge unexplained.
+//
+// This is intentionally a standalone function — it does not touch or
+// reuse the webhook/updateBookingStatus code paths, so it carries zero
+// risk of regressing the existing, already-working booking flow.
+// =====================================================================
+
+async function attemptBookingRecoveryForPayment(payment) {
+  const tag = `[PaymentReconciliation:${payment._id}]`;
+
+  // Service Request payments have their own recovery (seat/offer release).
+  if (payment.serviceRequest) {
+    return requestPayment.recoverPendingRequestPayment(payment);
+  }
+
+  try {
+    if (payment.status !== "pending") return;
+    if (!payment.checkoutSessionId) {
+      console.log(`${tag} No checkoutSessionId on record — skipping`);
+      return;
+    }
+
+    const session = await stripe.checkout.sessions.retrieve(
+      payment.checkoutSessionId,
+    );
+    const intentId = session.payment_intent;
+
+    if (!intentId) {
+      console.log(
+        `${tag} Stripe session has no PaymentIntent yet — still genuinely pending`,
+      );
+      return;
+    }
+
+    const paymentIntent = await stripe.paymentIntents.retrieve(intentId);
+
+    if (paymentIntent.status !== "succeeded") {
+      console.log(
+        `${tag} PaymentIntent status is "${paymentIntent.status}", not succeeded — leaving as-is`,
+      );
+      return;
+    }
+
+    console.log(
+      `🚨 ${tag} Customer WAS charged (PaymentIntent succeeded) but Payment is still "pending" — attempting recovery`,
+    );
+
+    // Self-heal: a Booking already exists (e.g. the webhook created it but
+    // the follow-up Payment update failed) — just fix the Payment record.
+    const existingBooking = await Booking.findOne({ paymentId: payment._id });
+    if (existingBooking) {
+      payment.status = "held";
+      payment.bookingId = existingBooking._id;
+      payment.paymentIntentId = intentId;
+      payment.heldAt = payment.heldAt || new Date();
+      await payment.save();
+      console.log(`✅ ${tag} Booking already existed — Payment record repaired`);
+      return;
+    }
+
+    // Re-check right before writing — the real webhook may have resolved
+    // this in the time it took to reach this point.
+    const freshPayment = await Payment.findById(payment._id);
+    if (!freshPayment || freshPayment.status !== "pending") {
+      console.log(
+        `${tag} Payment status changed since this check started — skipping (likely resolved already)`,
+      );
+      return;
+    }
+
+    // Retry booking creation with the same metadata the webhook would use.
+    const { customerId, providerId, serviceId } = paymentIntent.metadata || {};
+    const [customer, provider, service] = await Promise.all([
+      User.findById(customerId),
+      User.findById(providerId),
+      Service.findById(serviceId),
+    ]);
+
+    if (!customer || !provider || !service) {
+      console.error(
+        `🚨 ${tag} Cannot recreate booking — customer/provider/service missing ` +
+          `(customer:${!!customer} provider:${!!provider} service:${!!service}). Refunding customer instead.`,
+      );
+
+      const refund = await stripe.refunds.create({
+        payment_intent: intentId,
+        reason: "requested_by_customer",
+        metadata: {
+          event: "reconciliation_auto_refund",
+          paymentId: payment._id.toString(),
+        },
+      });
+
+      // Release any wallet coins this booking had reserved — they were
+      // never actually spent (spend only happens in completeService), so
+      // a refund must free them back to the customer, same as refundBooking.
+      if (freshPayment.usedWallet && freshPayment.walletCoinsUsed > 0) {
+        const staleWallet = await Wallet.findOne({ user: freshPayment.user });
+        if (staleWallet) {
+          staleWallet.reservedPoints = Math.max(
+            0,
+            (staleWallet.reservedPoints || 0) - freshPayment.walletCoinsUsed,
+          );
+          await staleWallet.save();
+
+          await WalletHistory.create({
+            user: freshPayment.user,
+            points: freshPayment.walletCoinsUsed,
+            transactionType: "credit",
+            type: "wallet_refund",
+            service: freshPayment.service,
+            note: "Wallet coins released — reconciliation auto-refund",
+          });
+          notifyWalletTransaction(
+            customer,
+            "wallet_refund",
+            freshPayment.walletCoinsUsed,
+          ).catch((err) =>
+            console.error("❌ notifyWalletTransaction error:", err.message),
+          );
+        }
+      }
+
+      freshPayment.status = "refunded";
+      freshPayment.refundId = refund.id;
+      freshPayment.refundStatus = refund.status;
+      freshPayment.refundReason =
+        "Auto-refunded by reconciliation job — booking could not be recreated (customer/provider/service no longer valid)";
+      freshPayment.refundedAt = new Date();
+      freshPayment.refundedAmount = freshPayment.amount;
+      await freshPayment.save();
+
+      console.error(
+        `🚨 ${tag} Auto-refund issued: ${refund.id}. NEEDS MANUAL FOLLOW-UP WITH CUSTOMER.`,
+      );
+      return;
+    }
+
+    const booking = await Booking.create({
+      customer: customerId,
+      provider: providerId,
+      service: serviceId,
+      amount: freshPayment.originalAmount,
+      currency: freshPayment.currency,
+      paymentId: freshPayment._id,
+      status: "booked",
+      contactPhone: freshPayment.contactPhone,
+      location_name: freshPayment.location_name,
+      ...(freshPayment.location && { location: freshPayment.location }),
+    });
+
+    freshPayment.status = "held";
+    freshPayment.bookingId = booking._id;
+    freshPayment.paymentIntentId = intentId;
+    freshPayment.heldAt = new Date();
+    await freshPayment.save();
+
+    console.log(`✅ ${tag} Booking recovered successfully: ${booking._id}`);
+
+    sendServiceBookedEmail(customer, service, provider, booking, "customer").catch(
+      (err) => console.log(`${tag} Customer email error:`, err),
+    );
+    sendServiceBookedEmail(customer, service, provider, booking, "provider").catch(
+      (err) => console.log(`${tag} Provider email error:`, err),
+    );
+    sendBookingNotification(customer, provider, service, booking).catch((err) =>
+      console.log(`${tag} Notification error:`, err),
+    );
+  } catch (err) {
+    console.error(`🚨 ${tag} error:`, err.message);
+  }
+}
+
+// Every 10 minutes: look for payments Stripe charged but that never turned
+// into a booking in our DB. 15-minute cutoff gives normal webhook delivery
+// a fair chance to resolve things first; 3-day floor avoids re-scanning
+// very old, long-abandoned attempts forever.
+cron.schedule("*/10 * * * *", async () => {
+  try {
+    const cutoff = new Date(Date.now() - 15 * 60 * 1000);
+    const oldestToCheck = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+
+    const stuckPayments = await Payment.find({
+      status: "pending",
+      createdAt: { $lte: cutoff, $gte: oldestToCheck },
+    });
+
+    if (!stuckPayments.length) return;
+
+    console.log(
+      `🔍 [PaymentReconciliation] Checking ${stuckPayments.length} stuck "pending" payment(s)...`,
+    );
+
+    for (const payment of stuckPayments) {
+      await attemptBookingRecoveryForPayment(payment);
+    }
+  } catch (err) {
+    console.error("🚨 [PaymentReconciliation] cron error:", err.message);
+  }
+});
+
+console.log("🕐 Payment reconciliation cron scheduled (every 10 minutes)");
+
+
+

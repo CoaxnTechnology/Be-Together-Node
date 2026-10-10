@@ -42,6 +42,34 @@ const userSchema = new mongoose.Schema(
   ],
   default: "pending_verification",
 },
+    // ⭐ Unverified sign-ups (status "pending_verification"): when the person
+    // last did something on their sign-up (register / login attempt / resend
+    // OTP — null = created_at) and how many reminder emails have gone out
+    // since then (0–4). The registration reminder cron runs from these; the
+    // account is deleted 90 days after the last activity.
+    verificationActivityAt: { type: Date, default: null },
+    verificationReminderStage: { type: Number, default: 0 },
+    // ⭐ Set only for a temporary (e.g. 7-day) ban from a resolved Report —
+    // null for a permanent block. authMiddleware/authController self-heal
+    // the account back to "active" once this passes, no cron needed.
+    bannedUntil: { type: Date, default: null },
+    // ⭐ Count of Reports resolved against this user with any action other
+    // than "dismiss" — lets admins spot repeat offenders at a glance.
+    reportCount: { type: Number, default: 0 },
+    // ⭐ Set whenever a Report is resolved with warn/restrict/block — the
+    // main app reads this (e.g. on home-feed fetch) to show a red notice
+    // badge for a short window. Self-expires via `expiresAt`; no cron needed
+    // since it's just checked against `now` wherever it's read.
+    accountNotice: {
+      noticeType: {
+        type: String,
+        enum: ["warned", "restricted", "blocked"],
+        default: null,
+      },
+      message: { type: String, default: null },
+      issuedAt: { type: Date, default: null },
+      expiresAt: { type: Date, default: null },
+    },
     is_active: { type: Boolean, default: true },
 
     otp_code: { type: String, default: null },

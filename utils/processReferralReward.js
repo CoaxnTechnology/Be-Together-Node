@@ -2,6 +2,7 @@ const User = require("../model/User");
 const Wallet = require("../model/Wallet");
 const WalletHistory = require("../model/WalletHistory");
 const AdminWalletConfig = require("../model/AdminWalletConfig");
+const { notifyWalletTransaction } = require("../controller/notificationController");
 
 const processReferralReward = async (user) => {
   try {
@@ -170,6 +171,14 @@ const processReferralReward = async (user) => {
         note:
           "Referral signup reward (inviter)",
       });
+
+      notifyWalletTransaction(
+        inviterUser,
+        "referral_inviter_bonus",
+        inviterReward,
+      ).catch((err) =>
+        console.log("❌ notifyWalletTransaction (inviter) error:", err.message),
+      );
     }
 
     // ======================
@@ -203,6 +212,14 @@ const processReferralReward = async (user) => {
         note:
           "Referral signup reward (invited)",
       });
+
+      notifyWalletTransaction(
+        user,
+        "referral_invited_bonus",
+        invitedReward,
+      ).catch((err) =>
+        console.log("❌ notifyWalletTransaction (invited) error:", err.message),
+      );
     }
 
     // ======================

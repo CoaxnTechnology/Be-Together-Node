@@ -9,6 +9,8 @@ const fs = require("fs");
 const BASE_URL = process.env.BASE_URL;
 const AmbassadorApplication = require("../model/AmbassadorApplication");
 const PendingAmbassadorAssignment = require("../model/PendingAmbassadorAssignment");
+const { openInvitationFilter } = require("../utils/ambassadorInvitation");
+const { getRequestsByOwner } = require("./serviceRequestController");
 // ---------------- UPDATE Profile ----------------
 exports.editProfile = async (req, res) => {
   try {
@@ -355,7 +357,7 @@ exports.getUserProfileByEmail = async (req, res) => {
   .select("status rejectionReason rejectionCooldownUntil");
 const pendingAssignment = await PendingAmbassadorAssignment.findOne({
   user: user._id,
-  status: "pending",
+  ...openInvitationFilter(), // past 7 days = expired, not pending
 }).select(`
   status
   ambassadorType
@@ -378,6 +380,8 @@ const pendingAssignment = await PendingAmbassadorAssignment.findOne({
         averageRating: avgRating,
       };
     });
+    // Every request this user ever created — open first, fulfilled/closed last
+    const serviceRequests = await getRequestsByOwner(user._id);
 
     return res.json({
   isSuccess: true,
@@ -447,6 +451,9 @@ ambassadorStatus: user.isAmbassador
     servicesCount: servicesWithRating.length,
 
     services: servicesWithRating,
+
+    serviceRequestsCount: serviceRequests.length,
+    serviceRequests,
   },
 });
   } catch (err) {
@@ -501,6 +508,9 @@ exports.getProfileById = async (req, res) => {
         averageRating: avgRating,
       };
     });
+    // Every request this user ever created — open first, fulfilled/closed last
+    const serviceRequests = await getRequestsByOwner(user._id);
+
     res.json({
       isSuccess: true,
       message: "Profile fetched successfully",
@@ -520,6 +530,8 @@ exports.getProfileById = async (req, res) => {
         services: user.services || [],
         servicesCount: servicesWithRating.length, // total services
         services: servicesWithRating, // full service details with avg rating
+        serviceRequestsCount: serviceRequests.length,
+        serviceRequests,
       },
     });
   } catch (err) {

@@ -80,6 +80,19 @@ const pendingAmbassadorAssignmentSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+
+    // Set when the reminder EMAIL (day 3) went out — sent once per
+    // invitation. See utils/ambassadorInvitation.js.
+    reminderSentAt: {
+      type: Date,
+      default: null,
+    },
+
+    // How many daily reminder PUSHES have gone out (one per 24h, days 1–6).
+    pushRemindersSent: {
+      type: Number,
+      default: 0,
+    },
   },
   {
     timestamps: true,

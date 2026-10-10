@@ -10,6 +10,10 @@ const fs = require("fs");
 const crypto = require("crypto");
 const AmbassadorWithdrawal = require("../model/AmbassadorWithdrawal");
 const PendingAmbassadorAssignment = require("../model/PendingAmbassadorAssignment");
+const {
+  INVITATION_VALID_FOR,
+  isInvitationExpired,
+} = require("../utils/ambassadorInvitation");
 const path = require("path");
 const mongoose = require("mongoose");
 const AmbassadorWallet = require("../model/AmbassadorWallet");
@@ -23,6 +27,10 @@ const {
 const AmbassadorWalletHistory = require("../model/AmbassadorWalletHistory");
 const {
   sendExclusiveAmbassadorInvitationNotification,
+} = require("./notificationController");
+const {
+  notifyAmbassadorWithdrawalSuccess,
+  notifyAmbassadorWithdrawalFailed,
 } = require("./notificationController");
 
 function generateTempPassword(length = 8) {
@@ -168,6 +176,14 @@ exports.applyForAmbassador = async (req, res) => {
           message: "Requested user not found",
         });
       }
+      // Only a verified, active account can be invited (not pending
+      // verification, inactive or banned).
+      if (requestedUser.status !== "active") {
+        return res.status(400).json({
+          isSuccess: false,
+          message: "Only active users can be invited to become an ambassador.",
+        });
+      }
 if (requestedUser.isAmbassador) {
   return res.status(400).json({
     isSuccess: false,
@@ -189,7 +205,11 @@ if (requestedUser.isAmbassador) {
         status: "pending",
       });
 
-      if (pendingInvitation) {
+      // Past its 7 days → close it now instead of waiting for the cron.
+      if (pendingInvitation && isInvitationExpired(pendingInvitation)) {
+        pendingInvitation.status = "expired";
+        await pendingInvitation.save();
+      } else if (pendingInvitation) {
         console.log("[applyForAmbassador] Pending invitation exists", {
           requestedUserId,
           createdByUser: user._id,
@@ -342,7 +362,7 @@ if (lastRejectedApplication) {
         territories: [],
 
         status: "pending",
-        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        expiresAt: new Date(Date.now() + INVITATION_VALID_FOR),
       });
       console.log("[applyForAmbassador] Created exclusive invitation", {
         invitationId: invitation._id,
@@ -916,6 +936,15 @@ exports.makeAmbassador = async (req, res) => {
       });
     }
 
+    // Only a verified, active account can be invited (not pending
+    // verification, inactive or banned).
+    if (user.status !== "active") {
+      return res.status(400).json({
+        isSuccess: false,
+        message: "Only active users can be invited to become an ambassador.",
+      });
+    }
+
     // =====================================
     // CHECK EXISTING PENDING INVITATION
     // =====================================
@@ -931,7 +960,11 @@ exports.makeAmbassador = async (req, res) => {
       pendingExists: Boolean(existingPendingAssignment),
     });
 
-    if (existingPendingAssignment) {
+    // Past its 7 days → close it now so the admin can invite again.
+    if (existingPendingAssignment && isInvitationExpired(existingPendingAssignment)) {
+      existingPendingAssignment.status = "expired";
+      await existingPendingAssignment.save();
+    } else if (existingPendingAssignment) {
       return res.status(400).json({
         isSuccess: false,
         message: "User already has a pending ambassador invitation.",
@@ -1118,7 +1151,7 @@ exports.makeAmbassador = async (req, res) => {
 
       status: "pending",
 
-      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // optional
+      expiresAt: new Date(Date.now() + INVITATION_VALID_FOR),
     });
 
     console.log("[makeAmbassador] Pending assignment created", {
@@ -2908,6 +2941,9 @@ exports.withdrawAmount = async (req, res) => {
   const ambassadorId = req.user.id;
   let transfer = null;
   let wallet = null;
+  // ⭐ Hoisted (was a `const` inside the try block) so the catch block below
+  // can use it too, to send the withdrawal-failed notification.
+  let user = null;
   const amount = Number(req.body.amount);
 
   console.log("[withdrawAmount] Start", {
@@ -2967,7 +3003,7 @@ exports.withdrawAmount = async (req, res) => {
     // User
     // ======================================
 
-    const user = await User.findById(ambassadorId).session(session);
+    user = await User.findById(ambassadorId).session(session);
     console.log("[withdrawAmount] User loaded", {
       ambassadorId,
       userId: user?._id,
@@ -3373,6 +3409,11 @@ exports.withdrawAmount = async (req, res) => {
       availableBalance: wallet.availableBalance,
       reservedBalance: wallet.reservedBalance,
     });
+
+    notifyAmbassadorWithdrawalSuccess(user, amount).catch((err) =>
+      console.error("❌ notifyAmbassadorWithdrawalSuccess error:", err.message),
+    );
+
     return res.status(200).json({
       isSuccess: true,
 
@@ -3463,6 +3504,17 @@ exports.withdrawAmount = async (req, res) => {
           reservedBalance: wallet.reservedBalance,
         });
       }
+
+      // ⭐ Only notify once a real withdrawal was actually being attempted
+      // (withdrawalDoc exists) — an early input-validation error (bad
+      // amount, wallet not found, etc.) never reaches this block at all,
+      // and the caller already sees that failure synchronously anyway.
+      notifyAmbassadorWithdrawalFailed(user, amount).catch((notifyErr) =>
+        console.error(
+          "❌ notifyAmbassadorWithdrawalFailed error:",
+          notifyErr.message,
+        ),
+      );
     }
 
     return res.status(500).json({
@@ -3588,8 +3640,14 @@ if (!selfApplication && pendingAssignment) {
     });
   }
 
-  if (pendingAssignment.status === "expired") {
+  if (pendingAssignment.status === "expired" || isInvitationExpired(pendingAssignment)) {
     await session.abortTransaction();
+    if (pendingAssignment.status === "pending") {
+      await PendingAmbassadorAssignment.updateOne(
+        { _id: pendingAssignment._id, status: "pending" },
+        { $set: { status: "expired" } },
+      );
+    }
 
     return res.status(400).json({
       isSuccess: false,
@@ -3959,7 +4017,7 @@ if (assignment.status !== "pending") {
     // CHECK INVITATION EXPIRY
     // =====================================
 
-    if (assignment.expiresAt && assignment.expiresAt < new Date()) {
+    if (isInvitationExpired(assignment)) {
       assignment.status = "expired";
       await assignment.save({ session });
 

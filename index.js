@@ -17,7 +17,6 @@ const commissionRoutes = require("./routes/adminCommissionRoutes");
 const cancellationRoutes = require("./routes/adminCancellationRoutes");
 const stripeRoutes = require("./routes/stripeConnectRoutes");
 const paymentRoutes = require("./routes/paymentRoutes");
-const paymentViolationRoutes = require("./routes/paymentViolationRoutes");
 const deleteAccountRoutes = require("./routes/deleteaccountRoutes");
 const connectDB = require("./utils/connect");
 const app = express();
@@ -34,6 +33,14 @@ const walletRoutes = require("./routes/walletRoutes");
 const adminWalletConfigRoutes = require("./routes/adminWalletConfigRoutes");
 const ambassadorRoutes = require("./routes/ambassadorRoutes");
 const territoryRoutes = require("./routes/territoryRoutes");
+const blogRoutes = require("./routes/blogRoutes");
+const serviceRequestRoutes = require("./routes/serviceRequestRoutes");
+const homeFeedRoutes = require("./routes/homeFeedRoutes");
+const adminNotificationRoutes = require("./routes/adminNotificationRoutes");
+// Hourly reminders for unverified sign-ups + removal after 90 days.
+require("./services/registrationReminderCron");
+// Hourly reminder (3 days) and expiry (7 days) for ambassador invitations.
+require("./services/ambassadorInvitationCron");
 // --- KEEP RAW ONLY FOR GITHUB ---
 app.post(
   "/webhook/github",
@@ -115,18 +122,47 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(
   cors({
-    origin: [
-      "https://uat.admin.betogetherapp.com",
-      "https://uat.betogetherapp.com",
-      "https://admin.betogetherapp.com",
-      "https://betogetherapp.com",
-      "http://localhost:8080",
-    ], // Allow all origins (not recommended for production)
-    methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
+    origin: function (origin, callback) {
+      // Postman / server-to-server requests
+      if (!origin) {
+        return callback(null, true);
+      }
+
+      // Allow ANY localhost / 127.0.0.1 port
+      const isLocalhost =
+        /^http:\/\/localhost(:\d+)?$/.test(origin) ||
+        /^http:\/\/127\.0\.0\.1(:\d+)?$/.test(origin);
+
+      if (isLocalhost) {
+        return callback(null, true);
+      }
+
+      // Allow your production/UAT domains
+      const allowedOrigins = [
+        "https://uat.admin.betogetherapp.com",
+        "https://uat.betogetherapp.com",
+        "https://admin.betogetherapp.com",
+        "https://betogetherapp.com",
+      ];
+
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      return callback(new Error("Not allowed by CORS"));
+    },
+
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "X-Requested-With",
+    ],
+
     credentials: true,
-  }),
-);
-connectDB();
+  })
+);connectDB();
 
 // Route to serve terms_and_conditions.html
 app.get("/api/terms", (req, res) => {
@@ -148,7 +184,7 @@ app.get("/api/disclaimer", (req, res) => {
     path.join(
       __dirname,
       "templates",
-      "disclaimer_and_limitation_of_liability.html",
+      "disclaimer-and-limitation-of-liability.html",
     ),
   );
 });
@@ -202,7 +238,6 @@ app.use("/api/admin/cancellation", cancellationRoutes);
 
 app.use("/api/stripe/connect", stripeRoutes);
 app.use("/api/payments", paymentRoutes);
-app.use("/api/payment/violation", paymentViolationRoutes);
 app.use("/api/promotion", promotionSubscription);
 app.use("/api", promotionPlanAdminRoutes);
 // Connect to MongoDB (live Atlas)
@@ -212,6 +247,10 @@ app.use("/api/referral", referralRoutes);
 app.use("/api/wallet", walletRoutes);
 app.use("/api/admin", adminWalletConfigRoutes);
 app.use("/api/account", deleteAccountRoutes);
+app.use("/api/blogs", blogRoutes);
+app.use("/api/service-requests", serviceRequestRoutes);
+app.use("/api/home", homeFeedRoutes);
+app.use("/api/admin/notifications", adminNotificationRoutes);
 console.log("Product ID:", process.env.STRIPE_PROMOTION_PRODUCT_ID);
 console.log("apple client ID:", process.env.APPLE_CLIENT_ID);
 console.log("reset password link:", process.env.FRONTEND_RESET_URL);

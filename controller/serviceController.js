@@ -1,4 +1,5 @@
 const moment = require("moment");
+const { ensurePayoutAccount } = require("../utils/stripeConnect");
 const User = require("../model/User");
 const Category = require("../model/Category");
 const Service = require("../model/Service");
@@ -215,41 +216,14 @@ exports.createService = async (req, res) => {
     // ⭐ NEW: PAID SERVICE → CREATE CONNECTED ACCOUNT + KYC CHECK
     // ---------------------------
     if (!isFree) {
-      const provider = user;
-
-      // Step 1: Create account if not exists
-      if (!provider.stripeAccountId) {
-        const account = await stripe.accounts.create({
-          type: "express",
-          country: "IT",
-          email: provider.email,
-          capabilities: {
-            card_payments: { requested: true },
-            transfers: { requested: true },
-          },
-        });
-
-        provider.stripeAccountId = account.id;
-        await provider.save();
-      }
-
-      // Step 2: Check account status
-      const account = await stripe.accounts.retrieve(provider.stripeAccountId);
-
-      // Step 3: If KYC incomplete → return onboarding link
-      if (!account.charges_enabled || !account.details_submitted) {
-        const link = await stripe.accountLinks.create({
-          account: provider.stripeAccountId,
-          refresh_url: "https://example.com/refresh",
-          return_url: "https://example.com/success",
-          type: "account_onboarding",
-        });
-
+      // Creates the account if missing; if KYC is incomplete returns an
+      // onboarding link whose refresh_url re-issues it when it expires.
+      const payout = await ensurePayoutAccount(user);
+      if (!payout.ready) {
         return res.status(200).json({
-          isSuccess: false,
           isSuccess: true,
           message: "Please complete KYC to offer paid services.",
-          onboardingUrl: link.url,
+          onboardingUrl: payout.onboardingUrl,
         });
       }
 
@@ -335,6 +309,11 @@ exports.createService = async (req, res) => {
           referralOwner.totalReferralEarned += 30;
 
           await referralOwner.save();
+          notificationController
+            .notifyWalletTransaction(referralOwner, "referral_service_bonus", 30)
+            .catch((err) =>
+              console.error("❌ notifyWalletTransaction error:", err.message),
+            );
         }
       }
     }
@@ -344,6 +323,12 @@ exports.createService = async (req, res) => {
     console.log("✅ Service created", {
       serviceId: createdService._id,
     });
+
+    // ⭐ Was imported but never actually called — nearby users with
+    // matching interests never got a "new service near you" push before.
+    notifyOnNewService(createdService).catch((err) =>
+      console.error("❌ notifyOnNewService error:", err),
+    );
 
     return res.json({
       isSuccess: true,

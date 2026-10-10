@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const paymentController = require("../controller/paymentController");
+const requestPaymentController = require("../controller/requestPaymentController");
 const authMiddleware = require("../Middleware/authMiddleware");
 
 router.post("/book", authMiddleware, paymentController.bookService);
@@ -23,4 +24,19 @@ router.post(
   "/updateBookingStatus",authMiddleware,paymentController.updateBookingStatus,
 );
 router.post("/booking-preview", authMiddleware, paymentController.bookingPreview);
+
+// ⭐ Quotation Change (client-finalized 24 Sep 2026) — the only
+// post-booking price-adjustment mechanism for a "paid_offer" Service
+// Request booking. No visit/inspection fee exists anywhere.
+router.post(
+  "/bookings/:bookingId/quotation-change",
+  authMiddleware,
+  requestPaymentController.createQuotationChange,
+);
+router.post(
+  "/bookings/:bookingId/quotation-change/:id/respond",
+  authMiddleware,
+  requestPaymentController.respondToQuotationChange,
+);
+
 module.exports = router;

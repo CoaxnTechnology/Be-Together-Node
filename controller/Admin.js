@@ -4,6 +4,7 @@ const axios = require("axios");
 const Category = require("../model/Category");
 const User = require("../model/User");
 const Service = require("../model/Service");
+const { getRequestsByOwner } = require("./serviceRequestController");
 const { getFullImageUrl } = require("../utils/image");
 const Review = require("../model/review");
 const moment = require("moment");
@@ -12,12 +13,18 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const fs = require("fs");
 const path = require("path");
-const { notifyOnServicePromoted } = require("./notificationController");
+const {
+  notifyOnServicePromoted,
+  notifyAccountBlocked,
+  notifyAccountUnblocked,
+} = require("./notificationController");
 const csv = require("csv-parser");
 const Booking = require("../model/Booking");
 const Payment = require("../model/Payment");
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const PendingAmbassadorAssignment = require("../model/PendingAmbassadorAssignment");
+const { openInvitationFilter } = require("../utils/ambassadorInvitation");
+const { banUser } = require("../utils/banUser");
 // ------------------ Cloudinary Config ------------------
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -467,10 +474,17 @@ exports.getUserById = async (req, res) => {
         .json({ success: false, message: "User not found" });
     }
 
+    // Every request this user ever created — open first, fulfilled/closed last
+    const serviceRequests = await getRequestsByOwner(user._id);
+
     res.status(200).json({
       success: true,
       message: "User fetched successfully",
-      data: user,
+      data: {
+        ...user,
+        serviceRequestsCount: serviceRequests.length,
+        serviceRequests,
+      },
     });
   } catch (err) {
     console.error("❌ Error fetching user:", err);
@@ -509,7 +523,7 @@ exports.getAllUsers = async (req, res) => {
 
 const pendingAssignments = await PendingAmbassadorAssignment.find({
   user: { $in: userIds },
-  status: "pending",
+  ...openInvitationFilter(), // expired after 7 days → button shows again
 }).select("user");
 
 const pendingMap = new Set(
@@ -1517,31 +1531,52 @@ exports.loginAdmin = async (req, res) => {
 //admin booking
 exports.getAllBookings = async (req, res) => {
   try {
-    // 1️⃣ Fetch all bookings with populated references
-    const bookings = await Booking.find()
+    // ⭐ "service" (default) = bookings made against a normal Service
+    // listing; "request" = bookings made against a Service Request
+    // (Category A fixed-price / Category B accepted-offer / Category C-D
+    // free join). Reuses this single endpoint/function with a filter,
+    // same pattern as getAllPayments's `type` param.
+    const { type = "service" } = req.query;
+
+    const filter =
+      type === "request"
+        ? { serviceRequest: { $ne: null } }
+        : { serviceRequest: null };
+
+    // 1️⃣ Fetch bookings with populated references
+    const bookings = await Booking.find(filter)
       .populate("customer")
       .populate("provider")
       .populate("service")
+      .populate("serviceRequest", "title requestMode budget category schedule")
       .populate("paymentId")
       .sort({ createdAt: -1 });
 
-    // 2️⃣ Group bookings by service
-    const groupedByService = {};
+    // 2️⃣ Group bookings by service (or by request, for the request tab)
+    const grouped = {};
 
     bookings.forEach((booking) => {
-      // 🛑 SAFETY CHECK (VERY IMPORTANT)
-      // 🟡 HANDLE DELETED REFERENCES SAFELY
-      if (!booking.service || !booking.customer || !booking.provider) {
-        const serviceId = "deleted";
+      // 🛑 SAFETY CHECK — handle deleted references safely. A Request
+      // booking has no `service` by design, so this must check BOTH
+      // `service` and `serviceRequest` before treating it as orphaned
+      // (previously this only checked `service`, which mislabeled every
+      // Request booking as "Deleted Service" — fixed here).
+      if (
+        !booking.customer ||
+        !booking.provider ||
+        (!booking.service && !booking.serviceRequest)
+      ) {
+        const groupId = "deleted";
 
-        if (!groupedByService[serviceId]) {
-          groupedByService[serviceId] = {
+        if (!grouped[groupId]) {
+          grouped[groupId] = {
             service: {
               _id: "deleted",
-              title: "Deleted Service",
+              title: "Deleted Service / Request",
               price: 0,
               isFree: false,
             },
+            serviceRequest: null,
             provider: {
               _id: "deleted",
               name: "Deleted Provider",
@@ -1551,7 +1586,7 @@ exports.getAllBookings = async (req, res) => {
           };
         }
 
-        groupedByService[serviceId].users.push({
+        grouped[groupId].users.push({
           bookingId: booking._id,
           status: booking.status,
           cancelledBy: booking.cancelledBy,
@@ -1559,26 +1594,29 @@ exports.getAllBookings = async (req, res) => {
           refundAmount: booking.refundAmount || 0,
           cancellationFee: booking.cancellationFee || 0,
           amount: booking.amount,
-          note: "Related user or service was deleted",
+          note: "Related user, service or request was deleted",
           createdAt: booking.createdAt,
         });
 
         return;
       }
 
-      const serviceId = booking.service._id.toString();
+      const groupKey = booking.service
+        ? `service:${booking.service._id}`
+        : `request:${booking.serviceRequest._id}`;
 
-      // 3️⃣ Create service group if not exists
-      if (!groupedByService[serviceId]) {
-        groupedByService[serviceId] = {
-          service: booking.service,
+      // 3️⃣ Create group if not exists
+      if (!grouped[groupKey]) {
+        grouped[groupKey] = {
+          service: booking.service || null,
+          serviceRequest: booking.serviceRequest || null,
           provider: booking.provider,
           users: [],
         };
       }
 
       // 4️⃣ Push customer + booking details
-      groupedByService[serviceId].users.push({
+      grouped[groupKey].users.push({
         _id: booking.customer._id,
         name: booking.customer.name,
         email: booking.customer.email,
@@ -1589,6 +1627,8 @@ exports.getAllBookings = async (req, res) => {
         bookingId: booking._id,
         status: booking.status,
         amount: booking.amount,
+        contactPhone: booking.contactPhone || null,
+        location_name: booking.location_name || null,
         otp: booking.otp,
         otpExpiry: booking.otpExpiry,
         cancelledBy: booking.cancelledBy,
@@ -1605,7 +1645,7 @@ exports.getAllBookings = async (req, res) => {
     return res.status(200).json({
       isSuccess: true,
       message: "All bookings grouped by service",
-      services: Object.values(groupedByService),
+      services: Object.values(grouped),
     });
   } catch (error) {
     console.error("❌ getAllBookings Error:", error);
@@ -1628,12 +1668,25 @@ exports.getAllPayments = async (req, res) => {
       currency,
       providerId,
       userId,
+      // ⭐ "service" (default) = payments made against a normal Service
+      // listing; "request" = payments made against a Service Request
+      // (Category A fixed-price / Category B accepted-offer booking).
+      // Reuses this single endpoint/function instead of a parallel one —
+      // same pattern already used for bookService/refundBooking.
+      type = "service",
     } = req.query;
 
     page = Number(page);
     limit = Number(limit);
 
     const query = {};
+
+    // --------- SOURCE FILTER (service vs service-request) ---------
+    if (type === "request") {
+      query.serviceRequest = { $ne: null };
+    } else {
+      query.serviceRequest = null;
+    }
 
     // --------- OPTIONAL FILTERS ---------
     if (status) query.status = status;
@@ -1646,6 +1699,7 @@ exports.getAllPayments = async (req, res) => {
       .populate("user", "name email phone")
       .populate("provider", "name email phone")
       .populate("service", "title description price isFree")
+      .populate("serviceRequest", "title requestMode budget category schedule")
       .sort({ createdAt: -1 })
       .skip((page - 1) * limit)
       .limit(limit);
@@ -1663,6 +1717,7 @@ exports.getAllPayments = async (req, res) => {
       data: payments.map((p) => ({
         paymentId: p._id,
         bookingId: p.bookingId || null,
+        contactPhone: p.contactPhone || null,
 
         customer: {
           id: p.user?._id || null,
@@ -1678,33 +1733,74 @@ exports.getAllPayments = async (req, res) => {
           phone: p.provider?.phone || null,
         },
 
-        service: {
-          id: p.service?._id || null,
-          title: p.service?.title || null,
-          description: p.service?.description || null,
-          price: p.service?.price || null,
-          isFree: p.service?.isFree || false,
-        },
+        service: p.service
+          ? {
+              id: p.service._id,
+              title: p.service.title,
+              description: p.service.description,
+              price: p.service.price,
+              isFree: p.service.isFree || false,
+            }
+          : null,
+
+        serviceRequest: p.serviceRequest
+          ? {
+              id: p.serviceRequest._id,
+              title: p.serviceRequest.title,
+              requestMode: p.serviceRequest.requestMode,
+              budget: p.serviceRequest.budget,
+              category: p.serviceRequest.category,
+              schedule: p.serviceRequest.schedule,
+            }
+          : null,
 
         amount: p.amount,
         currency: p.currency,
+        originalAmount: p.originalAmount,
         appCommission: p.appCommission,
         providerAmount: p.providerAmount,
+        providerCommissionPercentage: p.providerCommissionPercentage,
+        customerCommissionPercentage: p.customerCommissionPercentage,
+        totalPaidByCustomer: p.totalPaidByCustomer,
+        customerPaidAmount: p.customerPaidAmount,
+
+        // --------- WALLET ---------
+        usedWallet: p.usedWallet,
+        walletCoinsUsed: p.walletCoinsUsed,
+        walletAmountUsed: p.walletAmountUsed,
 
         // --------- PAYMENT STATUS ---------
         paymentStatus: p.status || "unknown",
+        captureStatus: p.captureStatus,
+        capturedAt: p.capturedAt,
+        failureReason: p.failureReason,
 
-        refundId: p.refundId,
-        refundReason: p.refundReason,
-
+        // --------- STRIPE IDs (for support cross-reference in Stripe dashboard) ---------
         checkoutSessionId: p.checkoutSessionId,
         paymentIntentId: p.paymentIntentId,
         customerStripeId: p.customerStripeId,
         providerStripeId: p.providerStripeId,
 
+        // --------- PROVIDER TRANSFER (payout) ---------
+        transferId: p.transferId,
+        transferStatus: p.transferStatus,
+        transferAmount: p.transferAmount,
+        transferCreatedAt: p.transferCreatedAt,
+        transferFailureReason: p.transferFailureReason,
+        transferFailureCode: p.transferFailureCode,
+
+        // --------- REFUND / CANCELLATION ---------
+        refundId: p.refundId,
+        refundReason: p.refundReason,
+        refundStatus: p.refundStatus,
+        refundedAmount: p.refundedAmount,
+        refundedAt: p.refundedAt,
+        cancellationFee: p.cancellationFee,
+        platformRetainedAmount: p.platformRetainedAmount,
+
+        // --------- TIMESTAMPS ---------
         createdAt: p.createdAt,
         completedAt: p.completedAt,
-        refundedAt: p.refundedAt,
       })),
     });
   } catch (err) {
@@ -1951,21 +2047,16 @@ exports.blockUser = async (req, res) => {
       fcmTokens: user.fcmToken?.length || 0,
     });
 
-    // 🔥 BLOCK USER
+    // ⭐ Notify BEFORE banUser() — it clears fcmToken as part of logging the
+    // user out everywhere, so the push must go out first or it silently has
+    // no token left to send to.
+    notifyAccountBlocked(user).catch((err) =>
+      console.error("❌ notifyAccountBlocked error:", err.message),
+    );
+
+    // 🔥 BLOCK USER — shared helper (also used by the Reports resolve action)
     console.log("🚫 Blocking user now...");
-    user.status = "banned";
-    user.is_active = false;
-
-    // 🔥 kill all sessions
-    console.log("🔐 Clearing session & access token");
-    user.session_id = null;
-    user.access_token = null;
-
-    // 🔥 mobile push logout
-    console.log("📵 Clearing FCM tokens");
-    user.fcmToken = [];
-
-    await user.save();
+    await banUser(user);
 
     console.log("✅ USER BLOCKED SUCCESSFULLY:", {
       id: user._id,
@@ -2019,6 +2110,10 @@ exports.unblockUser = async (req, res) => {
     await user.save();
 
     console.log("✅ User unblocked:", user.email);
+
+    notifyAccountUnblocked(user).catch((err) =>
+      console.error("❌ notifyAccountUnblocked error:", err.message),
+    );
 
     return res.json({
       success: true,
@@ -2265,7 +2360,7 @@ exports.searchUsers = async (req, res) => {
 
 const pendingAssignments = await PendingAmbassadorAssignment.find({
   user: { $in: userIds },
-  status: "pending",
+  ...openInvitationFilter(), // expired after 7 days → button shows again
 }).select("user");
 
 const pendingMap = new Set(

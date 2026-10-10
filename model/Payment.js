@@ -11,7 +11,26 @@ const paymentSchema = new mongoose.Schema(
     service: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Service",
-      required: true,
+      // Required unless this payment came from a Service Request booking
+      // instead (see `serviceRequest`) — existing Service payments are
+      // unaffected since they never set `serviceRequest`.
+      required: function () {
+        return !this.serviceRequest;
+      },
+    },
+    // ⭐ Set instead of `service` when this payment was created from the
+    // Service Request flow (paid_fixed / paid_offer).
+    serviceRequest: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ServiceRequest",
+      default: null,
+    },
+    // Set only for paid_offer bookings — the specific accepted Offer this
+    // payment was created for (kept for traceability/history).
+    serviceRequestOffer: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ServiceRequestOffer",
+      default: null,
     },
     contactPhone: { type: String },
     location_name: { type: String, default: null },
@@ -125,6 +144,59 @@ const paymentSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    // Service Request bookings only — snapshot taken at checkout, copied to
+    // the Booking when it's created.
+    cancellationPolicy: {
+      type: String,
+      enum: ["late_fee", "free", null],
+      default: null,
+    },
+    serviceStartAt: { type: Date, default: null },
+    // Service Request bookings only. originalAmount is the CURRENT total
+    // service amount; it always equals initialServiceAmount +
+    // quotationAdjustmentAmount.
+    initialServiceAmount: { type: Number, default: null },
+    quotationAdjustmentAmount: { type: Number, default: 0 },
+    // Each paid quotation-change difference — a separate Stripe charge whose
+    // money stays on the platform with the original until completion. The
+    // full history (incl. rejected/unpaid changes) is booking.quotationChanges.
+    additionalCharges: {
+      type: [
+        {
+          quotationChange: { type: mongoose.Schema.Types.ObjectId, default: null },
+          checkoutSessionId: String,
+          paymentIntentId: String,
+          serviceAmount: Number, // the price difference
+          customerPaidAmount: Number, // difference + customer commission
+          providerAmount: Number,
+          providerCommissionAmount: Number,
+          customerCommissionAmount: Number,
+          paidAt: { type: Date, default: Date.now },
+        },
+      ],
+      default: [],
+    },
+    // A Service Request booking can be paid in more than one Stripe charge
+    // (the original + each accepted Quotation Change). A cancellation refunds
+    // across all of them; each Stripe refund is recorded here.
+    refunds: {
+      type: [
+        {
+          refundId: String,
+          paymentIntentId: String,
+          // _id of the booking.quotationChanges entry this charge belonged
+          // to (null = the original payment).
+          quotationChange: { type: mongoose.Schema.Types.ObjectId, default: null },
+          amount: Number,
+          status: String,
+          createdAt: { type: Date, default: Date.now },
+        },
+      ],
+      default: [],
+    },
+    // Late cancellation fee split (Service Request bookings only).
+    cancellationFeeAdminShare: { type: Number, default: 0 },
+    cancellationFeeProviderShare: { type: Number, default: 0 },
     refundId: { type: String, default: null },
     refundReason: { type: String, default: null },
     completedAt: { type: Date, default: null },

@@ -4,6 +4,7 @@ const admin = require("../utils/firebase"); // ✅ use initialized admin
 const User = require("../model/User");
 const Service = require("../model/Service");
 const Category = require("../model/Category");
+const { formatDateTime } = require("../utils/dateTimeFormat");
 const BASE_URL = process.env.BASE_URL;
 const notifiedMap = {}; // To avoid duplicate notifications
 
@@ -355,6 +356,24 @@ async function notifyOnServiceView(service, viewer) {
 async function sendBookingNotification(customer, provider, service, booking) {
   console.log("🔔 sendBookingNotification CALLED");
 
+  // ⭐ Different wording for a Service-Request-sourced booking (Category A
+  // "Book Now" / Category B accepted Offer) vs a plain Service booking —
+  // `booking.serviceRequest` is set only for the former, whether populated
+  // or still a raw ObjectId, so a simple truthy check is enough here.
+  const isRequestBooking = Boolean(booking.serviceRequest);
+  const customerTitle = isRequestBooking
+    ? "🎉 Your Request Has Been Booked!"
+    : "🎉 Service Booked Successfully!";
+  const customerBody = isRequestBooking
+    ? `Your request "${service.title}" has been booked with ${provider.name}. Amount: ₹${booking.amount}`
+    : `You booked "${service.title}" with ${provider.name}. Amount: ₹${booking.amount}`;
+  const providerTitle = isRequestBooking
+    ? "🛎 You've Been Booked for a Request!"
+    : "🛎 New Booking Received!";
+  const providerBody = isRequestBooking
+    ? `${customer.name} booked you for their request "${service.title}". Amount: ₹${booking.amount}`
+    : `${customer.name} booked "${service.title}". Amount: ₹${booking.amount}`;
+
   try {
     console.log("Customer Tokens →", customer.fcmToken);
     console.log("Provider Tokens →", provider.fcmToken);
@@ -366,11 +385,11 @@ async function sendBookingNotification(customer, provider, service, booking) {
       await admin.messaging().sendEachForMulticast({
         tokens: customer.fcmToken,
         notification: {
-          title: "🎉 Service Booked Successfully!",
-          body: `You booked "${service.title}" with ${provider.name}. Amount: ₹${booking.amount}`,
+          title: customerTitle,
+          body: customerBody,
         },
         data: {
-          type: "booking_success",
+          type: isRequestBooking ? "request_booking_success" : "booking_success",
           userType: "customer",
           bookingId: booking._id.toString(),
         },
@@ -388,11 +407,11 @@ async function sendBookingNotification(customer, provider, service, booking) {
       await admin.messaging().sendEachForMulticast({
         tokens: provider.fcmToken,
         notification: {
-          title: "🛎 New Booking Received!",
-          body: `${customer.name} booked "${service.title}". Amount: ₹${booking.amount}`,
+          title: providerTitle,
+          body: providerBody,
         },
         data: {
-          type: "booking_received",
+          type: isRequestBooking ? "request_booking_received" : "booking_received",
           userType: "provider",
           bookingId: booking._id.toString(),
         },
@@ -966,6 +985,44 @@ async function sendExclusiveAmbassadorInvitationNotification(
     );
   }
 }
+// Daily push while an Ambassador invitation is unanswered — same payload as
+// the original invitation so tapping it opens the Agreement again.
+async function sendAmbassadorInvitationReminderNotification(invitedUser, expiresAt, daysLeft) {
+  const date = new Date(expiresAt).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "long",
+  });
+  const when =
+    daysLeft <= 1 ? "It expires tomorrow" : `It expires in ${daysLeft} days (${date})`;
+  await sendUserNotification(
+    invitedUser,
+    daysLeft <= 1
+      ? "⏳ Last day for your Ambassador invitation"
+      : "⏳ Your Ambassador invitation is waiting",
+    `You haven't answered your BeTogether Ambassador invitation yet. ${when} — review and accept the Agreement to become an Ambassador.`,
+    {
+      type: "exclusive_ambassador_invitation",
+      pageType: "WebView",
+      agreementUrl: `${process.env.BASE_URL}/api/ambassador-terms`,
+      userId: invitedUser._id,
+      reminder: "true",
+    },
+  );
+}
+
+// Tells the exclusive ambassador who sent it that their invitation lapsed.
+async function notifyAmbassadorInvitationExpired(inviter, invitedUser) {
+  await sendUserNotification(
+    inviter,
+    "Ambassador invitation expired",
+    `${invitedUser?.name || "The user"} didn't accept your Ambassador invitation within 7 days. You can send a new one.`,
+    {
+      type: "ambassador_invitation_expired",
+      invitedUserId: invitedUser?._id || "",
+    },
+  );
+}
+
 async function sendAmbassadorInvitationNotification(invitedUser) {
   try {
     console.log("[sendAmbassadorInvitationNotification] Starting", {
@@ -1058,7 +1115,701 @@ async function sendAmbassadorInvitationNotification(invitedUser) {
 //     console.error("❌ notifyServiceOwnerOnSubscription error:", err.message);
 //   }
 // }
+// ------------------------------------------------------------------
+// SERVICE REQUEST NOTIFICATIONS ("I need X" posts)
+// ------------------------------------------------------------------
+const SERVICE_REQUEST_RADIUS_KM = 30;
+const SERVICE_REQUEST_MAX_NOTIFIED = 50;
+
+function buildServiceRequestMessage(request, ownerName, distance) {
+  return {
+    title: "🙋 Someone near you needs help",
+    body: `${ownerName} is looking for "${request.title}" (${distance.toFixed(
+      1,
+    )} km away)`,
+  };
+}
+
+async function notifyNearbyUsersForRequest(request) {
+  try {
+    console.log(
+      `🚀 Starting notification for service request "${request.title}"`,
+    );
+
+    const owner = await User.findById(request.owner).select(
+      "name email profile_image",
+    );
+    const ownerName = owner?.name || "Someone";
+
+    // Broaden the match with the request's category name/tags — same
+    // expansion getInterestedUsers() does for category-based search.
+    let matchTags = Array.isArray(request.tags) ? [...request.tags] : [];
+    if (request.category) {
+      const category = await Category.findById(request.category).select(
+        "name tags",
+      );
+      if (category) {
+        if (category.name) matchTags.push(category.name);
+        if (Array.isArray(category.tags)) matchTags.push(...category.tags);
+      }
+    }
+    matchTags = [...new Set(matchTags.map((t) => String(t).toLowerCase()))];
+
+    if (!matchTags.length) {
+      console.log(
+        "⚠️ Service request has no tags/category to match — skipping notification fan-out",
+      );
+      return 0;
+    }
+
+    const candidates = await User.find({
+      interests: { $in: matchTags },
+      is_active: true,
+      _id: { $ne: request.owner },
+    });
+
+    console.log(
+      `Found ${candidates.length} active users with matching interests`,
+    );
+
+    // Compute distance for everyone in range, then cap the fan-out to the
+    // nearest N so one popular tag near a dense city can't blast hundreds
+    // of push notifications.
+    const [reqLng, reqLat] = request.location.coordinates;
+    const inRange = [];
+    for (const user of candidates) {
+      if (!user.fcmToken?.length) continue;
+      if (!user.lastLocation?.coords?.coordinates) continue;
+
+      const dist = getDistanceFromLatLonInKm(
+        reqLat,
+        reqLng,
+        user.lastLocation.coords.coordinates[1],
+        user.lastLocation.coords.coordinates[0],
+      );
+
+      if (dist > SERVICE_REQUEST_RADIUS_KM) continue;
+
+      inRange.push({ user, dist });
+    }
+
+    inRange.sort((a, b) => a.dist - b.dist);
+    const toNotify = inRange.slice(0, SERVICE_REQUEST_MAX_NOTIFIED);
+
+    let notifiedUsers = [];
+
+    for (const { user, dist } of toNotify) {
+      const key = `sr-${user._id}-${request._id}`;
+      if (!global.notifiedMap) global.notifiedMap = {};
+      if (global.notifiedMap[key]) {
+        console.log(
+          `⏱ Already notified ${user.name} for this request, skipping`,
+        );
+        continue;
+      }
+
+      const message = buildServiceRequestMessage(request, ownerName, dist);
+      const payload = {
+        tokens: user.fcmToken,
+        notification: { title: message.title, body: message.body },
+        data: {
+          type: "ServiceRequest",
+          pageType: "ServiceRequestDetailsPage",
+          requestId: request._id.toString(),
+          requestTitle: request.title || "",
+          ownerId: request.owner.toString(),
+          ownerName: ownerName,
+          ownerEmail: owner?.email || "",
+          ownerProfileImage: owner?.profile_image || "",
+          distanceKm: dist.toFixed(1),
+        },
+      };
+
+      try {
+        const response = await admin.messaging().sendEachForMulticast(payload);
+        response.responses.forEach((res, index) => {
+          const token = payload.tokens[index];
+          if (res.success) console.log(`✅ Sent to token: ${token}`);
+          else
+            console.log(
+              `❌ Failed for token: ${token} - ${res.error?.message}`,
+            );
+        });
+
+        global.notifiedMap[key] = true;
+        notifiedUsers.push(user.name);
+      } catch (err) {
+        console.error(
+          `❌ Failed to send request notification to ${user.name}:`,
+          err.message,
+        );
+      }
+    }
+
+    console.log(
+      `🎯 Finished notification for service request "${request.title}"`,
+    );
+    console.log(`📣 Total users notified: ${notifiedUsers.length}`);
+    if (notifiedUsers.length > 0)
+      console.log(`Users notified: ${notifiedUsers.join(", ")}`);
+
+    return notifiedUsers.length;
+  } catch (err) {
+    console.error(
+      `❌ Notification error for service request "${request.title}":`,
+      err.message,
+    );
+    return 0;
+  }
+}
+
+// =====================================================================
+// SINGLE-RECIPIENT NOTIFICATIONS — Offer / Join / Quotation Change
+// (client-finalized 24 Sep 2026 Service Request booking flow)
+// Same sendEachForMulticast payload shape as the broadcast functions
+// above, just targeted at exactly one user instead of a radius search —
+// extracted into one helper so the 6 call sites below don't duplicate it.
+// =====================================================================
+async function sendUserNotification(user, title, body, data = {}) {
+  try {
+    if (!user?.fcmToken?.length) {
+      console.log(`⚠️ No fcmToken for user ${user?._id} — skipping notification`);
+      return false;
+    }
+    const payload = {
+      tokens: user.fcmToken,
+      notification: { title, body },
+      data: Object.fromEntries(
+        Object.entries(data).map(([k, v]) => [k, String(v ?? "")]),
+      ),
+    };
+    const response = await admin.messaging().sendEachForMulticast(payload);
+    response.responses.forEach((res, index) => {
+      const token = payload.tokens[index];
+      if (res.success) console.log(`✅ Sent to token: ${token}`);
+      else console.log(`❌ Failed for token: ${token} - ${res.error?.message}`);
+    });
+    return true;
+  } catch (err) {
+    console.error(`❌ sendUserNotification error for user ${user?._id}:`, err.message);
+    return false;
+  }
+}
+
+async function notifyNewOffer(request, offer) {
+  const owner = await User.findById(request.owner).select("fcmToken");
+  const provider = await User.findById(offer.provider).select("name");
+  if (!owner) return;
+  await sendUserNotification(
+    owner,
+    "💬 New Offer received",
+    `${provider?.name || "A provider"} offered ${offer.currency || ""} ${offer.amount} for "${request.title}"`,
+    {
+      type: "ServiceRequestOffer",
+      pageType: "ServiceRequestOffersPage",
+      requestId: request._id,
+      offerId: offer._id,
+    },
+  );
+}
+
+async function notifyOfferAccepted(request, offer) {
+  const provider = await User.findById(offer.provider).select("fcmToken");
+  if (!provider) return;
+  await sendUserNotification(
+    provider,
+    "🎉 Your Offer was accepted",
+    `Your offer of ${offer.currency || ""} ${offer.amount} for "${request.title}" was accepted`,
+    {
+      type: "ServiceRequestOffer",
+      pageType: "ServiceRequestOffersPage",
+      requestId: request._id,
+      offerId: offer._id,
+    },
+  );
+}
+
+async function notifyOfferDeclined(request, offer) {
+  const provider = await User.findById(offer.provider).select("fcmToken");
+  if (!provider) return;
+  await sendUserNotification(
+    provider,
+    "Offer not selected this time",
+    `Your offer for "${request.title}" was not selected — another provider was chosen`,
+    {
+      type: "ServiceRequestOffer",
+      pageType: "ServiceRequestOffersPage",
+      requestId: request._id,
+      offerId: offer._id,
+    },
+  );
+}
+
+async function notifyGroupFilled(request) {
+  const owner = await User.findById(request.owner).select("fcmToken");
+  if (!owner) return;
+  await sendUserNotification(
+    owner,
+    "✅ Your request is full",
+    `"${request.title}" has reached its required participants`,
+    {
+      type: "ServiceRequest",
+      pageType: "ServiceRequestDetailsPage",
+      requestId: request._id,
+    },
+  );
+}
+
+async function notifyOfferWithdrawn(request, offer) {
+  const owner = await User.findById(request.owner).select("fcmToken");
+  const provider = await User.findById(offer.provider).select("name");
+  if (!owner) return;
+  await sendUserNotification(
+    owner,
+    "↩️ Offer Withdrawn",
+    `${provider?.name || "A provider"} withdrew their offer on "${request.title}"`,
+    {
+      type: "ServiceRequest",
+      pageType: "ServiceRequestDetailsPage",
+      requestId: request._id,
+      offerId: offer._id,
+    },
+  );
+}
+
+// =====================================================================
+// SERVICE REQUEST BOOKING CANCELLED — kept separate from the normal
+// "Service Cancelled" push so the app can tell it's a request booking and
+// who cancelled it. Each side gets its own wording:
+//   free join  → booking.customer = the participant, booking.provider = the
+//                request owner (host)
+//   paid       → booking.customer = customer, booking.provider = provider
+// data.type = "request_booking_cancelled" for every one of them.
+// =====================================================================
+async function notifyRequestBookingCancelled({
+  booking,
+  customer,
+  provider,
+  request,
+  cancelledBy,
+  byAdmin = false,
+  reason = "",
+  refundAmount = 0,
+  cancellationFee = 0,
+  providerFeeShare = 0,
+  currency = "",
+}) {
+  const title = request?.title || "your request";
+  const isFree = !booking.amount;
+  const money = (n) => `${Number(n || 0)} ${String(currency || "").toUpperCase()}`.trim();
+  const customerCancelled = cancelledBy !== "provider";
+  const by = byAdmin ? "BeTogether support" : null;
+
+  let toCustomer;
+  let toProvider;
+  if (isFree) {
+    toCustomer = customerCancelled
+      ? ["You left the request", `You cancelled your spot in "${title}".`]
+      : [
+          "❌ Request cancelled by host",
+          `${by || provider.name} cancelled your spot in "${title}".`,
+        ];
+    toProvider = customerCancelled
+      ? ["👋 A participant left", `${customer.name} cancelled their spot in your request "${title}".`]
+      : by
+        ? ["❌ Participant removed", `${by} removed ${customer.name} from your request "${title}".`]
+        : ["Participant removed", `You cancelled ${customer.name}'s spot in "${title}".`];
+  } else if (customerCancelled) {
+    toCustomer = [
+      "Request booking cancelled",
+      cancellationFee > 0
+        ? `You cancelled "${title}". Refund: ${money(refundAmount)} (late cancellation fee ${money(cancellationFee)}).`
+        : `You cancelled "${title}". Full refund: ${money(refundAmount)}.`,
+    ];
+    toProvider = [
+      "❌ Request booking cancelled by customer",
+      providerFeeShare > 0
+        ? `${customer.name} cancelled "${title}". You'll receive ${money(providerFeeShare)} from the late cancellation fee.`
+        : `${customer.name} cancelled "${title}".`,
+    ];
+  } else {
+    toCustomer = [
+      by ? "❌ Request booking cancelled" : "❌ Request booking cancelled by provider",
+      `${by || provider.name} cancelled "${title}". You'll get a full refund of ${money(refundAmount)}.`,
+    ];
+    toProvider = by
+      ? ["❌ Request booking cancelled", `${by} cancelled "${title}". The customer gets a full refund.`]
+      : ["Request booking cancelled", `You cancelled "${title}". The customer gets a full refund.`];
+  }
+
+  const data = {
+    type: "request_booking_cancelled",
+    pageType: "BookingDetailsPage",
+    bookingId: booking._id,
+    serviceRequestId: request?._id || booking.serviceRequest,
+    requestMode: request?.requestMode || "",
+    cancelledBy: byAdmin ? "admin" : cancelledBy,
+    reason,
+    refundAmount,
+    cancellationFee,
+  };
+
+  await sendUserNotification(customer, toCustomer[0], toCustomer[1], {
+    ...data,
+    userType: "customer",
+  });
+  await sendUserNotification(provider, toProvider[0], toProvider[1], {
+    ...data,
+    userType: "provider",
+  });
+}
+
+async function notifyQuotationChangeSubmitted(quotationChange, booking) {
+  const customer = await User.findById(booking.customer).select("fcmToken");
+  if (!customer) return;
+  await sendUserNotification(
+    customer,
+    "📝 Updated price proposed",
+    `The provider proposed a new price: ${quotationChange.proposedAmount} (was ${quotationChange.previousAmount})`,
+    {
+      type: "QuotationChange",
+      pageType: "BookingDetailsPage",
+      bookingId: booking._id,
+      quotationChangeId: quotationChange._id,
+    },
+  );
+}
+
+async function notifyQuotationChangeResponded(quotationChange, booking) {
+  const provider = await User.findById(booking.provider).select("fcmToken");
+  if (!provider) return;
+  const accepted = quotationChange.status === "accepted";
+  await sendUserNotification(
+    provider,
+    accepted ? "✅ Price change accepted" : "Price change rejected",
+    accepted
+      ? `The customer accepted the new price of ${quotationChange.proposedAmount}`
+      : `The customer rejected the new price of ${quotationChange.proposedAmount}`,
+    {
+      type: "QuotationChange",
+      pageType: "BookingDetailsPage",
+      bookingId: booking._id,
+      quotationChangeId: quotationChange._id,
+    },
+  );
+}
+
+// =====================================================================
+// REPORT RESOLUTION — push notification to the reported user once admin
+// takes an action (warn/restrict/block). Not sent for "dismiss" (nothing
+// happened) or "refund" (that's between the customer and admin, not a
+// notice about the reported user's own account standing).
+// =====================================================================
+async function notifyReportOutcome(user, adminAction, notes) {
+  if (!user) return;
+  const titles = {
+    warned: "⚠️ Account Warning",
+    restricted: "🚫 Account Temporarily Restricted",
+    blocked: "⛔ Account Blocked",
+  };
+  const bodies = {
+    warned:
+      "You've received a warning following a reported incident. Repeated issues may lead to a temporary or permanent restriction.",
+    restricted:
+      "Your account has been restricted for 7 days due to a reported incident.",
+    blocked: "Your account has been blocked due to a reported incident.",
+  };
+  const title = titles[adminAction];
+  const body = bodies[adminAction];
+  if (!title || !body) return;
+  await sendUserNotification(user, title, notes ? `${body} (${notes})` : body, {
+    type: "report_outcome",
+    adminAction,
+  });
+}
+
+// =====================================================================
+// PAYMENT FAILED — one shared helper for every place a Stripe charge can
+// fail: a Service booking, a Service-Request booking (paid_fixed/
+// paid_offer — same Payment model, same webhook case), and a Promotion
+// subscription renewal. Kept as a single function so the wording never
+// drifts between the three call sites, and so a future 4th payment type
+// gets this for free.
+// =====================================================================
+async function notifyPaymentFailed(user, itemTitle, amount, currency, reason) {
+  if (!user) return;
+  const amountLabel =
+    amount !== null && amount !== undefined
+      ? `${currency ? currency + " " : ""}${amount}`
+      : null;
+  const body = reason
+    ? `Your payment${amountLabel ? ` of ${amountLabel}` : ""} for "${itemTitle}" failed: ${reason}. Please try again or use a different payment method.`
+    : `Your payment${amountLabel ? ` of ${amountLabel}` : ""} for "${itemTitle}" could not be processed. Please try again or use a different payment method.`;
+  await sendUserNotification(user, "❌ Payment Failed", body, {
+    type: "payment_failed",
+    itemTitle,
+  });
+}
+
+// =====================================================================
+// WALLET COINS — one shared helper for every place points get credited or
+// debited: referral rewards (signup-time AND first-booking/first-service
+// milestones), coins actually spent on a completed booking, and coins
+// refunded back after a cancellation. Keyed by the exact same `type`
+// string already used on the WalletHistory record, so adding a new coin
+// event later only means adding one entry to this map.
+// =====================================================================
+const WALLET_NOTICES = {
+  referral_inviter_bonus: {
+    title: "🎁 Referral Reward!",
+    body: (points) => `You earned ${points} coins — a friend joined Betogether using your referral code!`,
+  },
+  referral_invited_bonus: {
+    title: "🎉 Welcome Bonus!",
+    body: (points) => `You earned ${points} coins for joining with a referral code!`,
+  },
+  referral_booking_bonus: {
+    title: "🎁 Referral Reward!",
+    body: (points) => `You earned ${points} coins — your referred friend just completed their first booking!`,
+  },
+  referral_service_bonus: {
+    title: "🎁 Referral Reward!",
+    body: (points) => `You earned ${points} coins — your referred friend just posted their first service!`,
+  },
+  wallet_spent: {
+    title: "🪙 Wallet Coins Used",
+    body: (points) => `${points} coins were deducted from your wallet for your recent booking.`,
+  },
+  wallet_refund: {
+    title: "🪙 Coins Refunded",
+    body: (points) => `${points} coins have been refunded to your wallet after your booking was cancelled.`,
+  },
+};
+
+async function notifyWalletTransaction(user, type, points) {
+  if (!user) return;
+  const notice = WALLET_NOTICES[type];
+  if (!notice) return;
+  await sendUserNotification(user, notice.title, notice.body(Math.abs(points)), {
+    type: "wallet_transaction",
+    walletEventType: type,
+    points: Math.abs(points),
+  });
+}
+
+// =====================================================================
+// PROMOTION / SUBSCRIPTION — purchase confirmation, renewal, expiring-soon
+// reminder, and expired notice, all sent to the service owner.
+// =====================================================================
+async function notifyPromotionPurchased(user, serviceTitle, endDate) {
+  if (!user) return;
+  await sendUserNotification(
+    user,
+    "🚀 Promotion Activated!",
+    `Your promotion for "${serviceTitle}" is now live until ${formatDateTime(endDate)}. Enjoy boosted visibility!`,
+    { type: "promotion_purchased", serviceTitle },
+  );
+}
+
+async function notifyPromotionRenewed(user, serviceTitle, endDate) {
+  if (!user) return;
+  await sendUserNotification(
+    user,
+    "✅ Promotion Renewed",
+    `Your promotion for "${serviceTitle}" has been renewed and is active until ${formatDateTime(endDate)}.`,
+    { type: "promotion_renewed", serviceTitle },
+  );
+}
+
+async function notifyPromotionExpiringSoon(user, serviceTitle, endDate) {
+  if (!user) return;
+  await sendUserNotification(
+    user,
+    "⏳ Promotion Expiring Soon",
+    `Your promotion for "${serviceTitle}" expires on ${formatDateTime(endDate)}. Renew now to keep your boosted visibility.`,
+    { type: "promotion_expiring_soon", serviceTitle },
+  );
+}
+
+async function notifyPromotionExpired(user, serviceTitle) {
+  if (!user) return;
+  await sendUserNotification(
+    user,
+    "🔴 Promotion Expired",
+    `Your promotion for "${serviceTitle}" has expired. Renew it to get boosted visibility again.`,
+    { type: "promotion_expired", serviceTitle },
+  );
+}
+
+// =====================================================================
+// NEW REVIEW — push notification to the provider when a customer reviews
+// their completed booking.
+// =====================================================================
+async function notifyNewReview(provider, rating, text) {
+  if (!provider) return;
+  const body = text
+    ? `You received a ${rating}-star review: "${text}"`
+    : `You received a ${rating}-star review!`;
+  await sendUserNotification(provider, "⭐ New Review!", body, {
+    type: "new_review",
+    rating,
+  });
+}
+
+// =====================================================================
+// REPORT SUBMITTED / RESOLVED — sent to the REPORTER (not the reported
+// party — that's notifyReportOutcome above). Covers both report types
+// (type:"service" and type:"user") with the same two functions.
+// =====================================================================
+async function notifyReportReceived(reporter) {
+  if (!reporter) return;
+  await sendUserNotification(
+    reporter,
+    "📩 Report Received",
+    "Your report has been received and is under review by our team. We'll take appropriate action shortly.",
+    { type: "report_received" },
+  );
+}
+
+function buildReporterResolutionMessage(reportType, outcome) {
+  if (reportType === "service") {
+    return outcome === "approved"
+      ? "Your report has been reviewed — the reported service has been removed. Thank you for helping keep Betogether safe."
+      : "Your report has been reviewed. We didn't find a violation this time, but thank you for flagging it.";
+  }
+  // reportType === "user"
+  if (outcome === "dismissed") {
+    return "Your report has been reviewed and closed — no violation was found.";
+  }
+  return "Your report has been reviewed and appropriate action has been taken. Thank you for helping keep Betogether safe.";
+}
+
+async function notifyReporterOnResolution(reporter, reportType, outcome) {
+  if (!reporter) return;
+  await sendUserNotification(
+    reporter,
+    "✅ Your Report Was Reviewed",
+    buildReporterResolutionMessage(reportType, outcome),
+    { type: "report_resolved", reportType, outcome },
+  );
+}
+
+// =====================================================================
+// REQUEST EXPIRING SOON, ZERO RESPONSE — heads-up to the request owner so
+// they can adjust price/details before it lapses with nobody having
+// booked/offered/joined at all.
+// =====================================================================
+async function notifyRequestExpiringNoResponse(owner, requestTitle) {
+  if (!owner) return;
+  await sendUserNotification(
+    owner,
+    "⏰ Your Request is Expiring Soon",
+    `Your request "${requestTitle}" expires soon and hasn't received any response yet. Consider adjusting your budget or details to attract more interest.`,
+    { type: "request_expiring_no_response", requestTitle },
+  );
+}
+
+// =====================================================================
+// DIRECT ADMIN BLOCK/UNBLOCK — Admin.js's blockUser/unblockUser act outside
+// the Reports flow (no linked report, no "reported incident" wording), so
+// these use plainer copy than notifyReportOutcome above.
+// =====================================================================
+// =====================================================================
+// AMBASSADOR WITHDRAWAL — success/failure of a payout request.
+// =====================================================================
+// =====================================================================
+// PASSWORD CHANGED — security notice, sent right after a successful
+// password reset so the account owner notices immediately if it wasn't
+// actually them.
+// =====================================================================
+async function notifyPasswordChanged(user) {
+  if (!user) return;
+  await sendUserNotification(
+    user,
+    "🔒 Password Changed",
+    "Your password was just changed. If this wasn't you, please contact support immediately.",
+    { type: "password_changed" },
+  );
+}
+
+async function notifyAmbassadorWithdrawalSuccess(user, amount) {
+  if (!user) return;
+  await sendUserNotification(
+    user,
+    "💸 Withdrawal Successful",
+    `Your withdrawal of €${amount} is being processed and will arrive in your bank account soon.`,
+    { type: "ambassador_withdrawal_success", amount },
+  );
+}
+
+async function notifyAmbassadorWithdrawalFailed(user, amount) {
+  if (!user) return;
+  await sendUserNotification(
+    user,
+    "❌ Withdrawal Failed",
+    `Your withdrawal of €${amount} could not be processed. The amount has been returned to your wallet — please try again.`,
+    { type: "ambassador_withdrawal_failed", amount },
+  );
+}
+
+async function notifyAccountBlocked(user) {
+  if (!user) return;
+  await sendUserNotification(
+    user,
+    "⛔ Account Blocked",
+    "Your account has been blocked by admin. Please contact support if you believe this is a mistake.",
+    { type: "account_blocked" },
+  );
+}
+
+async function notifyAccountUnblocked(user) {
+  if (!user) return;
+  await sendUserNotification(
+    user,
+    "✅ Account Restored",
+    "Good news — your account has been unblocked and is active again. Welcome back!",
+    { type: "account_unblocked" },
+  );
+}
+
+async function notifyPromotionCancelled(user, serviceTitle) {
+  if (!user) return;
+  await sendUserNotification(
+    user,
+    "🛑 Promotion Cancelled",
+    `Your promotion for "${serviceTitle}" has been cancelled. Your service has returned to normal listing.`,
+    { type: "promotion_cancelled", serviceTitle },
+  );
+}
+
 // Exports
+exports.sendUserNotification = sendUserNotification;
+exports.notifyReportOutcome = notifyReportOutcome;
+exports.notifyPaymentFailed = notifyPaymentFailed;
+exports.notifyWalletTransaction = notifyWalletTransaction;
+exports.notifyPromotionPurchased = notifyPromotionPurchased;
+exports.notifyPromotionRenewed = notifyPromotionRenewed;
+exports.notifyPromotionCancelled = notifyPromotionCancelled;
+exports.notifyPromotionExpiringSoon = notifyPromotionExpiringSoon;
+exports.notifyPromotionExpired = notifyPromotionExpired;
+exports.notifyNewReview = notifyNewReview;
+exports.notifyReportReceived = notifyReportReceived;
+exports.notifyReporterOnResolution = notifyReporterOnResolution;
+exports.notifyAccountBlocked = notifyAccountBlocked;
+exports.notifyAccountUnblocked = notifyAccountUnblocked;
+exports.notifyAmbassadorWithdrawalSuccess = notifyAmbassadorWithdrawalSuccess;
+exports.notifyAmbassadorWithdrawalFailed = notifyAmbassadorWithdrawalFailed;
+exports.notifyPasswordChanged = notifyPasswordChanged;
+exports.notifyRequestExpiringNoResponse = notifyRequestExpiringNoResponse;
+exports.notifyNewOffer = notifyNewOffer;
+exports.notifyOfferAccepted = notifyOfferAccepted;
+exports.notifyOfferDeclined = notifyOfferDeclined;
+exports.notifyOfferWithdrawn = notifyOfferWithdrawn;
+exports.notifyGroupFilled = notifyGroupFilled;
+exports.notifyQuotationChangeSubmitted = notifyQuotationChangeSubmitted;
+exports.notifyQuotationChangeResponded = notifyQuotationChangeResponded;
+exports.notifyRequestBookingCancelled = notifyRequestBookingCancelled;
+exports.notifyOnNewServiceRequest = notifyNearbyUsersForRequest;
 exports.notifyOnNewService = (service) => notifyUsersForService(service, "new");
 exports.notifyOnUpdate = (service) => notifyUsersForService(service, "update");
 exports.notifyOnUserInterestUpdate = notifyNearbyUsersOnInterestUpdate;
@@ -1082,6 +1833,8 @@ module.exports.sendAmbassadorRejectedNotification =
 module.exports.sendExclusiveAmbassadorInvitationNotification =
   sendExclusiveAmbassadorInvitationNotification;
   module.exports.sendAmbassadorInvitationNotification=sendAmbassadorInvitationNotification
+module.exports.sendAmbassadorInvitationReminderNotification = sendAmbassadorInvitationReminderNotification;
+module.exports.notifyAmbassadorInvitationExpired = notifyAmbassadorInvitationExpired;
 //module.exports.notifyOnServiceSubscription = notifyServiceOwnerOnSubscription;
 //module.exports.notifyServiceOwnerOnSubscription = notifyServiceOwnerOnSubscription;
 //notificaton addd

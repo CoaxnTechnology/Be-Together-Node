@@ -4,6 +4,8 @@ const mongoose = require("mongoose");
 const User = require("../model/User");
 const { createAccessToken } = require("../utils/jwt");
 const { generateOTP } = require("../utils/otp");
+const { liftExpiredBan, getBanMessage } = require("../utils/banUser");
+const { notifyPasswordChanged } = require("./notificationController");
 const { sendOtpEmail, sendResetEmail } = require("../utils/email");
 const { getFullImageUrl } = require("../utils/image");
 const { randomUUID } = require("crypto");
@@ -369,6 +371,12 @@ exports.register = async (req, res) => {
       // Optional
      // existing.lastResendAt = new Date();
 
+      // Activity on an unverified sign-up restarts the reminder clock.
+      if (existing.status === "pending_verification") {
+        existing.verificationActivityAt = new Date();
+        existing.verificationReminderStage = 0;
+      }
+
       await existing.save();
 
       try {
@@ -664,10 +672,11 @@ exports.verifyOtpRegister = async (req, res) => {
         .status(404)
         .json({ IsSucces: false, message: "User not found" });
     }
+    await liftExpiredBan(user);
     if (user.status === "banned" || user.is_active === false) {
       return res.status(403).json({
         IsSucces: false,
-        message: "Your account has been blocked by admin",
+        message: getBanMessage(user),
       });
     }
 
@@ -759,10 +768,11 @@ exports.login = async (req, res) => {
     }
 
     console.log("🔍 Fetched user from DB:", user);
+    if (user) await liftExpiredBan(user);
     if (user && (user.status === "banned" || user.is_active === false)) {
       return res.status(403).json({
         IsSucces: false,
-        message: "Your account has been blocked by admin",
+        message: getBanMessage(user),
       });
     }
 
@@ -811,6 +821,9 @@ exports.login = async (req, res) => {
   user.otp_code = otpObj.otp;
   user.otp_expiry = otpObj.expiry;
   user.otp_verified = false;
+  // Activity on an unverified sign-up restarts the reminder clock.
+  user.verificationActivityAt = new Date();
+  user.verificationReminderStage = 0;
 
  await user.save();
 await saveGdprData(user, req);
@@ -890,6 +903,7 @@ return res.json({
           name: userName,
           register_type: "google_auth",
           login_type: "google_auth", // ✅ ADD
+          status: "active", // Google already verified the email
           provider_id: provider_id || null,
           provider_uid: provider_uid || null,
           otp_verified: true,
@@ -952,6 +966,9 @@ return res.json({
       user.access_token = access_token;
       user.otp_verified = true;
       user.login_type = "google_auth";
+      // Social sign-ups created before the fix were saved as
+      // "pending_verification" by mistake — they're verified, so heal it.
+      if (user.status === "pending_verification") user.status = "active";
       user.last_login = new Date();
       await user.save();
       await saveGdprData(user, req);
@@ -1033,6 +1050,7 @@ return res.json({
           name: name || "Apple User",
           register_type: "apple_auth",
           login_type: "apple_auth", // ✅ ADD
+          status: "active", // Apple already verified the email
           provider_uid: appleUserId,
           otp_verified: true,
           fcmTokens: [],
@@ -1080,6 +1098,8 @@ return res.json({
       appleUser.access_token = access_token;
       appleUser.otp_verified = true;
       appleUser.login_type = "apple_auth";
+      // Same heal as Google — verified by Apple, never pending.
+      if (appleUser.status === "pending_verification") appleUser.status = "active";
       appleUser.last_login = new Date();
 
       await appleUser.save();
@@ -1154,10 +1174,11 @@ exports.verifyOtpLogin = async (req, res) => {
         .status(404)
         .json({ IsSucces: false, message: "User not found" });
     }
+    await liftExpiredBan(user);
     if (user.status === "banned" || user.is_active === false) {
       return res.status(403).json({
         IsSucces: false,
-        message: "Your account has been blocked by admin",
+        message: getBanMessage(user),
       });
     }
 
@@ -1291,10 +1312,11 @@ exports.resendOtp = async (req, res) => {
         .status(404)
         .json({ IsSucces: false, message: "User not found" });
     }
+    await liftExpiredBan(user);
     if (user.status === "banned" || user.is_active === false) {
       return res.status(403).json({
         IsSucces: false,
-        message: "Your account has been blocked by admin",
+        message: getBanMessage(user),
       });
     }
 
@@ -1359,6 +1381,11 @@ exports.resendOtp = async (req, res) => {
     user.otp_expiry = expiry;
     user.otp_verified = false;
     user.lastResendAt = new Date();
+    // Activity on an unverified sign-up restarts the reminder clock.
+    if (user.status === "pending_verification") {
+      user.verificationActivityAt = new Date();
+      user.verificationReminderStage = 0;
+    }
 
     await user.save();
 
@@ -1420,11 +1447,12 @@ exports.forgotOrResetPassword = async (req, res) => {
 
     console.log("👤 User found:", user._id);
 
+    await liftExpiredBan(user);
     if (user.status === "banned" || user.is_active === false) {
       console.log("🚫 User blocked");
       return res.status(403).json({
         isSuccess: false,
-        message: "Your account has been blocked by admin",
+        message: getBanMessage(user),
       });
     }
 
@@ -1591,6 +1619,10 @@ exports.forgotOrResetPassword = async (req, res) => {
     await user.save();
 
     console.log("🎉 PASSWORD RESET SUCCESS");
+
+    notifyPasswordChanged(user).catch((err) =>
+      console.error("❌ notifyPasswordChanged error:", err.message),
+    );
 
     return res.json({
       isSuccess: true,

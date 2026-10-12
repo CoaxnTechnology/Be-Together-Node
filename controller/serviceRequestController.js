@@ -1344,14 +1344,18 @@ exports.getMyOffers = async (req, res) => {
           .select("status amount createdAt quotationChanges")
           .lean();
         const { quotationChanges = [], ...bookingInfo } = booking || {};
+        // The provider's latest price change shows as the amount from the
+        // moment it's sent (pending / being paid / paid). If the customer
+        // rejected it (or the booking was cancelled first), the booking's
+        // own amount applies again.
+        const latestChange = quotationChanges[quotationChanges.length - 1];
+        const showsNewPrice =
+          Boolean(latestChange) && !["rejected", "cancelled"].includes(latestChange.status);
         return {
           ...offer,
-          // the price agreed now — a paid price change raises the booking's
-          // amount, so show that instead of the first offered price
-          amount: booking?.amount ?? offer.amount,
+          amount: showsNewPrice ? latestChange.proposedAmount : (booking?.amount ?? offer.amount),
           // true as soon as the provider has sent a price change on this
-          // booking (whatever the customer answers); amount only changes once
-          // the customer has paid the difference
+          // booking (whatever the customer answers)
           isQuotationChanged: quotationChanges.length > 0,
           status: displayOfferStatus(offer.status, booking?.status),
           booking: booking ? bookingInfo : null,

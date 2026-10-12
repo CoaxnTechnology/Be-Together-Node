@@ -649,7 +649,7 @@ function displayOfferStatus(offerStatus, bookingStatus) {
 
 // The latest price change on a booking, in the shape the request detail
 // screen shows — null when the provider never proposed one.
-//   pending → awaiting_payment (customer accepted, paying the difference)
+//   pending → payment_pending (customer accepted, paying the difference)
 //   → accepted (paid) | rejected | cancelled (booking cancelled first)
 // commission = { providerCommissionPercent, customerCommissionPercent } —
 // the admin's current values, used to estimate a still-unanswered change.
@@ -863,7 +863,7 @@ exports.getServiceRequestById = async (req, res) => {
         ...(ownerBookings && {
           ownerBookings, // owner: their bookings on this request + price changes
           hasPendingQuotationChange: ownerBookings.some(
-            (b) => b.quotationChangeStatus === "pending" || b.quotationChangeStatus === "awaiting_payment",
+            (b) => b.quotationChangeStatus === "pending" || b.quotationChangeStatus === "payment_pending",
           ),
         }),
         hasJoined: Boolean(myBooking),

@@ -70,7 +70,7 @@ const CANCEL_URL = "https://yourflutterapp.com/payment-cancel";
 // "late_fee" policy: free cancellation until this long before the start.
 const LATE_CANCEL_WINDOW_MS = 60 * 60 * 1000;
 
-const OPEN_QUOTATION_STATUSES = ["pending", "awaiting_payment"];
+const OPEN_QUOTATION_STATUSES = ["pending", "payment_pending"];
 
 function serviceStartFromRequest(request) {
   if (!request?.schedule?.date || !request?.schedule?.startTime) return null;
@@ -731,7 +731,7 @@ exports.respondToQuotationChange = async (req, res) => {
 
     // ===== ACCEPT: customer pays only the difference =====
     // Re-use a still-open payment link instead of creating a second one.
-    if (quotationChange.status === "awaiting_payment" && quotationChange.checkoutSessionId) {
+    if (quotationChange.status === "payment_pending" && quotationChange.checkoutSessionId) {
       const existingSession = await stripe.checkout.sessions.retrieve(
         quotationChange.checkoutSessionId,
       );
@@ -807,7 +807,7 @@ exports.respondToQuotationChange = async (req, res) => {
       quotationChange._id,
       OPEN_QUOTATION_STATUSES,
       {
-        status: "awaiting_payment",
+        status: "payment_pending",
         respondedAt: new Date(),
         deltaAmount: delta,
         customerPayable: split.customerPayable,
@@ -849,10 +849,10 @@ async function applyQuotationPayment(session) {
   const change = booking?.quotationChanges.id(quotationChangeId);
   if (!change || change.status === "accepted") return;
 
-  // Claim it: only one caller can move awaiting_payment → accepted.
+  // Claim it: only one caller can move payment_pending → accepted.
   const claimed =
     booking.status === "booked" &&
-    (await updateQuotationChange(bookingId, quotationChangeId, ["awaiting_payment"], {
+    (await updateQuotationChange(bookingId, quotationChangeId, ["payment_pending"], {
       status: "accepted",
       paidAt: new Date(),
       paymentIntentId: session.payment_intent,
@@ -880,7 +880,7 @@ async function applyQuotationPayment(session) {
       await updateQuotationChange(
         bookingId,
         quotationChangeId,
-        ["pending", "awaiting_payment", "rejected", "cancelled"],
+        ["pending", "payment_pending", "rejected", "cancelled"],
         { paymentIntentId: session.payment_intent, refundedAmount: freshChange.customerPayable },
       );
       log("applyQuotationPayment:autoRefunded", { quotationChangeId, refundId: refund.id });
@@ -981,7 +981,7 @@ exports.handleCheckoutSessionCompleted = async (session) => {
 // Customer left the Stripe page until it expired (24h) — free the seat.
 exports.handleCheckoutSessionExpired = async (session) => {
   if (session.metadata?.event === "quotation_change_payment") {
-    // Stays awaiting_payment — the customer can accept again for a new link.
+    // Stays payment_pending — the customer can accept again for a new link.
     return true;
   }
   const payment = await Payment.findOne({ checkoutSessionId: session.id });
@@ -1042,7 +1042,7 @@ exports.completeRequestBooking = async (req, res) => {
       return res.status(400).json({
         isSuccess: false,
         message:
-          openChange.status === "awaiting_payment"
+          openChange.status === "payment_pending"
             ? "The customer hasn't paid the updated price yet"
             : "A price change is still waiting for the customer's answer",
       });
@@ -1581,7 +1581,7 @@ cron.schedule("*/10 * * * *", async () => {
     const bookings = await Booking.find({
       quotationChanges: {
         $elemMatch: {
-          status: "awaiting_payment",
+          status: "payment_pending",
           checkoutSessionId: { $ne: null },
           respondedAt: { $lte: cutoff },
         },
@@ -1589,7 +1589,7 @@ cron.schedule("*/10 * * * *", async () => {
     }).select("quotationChanges");
     for (const booking of bookings) {
       for (const change of booking.quotationChanges) {
-        if (change.status !== "awaiting_payment" || !change.checkoutSessionId) continue;
+        if (change.status !== "payment_pending" || !change.checkoutSessionId) continue;
         try {
           const session = await stripe.checkout.sessions.retrieve(change.checkoutSessionId);
           if (session.payment_status === "paid") await applyQuotationPayment(session);

@@ -1021,7 +1021,7 @@ exports.startService = async (req, res) => {
       return res.status(400).json({
         isSuccess: false,
         message:
-          openChange.status === "awaiting_payment"
+          openChange.status === "payment_pending"
             ? "The customer hasn't paid the updated price yet"
             : "A price change is still waiting for the customer's answer",
       });
@@ -1126,7 +1126,7 @@ exports.verifyServiceOtp = async (req, res) => {
       return res.status(400).json({
         isSuccess: false,
         message:
-          openChange.status === "awaiting_payment"
+          openChange.status === "payment_pending"
             ? "The customer hasn't paid the updated price yet"
             : "A price change is still waiting for the customer's answer",
       });

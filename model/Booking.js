@@ -5,7 +5,7 @@ const mongoose = require("mongoose");
 // accepts, they pay ONLY the difference in a separate Stripe Checkout; that
 // charge is also listed on the Payment (payment.additionalCharges).
 //   pending          → provider proposed, customer hasn't answered
-//   awaiting_payment → customer accepted, difference not paid yet
+//   payment_pending  → customer accepted, difference not paid yet
 //   accepted         → difference paid, booking total updated
 //   rejected         → customer said no
 //   cancelled        → dropped because the booking was cancelled first
@@ -19,7 +19,7 @@ const quotationChangeSchema = new mongoose.Schema(
     reason: { type: String, required: true, trim: true },
     status: {
       type: String,
-      enum: ["pending", "awaiting_payment", "accepted", "rejected", "cancelled"],
+      enum: ["pending", "payment_pending", "accepted", "rejected", "cancelled"],
       default: "pending",
     },
     respondedAt: { type: Date, default: null },

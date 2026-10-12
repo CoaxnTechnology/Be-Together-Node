@@ -1341,18 +1341,20 @@ exports.getMyOffers = async (req, res) => {
             : { serviceRequest: offer.request?._id || offer.request, provider: userId },
         )
           .sort({ createdAt: -1 })
-          .select("status amount createdAt")
+          .select("status amount createdAt quotationChanges")
           .lean();
+        const { quotationChanges = [], ...bookingInfo } = booking || {};
         return {
           ...offer,
           // the price agreed now — a paid price change raises the booking's
           // amount, so show that instead of the first offered price
           amount: booking?.amount ?? offer.amount,
-          // true once a price change was accepted and paid (amount above differs
-          // from what was first offered)
-          isQuotationChanged: booking ? booking.amount !== offer.amount : false,
+          // true as soon as the provider has sent a price change on this
+          // booking (whatever the customer answers); amount only changes once
+          // the customer has paid the difference
+          isQuotationChanged: quotationChanges.length > 0,
           status: displayOfferStatus(offer.status, booking?.status),
-          booking: booking || null,
+          booking: booking ? bookingInfo : null,
         };
       }),
     );

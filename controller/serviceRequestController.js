@@ -1345,6 +1345,12 @@ exports.getMyOffers = async (req, res) => {
           .lean();
         return {
           ...offer,
+          // the price agreed now — a paid price change raises the booking's
+          // amount, so show that instead of the first offered price
+          amount: booking?.amount ?? offer.amount,
+          // true once a price change was accepted and paid (amount above differs
+          // from what was first offered)
+          isQuotationChanged: booking ? booking.amount !== offer.amount : false,
           status: displayOfferStatus(offer.status, booking?.status),
           booking: booking || null,
         };

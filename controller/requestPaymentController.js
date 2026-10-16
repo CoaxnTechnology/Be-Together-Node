@@ -545,13 +545,17 @@ exports.createQuotationChange = async (req, res) => {
       return res.status(401).json({ isSuccess: false, message: "Unauthorized" });
     }
     const { bookingId } = req.params;
-    const { proposedAmount, reason } = req.body;
+    // The provider enters only the EXTRA amount on top of the current price
+    // (customer paid 100, the job turns out to cost 150 → they enter 50).
+    // `additionalAmount` is the clear name; `proposedAmount` is still read
+    // for the app's existing field and means the same extra amount.
+    const { additionalAmount, proposedAmount, reason } = req.body;
 
-    const amountNum = Number(proposedAmount);
-    if (!Number.isFinite(amountNum) || amountNum <= 0) {
+    const extra = round2(additionalAmount ?? proposedAmount);
+    if (!Number.isFinite(extra) || extra <= 0) {
       return res.status(400).json({
         isSuccess: false,
-        message: "A positive proposedAmount is required",
+        message: "A positive additional amount is required",
       });
     }
     // Required per the client's risk-mitigation decision (24 Sep 2026).
@@ -593,12 +597,8 @@ exports.createQuotationChange = async (req, res) => {
         .status(404)
         .json({ isSuccess: false, message: "Payment not found for this booking" });
     }
-    if (amountNum <= payment.originalAmount) {
-      return res.status(400).json({
-        isSuccess: false,
-        message: "Proposed amount must be higher than the current amount",
-      });
-    }
+    // New total = current price + the extra amount.
+    const newTotal = round2(payment.originalAmount + extra);
 
     // Added only if no other change is still open (atomic, so a double tap
     // can't create two).
@@ -614,7 +614,8 @@ exports.createQuotationChange = async (req, res) => {
             _id: quotationChangeId,
             provider: providerId,
             previousAmount: payment.originalAmount,
-            proposedAmount: amountNum,
+            proposedAmount: newTotal, // the new total price
+            deltaAmount: extra, // what's added (customer pays this + commission)
             reason: String(reason).trim(),
             currency: payment.currency,
           },

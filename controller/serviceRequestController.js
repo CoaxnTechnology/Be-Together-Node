@@ -683,7 +683,9 @@ function latestQuotationChange(booking, commission) {
     _id: q._id,
     status: q.status,
     previousAmount: q.previousAmount,
-    proposedAmount: q.proposedAmount,
+    // Only the change the provider asked for (customer paid 100, provider
+    // adds 100 → 100), not the new total — that's stored on the booking.
+    proposedAmount: changeAmount(q),
     reason: q.reason,
     differenceAmount, // new price − current price
     amountToPay, // difference + customer commission (what the customer pays)
@@ -693,6 +695,12 @@ function latestQuotationChange(booking, commission) {
     respondedAt: q.respondedAt,
     paidAt: q.paidAt,
   };
+}
+
+// What a price change adds on top of the price before it. Stored
+// proposedAmount is the new total, so this is total − previous.
+function changeAmount(q) {
+  return Number((q.proposedAmount - q.previousAmount).toFixed(2));
 }
 
 // Loaded only when some booking has a change still waiting for an answer.
@@ -717,7 +725,11 @@ function bookingWithQuotation(booking, extra = {}, commission = null) {
     hasQuotationChange: Boolean(quotationChange),
     quotationChangeStatus: quotationChange?.status || null,
     quotationChange,
-    quotationChanges: booking.quotationChanges || [],
+    // same: each entry's proposedAmount is the change, not the new total
+    quotationChanges: (booking.quotationChanges || []).map((q) => ({
+      ...q,
+      proposedAmount: changeAmount(q),
+    })),
   };
 }
 
